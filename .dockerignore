@@ -7,7 +7,9 @@ coverage
 test-results
 playwright-report
 output
-tests
+# The print-proof script imports the synthetic fixture, so it must stay in the build context.
+tests/*
+!tests/fixtures
 docs
 specs
 .env*
