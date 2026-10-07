@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Worker image: queue, engine subprocess, batches, webhooks, billing reconcile
+# and retention. On start it applies pending migrations, then runs the workers.
+FROM node:24-bookworm-slim
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH NODE_ENV=production TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+RUN corepack enable \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends tini tesseract-ocr tesseract-ocr-por tesseract-ocr-eng \
+  && rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+# tsx runs the TypeScript sources, so development dependencies are required.
+RUN --mount=type=cache,id=pnpm,target=/pnpm/store NODE_ENV=development pnpm install --frozen-lockfile
+COPY tsconfig.json drizzle.config.ts ./
+COPY drizzle ./drizzle
+COPY scripts ./scripts
+COPY src ./src
+RUN chown -R node:node /app
+USER node
+ENTRYPOINT ["tini", "--"]
+CMD ["sh", "-c", "node --import tsx scripts/migrate.ts && exec node --import tsx src/workers/index.ts"]

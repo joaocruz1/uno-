@@ -42,36 +42,52 @@ function renderMessage(kind: "verification" | "reset", message: AuthEmailMessage
 }
 
 function emailFrom(): string {
-  return process.env.EMAIL_FROM?.trim() || "UNO <no-reply@example.com>";
+  return process.env.SMTP_FROM?.trim() || process.env.EMAIL_FROM?.trim() || "UNO <no-reply@example.com>";
 }
 
-export function createAuthMailer(): AuthMailer {
-  const smtpUrl = process.env.SMTP_URL?.trim();
-  const useLocalSmtp = process.env.NODE_ENV !== "production" && Boolean(smtpUrl);
+type MailSender = (payload: MailPayload) => Promise<void>;
 
-  if (useLocalSmtp) {
-    const transport = nodemailer.createTransport(smtpUrl as string);
-    const send = async (payload: MailPayload) => {
+/**
+ * Provider selection, in order: authenticated SMTP (SMTP_HOST, any
+ * environment), the local SMTP URL (development only, e.g. Mailpit), Resend.
+ */
+function createMailSender(failure: string): MailSender {
+  const host = process.env.SMTP_HOST?.trim();
+  const localUrl = process.env.NODE_ENV !== "production" ? process.env.SMTP_URL?.trim() : undefined;
+  if (host || localUrl) {
+    let transport: ReturnType<typeof nodemailer.createTransport>;
+    if (host) {
+      const port = Number(process.env.SMTP_PORT ?? 587);
+      const user = process.env.SMTP_USER?.trim();
+      // App passwords are often displayed in groups; the provider expects them without spaces.
+      const pass = process.env.SMTP_PASS?.replace(/\s+/g, "");
+      if (!Number.isInteger(port) || port < 1 || port > 65_535 || !user || !pass) throw new Error("SMTP configuration is incomplete");
+      transport = nodemailer.createTransport({
+        host, port, secure: process.env.SMTP_SECURE === "true", requireTLS: process.env.SMTP_SECURE !== "true",
+        auth: { user, pass }, connectionTimeout: 10_000, socketTimeout: 20_000,
+      });
+    } else {
+      transport = nodemailer.createTransport(localUrl as string);
+    }
+    return async (payload) => {
       try {
         await transport.sendMail({ from: emailFrom(), ...payload });
       } catch {
-        throw new Error("Authentication email delivery failed");
+        throw new Error(failure);
       }
     };
-    return {
-      sendVerification: (message) => send(renderMessage("verification", message)),
-      sendPasswordReset: (message) => send(renderMessage("reset", message)),
-    };
   }
-
   const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) throw new Error("Resend is required for authentication email delivery");
+  if (!apiKey) throw new Error("An e-mail provider (SMTP_HOST or RESEND_API_KEY) is required");
   const resend = new Resend(apiKey);
-  const send = async (payload: MailPayload) => {
+  return async (payload) => {
     const { error } = await resend.emails.send({ from: emailFrom(), ...payload });
-    if (error) throw new Error("Authentication email delivery failed");
+    if (error) throw new Error(failure);
   };
+}
 
+export function createAuthMailer(): AuthMailer {
+  const send = createMailSender("Authentication email delivery failed");
   return {
     sendVerification: (message) => send(renderMessage("verification", message)),
     sendPasswordReset: (message) => send(renderMessage("reset", message)),
@@ -108,27 +124,6 @@ function renderInvitation(message: InvitationEmailMessage): MailPayload {
 
 /** Invitation delivery through the same provider selection as authentication mail. */
 export function createInvitationMailer(): InvitationMailer {
-  const smtpUrl = process.env.SMTP_URL?.trim();
-  if (process.env.NODE_ENV !== "production" && smtpUrl) {
-    const transport = nodemailer.createTransport(smtpUrl);
-    return {
-      async sendOrganizationInvitation(message) {
-        try {
-          await transport.sendMail({ from: emailFrom(), ...renderInvitation(message) });
-        } catch {
-          throw new Error("Invitation email delivery failed");
-        }
-      },
-    };
-  }
-
-  const apiKey = process.env.RESEND_API_KEY?.trim();
-  if (!apiKey) throw new Error("Resend is required for invitation email delivery");
-  const resend = new Resend(apiKey);
-  return {
-    async sendOrganizationInvitation(message) {
-      const { error } = await resend.emails.send({ from: emailFrom(), ...renderInvitation(message) });
-      if (error) throw new Error("Invitation email delivery failed");
-    },
-  };
+  const send = createMailSender("Invitation email delivery failed");
+  return { sendOrganizationInvitation: (message) => send(renderInvitation(message)) };
 }

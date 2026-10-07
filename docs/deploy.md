@@ -9,8 +9,8 @@ Treat the first build as part of release verification.
 | Service | Where | Image target / command |
 | --- | --- | --- |
 | Site and dashboard | Vercel | `pnpm build` (standalone Next.js) |
-| Public API (`/api/v1`, uploads) | Railway | `docker build --target web` → `node server.js` |
-| Worker (queue, engine, webhooks, retention, billing reconcile) | Railway | `docker build --target worker` → `node --import tsx src/workers/index.ts` |
+| Public API (`/api/v1`, uploads) | Railway | `Dockerfile` → `node server.js` |
+| Worker (queue, engine, webhooks, retention, billing reconcile) | Railway | `Dockerfile.worker` → migrations, then `src/workers/index.ts` |
 | PostgreSQL 17, Redis 7 (`noeviction`, TCP) | managed | — |
 | Private object storage | Cloudflare R2 | bucket never public |
 
@@ -68,3 +68,27 @@ the build environment or `connect-src` falls back to `https:`.
 Docker builds, Railway/Vercel deployment, real R2 policy and CORS, real Stripe
 payments, real Resend delivery, a real outbound webhook over TLS, container
 resource limits, backups, and the physical print proof.
+
+## Single server with Easypanel
+
+Everything can also run on one server next to PostgreSQL and Redis. Still
+**NOT VERIFIED**: these steps have not been executed.
+
+1. **Storage**: create a MinIO service (or use Cloudflare R2), give it an HTTPS
+   domain, create a private bucket and allow CORS from the app origin for
+   PUT/GET/HEAD. With MinIO set `S3_FORCE_PATH_STYLE=true`. The endpoint must be
+   reachable by browsers, because dashboard uploads go straight to storage.
+2. **App `uno-web`**: source GitHub repository, build with `Dockerfile`, proxy
+   port 3000, attach the domain with HTTPS. Add build arguments `S3_ENDPOINT`
+   and `NEXT_PUBLIC_APP_URL` (they are baked into the CSP and the bundle).
+3. **App `uno-worker`**: same repository, build with `Dockerfile.worker`, no
+   domain or port. It applies pending migrations on every start.
+4. **Environment** (both apps): the contents of `.env.production`, using the
+   internal hosts of PostgreSQL and Redis. Deploy the worker first.
+5. **Administrator**: register on the site, confirm the e-mail, add the address
+   to `ADMIN_EMAILS` in both apps, then in the worker console run
+   `node --import tsx scripts/create-local-admin.ts you@example.com` and redeploy.
+6. **Stripe**: add `https://<domain>/api/stripe/webhook` as an endpoint and set
+   `STRIPE_WEBHOOK_SECRET`.
+7. **Template release**: publish it in `/admin/templates`; until then every
+   conversion is refused in production.

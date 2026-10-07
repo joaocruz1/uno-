@@ -259,7 +259,7 @@ export async function recoverAbandonedEngineWorkspaces(
         entry.isSymbolicLink() || !entry.isDirectory() ||
         (ownerId !== undefined && entry.uid !== ownerId) ||
         (process.platform !== "win32" && (entry.mode & 0o077) !== 0) ||
-        now - Math.max(entry.mtimeMs, entry.birthtimeMs) < options.maxAgeMs
+        now - entry.mtimeMs < options.maxAgeMs
       ) continue;
       await rm(directory, { recursive: true, force: true });
       removed += 1;

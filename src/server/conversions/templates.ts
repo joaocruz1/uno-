@@ -14,9 +14,11 @@ export const INITIAL_TEMPLATE = `${TEMPLATE_KEY}@${TEMPLATE_VERSION}`;
 type TemplateRow = typeof templates.$inferSelect;
 export type TemplateEligibility = Pick<TemplateRow, "engineVersion" | "status" | "definition" | "releasedAt">;
 
-/** Development only: registers every engine layout as a draft so it can be exercised before release. */
-export async function seedInitialDraftTemplate(database: Pick<UnoDatabase, "insert"> = getDb()): Promise<void> {
-  if (process.env.NODE_ENV === "production") return;
+/**
+ * Registers every engine layout as a DRAFT row so it can be released from the
+ * administration area. Safe in production: a draft is never usable there.
+ */
+export async function syncTemplateRegistry(database: Pick<UnoDatabase, "insert"> = getDb()): Promise<void> {
   for (const definition of listTemplateDefinitions()) {
     const initial = definition.key === TEMPLATE_KEY && definition.version === TEMPLATE_VERSION;
     await database.insert(templates).values({
@@ -29,6 +31,12 @@ export async function seedInitialDraftTemplate(database: Pick<UnoDatabase, "inse
       definition: { releasedSizes: [] },
     }).onConflictDoNothing({ target: [templates.key, templates.version] });
   }
+}
+
+/** Development convenience used by creation paths when drafts are allowed. */
+export async function seedInitialDraftTemplate(database: Pick<UnoDatabase, "insert"> = getDb()): Promise<void> {
+  if (process.env.NODE_ENV === "production") return;
+  await syncTemplateRegistry(database);
 }
 
 export function parseTemplateReference(value = INITIAL_TEMPLATE): { key: string; version: string } {
