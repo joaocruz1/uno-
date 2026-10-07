@@ -42,3 +42,11 @@ Desktop/mobile visual review performed; headline spacing and demo layout correct
 - Native isolation test passed with RSS monitoring enabled, six ordered real progress callbacks and no remaining temporary workspace. Deadline, delayed final progress, callback failure and safe error propagation are covered. A hard container memory limit remains required for deployment.
 - Read-only architecture/security and QA reviews approved. Printing-package review approved explicit dimensions, atomic UUID packages, hashes, synthetic expected values and the distinction between automatic candidates and physical approval.
 - Digital, additional-content and scanned synthetic candidates were generated privately in `.tmp/print-proof/`. Operator printing at 100% and recorded scans remain **NOT VERIFIED**. No template/size is production-released by these automated results.
+
+## Phase 06 — Conversion
+
+- Lint, strict typecheck, 69 tests and production build passed; five native/OCR integrations remain opt-in in the default suite.
+- Native PostgreSQL/Redis/S3/BullMQ integration passed queue-outage recovery, immutable snapshots, success confirmation once, deterministic failure release, lost commit acknowledgement recovery and expired-claim recovery. Migration rerun was idempotent.
+- Read-only architecture and QA reviews approved after regression fixes for live duplicate jobs, pre-claim failures, commit uncertainty and output publication races. Persisted claims and versions remain authoritative.
+- Synthetic full upload → actual progress → result comparison → download/print flow passed Chromium, Firefox, WebKit and mobile. The insufficient format fails without confirmed usage. PDF previews render with versioned local PDF.js assets and omit credentials on signed requests.
+- Worker restarted with final reviewed code. Local native services demonstrate integration behavior; production providers, container memory limits and physical template releases remain unverified.

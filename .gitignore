@@ -10,3 +10,4 @@ tests/fixtures/private/
 output/
 .tmp/
 .DS_Store
+public/pdfjs/

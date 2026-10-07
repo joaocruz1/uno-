@@ -12,6 +12,7 @@ import {
 import { useRef, useState, type DragEvent } from "react";
 
 import { Button, Input, Progress } from "@/components/ui";
+import { outputSizeSchema, type OutputSize } from "@/lib/label-size";
 
 const PDF_CONTENT_TYPE = "application/pdf";
 const MEBIBYTE = 1_024 * 1_024;
@@ -37,11 +38,7 @@ export type UploadedFile = {
   fileName: string;
   fileSize: number;
   checksumSha256?: string;
-  output: {
-    preset: OutputPreset;
-    widthMm?: number;
-    heightMm?: number;
-  };
+  output: OutputSize;
 };
 
 export type UploadPanelProps = {
@@ -67,11 +64,6 @@ function isUploadIntent(value: unknown): value is UploadIntent {
     !Array.isArray(candidate.headers) &&
     Object.values(candidate.headers).every((header) => typeof header === "string")
   );
-}
-
-function boundedDimension(value: number, minimum: number, maximum: number, fallback: number) {
-  if (!Number.isFinite(value)) return fallback;
-  return Math.min(maximum, Math.max(minimum, Math.round(value)));
 }
 
 async function responseMessage(response: Response) {
@@ -136,14 +128,14 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
   const [uploaded, setUploaded] = useState<UploadedFile | null>(null);
   const [dragging, setDragging] = useState(false);
   const [preset, setPreset] = useState<OutputPreset>("100x150");
-  const [customWidth, setCustomWidth] = useState(100);
-  const [customHeight, setCustomHeight] = useState(150);
+  const [customWidth, setCustomWidth] = useState("100");
+  const [customHeight, setCustomHeight] = useState("150");
   const busy = phase === "preparing" || phase === "requesting" || phase === "uploading";
   const maxBytes = maxFileMB * MEBIBYTE;
 
   const currentOutput = () => ({
     preset,
-    ...(preset === "custom" ? { widthMm: customWidth, heightMm: customHeight } : {}),
+    ...(preset === "custom" ? { widthMm: Number(customWidth), heightMm: Number(customHeight) } : {}),
   });
 
   const reset = () => {
@@ -185,6 +177,8 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
     }
 
     try {
+      const chosenOutput = outputSizeSchema.safeParse(currentOutput());
+      if (!chosenOutput.success) throw new Error("Informe largura entre 50 e 210 mm e altura entre 50 e 300 mm.");
       setPhase("preparing");
       const { checksumSha256 } = await inspectPdf(nextFile);
       if (operationRef.current !== operation) return;
@@ -216,7 +210,7 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
         fileName: nextFile.name,
         fileSize: nextFile.size,
         checksumSha256,
-        output: currentOutput(),
+        output: chosenOutput.data,
       };
       activeRequestRef.current = null;
       setProgress(100);
@@ -357,8 +351,8 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
 
         {preset === "custom" ? (
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <label className="text-xs text-zinc-500">Largura (mm)<Input className="mt-2" type="number" min={50} max={210} step={1} value={customWidth} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomWidth(boundedDimension(event.currentTarget.valueAsNumber, 50, 210, 100))} /></label>
-            <label className="text-xs text-zinc-500">Altura (mm)<Input className="mt-2" type="number" min={50} max={300} step={1} value={customHeight} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomHeight(boundedDimension(event.currentTarget.valueAsNumber, 50, 300, 150))} /></label>
+            <label className="text-xs text-zinc-500">Largura (mm)<Input className="mt-2" type="number" min={50} max={210} step={1} value={customWidth} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomWidth(event.currentTarget.value)} /></label>
+            <label className="text-xs text-zinc-500">Altura (mm)<Input className="mt-2" type="number" min={50} max={300} step={1} value={customHeight} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomHeight(event.currentTarget.value)} /></label>
             <p className="col-span-2 text-[11px] leading-5 text-zinc-600">Largura de 50 a 210 mm e altura de 50 a 300 mm.</p>
           </div>
         ) : null}

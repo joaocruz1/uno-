@@ -46,8 +46,18 @@ type ChildErrorMessage = {
 };
 type ChildMessage = ChildProgressMessage | ChildResultMessage | ChildErrorMessage;
 
-function genericFailure() {
-  return new EngineError("invalid_pdf");
+export class EngineIsolationError extends Error {
+  readonly code = "engine_unavailable";
+  readonly terminal = false;
+
+  constructor() {
+    super("O processamento está temporariamente indisponível.");
+    this.name = "EngineIsolationError";
+  }
+}
+
+function isolationFailure() {
+  return new EngineIsolationError();
 }
 
 function boundedInteger(value: number | undefined, fallback: number, minimum: number, maximum: number) {
@@ -155,7 +165,7 @@ function isChildMessage(value: unknown): value is ChildMessage {
 }
 
 function reconstructError(message: ChildErrorMessage) {
-  if (!ENGINE_ERROR_CODES.has(message.code)) return genericFailure();
+  if (!ENGINE_ERROR_CODES.has(message.code)) return isolationFailure();
   return new EngineError(message.code, {
     terminal: typeof message.terminal === "boolean" ? message.terminal : undefined,
     suggestedSize: isOutputSize(message.suggestedSize) ? message.suggestedSize : undefined,
@@ -228,7 +238,7 @@ export async function convertPdfIsolated(
     bytes.byteLength > MAX_INPUT_BYTES ||
     !isOutputSize(size)
   ) {
-    throw genericFailure();
+    throw new EngineError("invalid_pdf");
   }
 
   let jobDirectory = "";
@@ -239,7 +249,7 @@ export async function convertPdfIsolated(
     if (jobDirectory) {
       await rm(jobDirectory, { recursive: true, force: true }).catch(() => undefined);
     }
-    throw genericFailure();
+    throw isolationFailure();
   }
 
   let child: ChildProcess;
@@ -254,7 +264,7 @@ export async function convertPdfIsolated(
     });
   } catch {
     await rm(jobDirectory, { recursive: true, force: true });
-    throw genericFailure();
+    throw isolationFailure();
   }
 
   return new Promise<ConversionResult>((resolve, reject) => {
@@ -271,7 +281,7 @@ export async function convertPdfIsolated(
       child.removeAllListeners("exit");
       await stopChildAndRemoveWorkspace(child, jobDirectory);
     };
-    const fail = (error: EngineError = genericFailure()) => {
+    const fail = (error: EngineError | EngineIsolationError = isolationFailure()) => {
       if (settled) return;
       settled = true;
       void cleanup().then(
@@ -284,7 +294,7 @@ export async function convertPdfIsolated(
       settled = true;
       void cleanup().then(
         () => resolve(result),
-        () => reject(genericFailure()),
+        () => reject(isolationFailure()),
       );
     };
     const deadline = setTimeout(() => fail(), timeoutFor(options));

@@ -27,7 +27,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 05 Engine:** six contract stages, initial versioned
   template, synthetic fixtures, digital embedding, scan OCR guidance, typed
   failures, 203/300 dpi validation, and code equivalence.
-- [ ] **NOT VERIFIED — 06 Conversion:** BullMQ/Redis enqueue and worker, atomic
+- [x] **CODE + AUTOMATED PASS — 06 Conversion:** BullMQ/Redis enqueue and worker, atomic
   quota lifecycle, persisted real progress, retry recovery, comparison, signed
   download, print, and retention metadata.
 - [ ] **NOT VERIFIED — 07 History:** organization-scoped search/filter,

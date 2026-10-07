@@ -14,6 +14,8 @@ docker compose up -d
 # Configure BETTER_AUTH_SECRET (mínimo 32 caracteres) e WEBHOOK_ENCRYPTION_KEY.
 pnpm db:migrate
 pnpm dev
+# Em outro terminal:
+pnpm worker
 ```
 
 O envio de e-mails local usa Mailpit em `http://localhost:8025`. Produção usa
@@ -51,6 +53,12 @@ usuário, suas imagens, textos e códigos ficam fora de Git e telemetria.
 A engine usa seis etapas independentes e incorpora regiões do PDF digital,
 preservando o conteúdo original. O worker deve usar o processo isolado;
 Tesseract local com português e inglês auxilia arquivos escaneados.
+
+Para testar o template inicial em desenvolvimento, configure
+`UNO_ALLOW_DRAFT_TEMPLATES=true`. Essa opção é recusada em produção: cada
+template/tamanho exige evidências automática e física antes da liberação.
+`pnpm dev` e `pnpm build` preparam os assets locais versionados do PDF.js;
+esses arquivos gerados ficam fora de Git e são copiados com suas licenças.
 
 O formato padrão de 100 × 150 mm pode ser insuficiente. A engine bloqueia
 composições que não cabem na escala original. O exemplo privado passou na

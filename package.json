@@ -7,8 +7,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "next dev",
-    "build": "next build --webpack",
+    "dev": "node scripts/prepare-pdf-worker.mjs && next dev",
+    "build": "node scripts/prepare-pdf-worker.mjs && next build --webpack",
     "start": "next start",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

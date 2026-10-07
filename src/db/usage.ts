@@ -29,8 +29,14 @@ function reservationFromRows(rows: unknown[]): UsageReservation {
 }
 
 function mapQuotaError(error: unknown): never {
-  if (error instanceof Error && error.message.includes("quota_exceeded")) {
-    throw new QuotaExceededError();
+  let candidate: unknown = error;
+  for (let depth = 0; depth < 4 && candidate; depth += 1) {
+    if (candidate instanceof Error && candidate.message.includes("quota_exceeded")) {
+      throw new QuotaExceededError();
+    }
+    candidate = typeof candidate === "object" && "cause" in candidate
+      ? (candidate as { cause?: unknown }).cause
+      : undefined;
   }
   throw error;
 }

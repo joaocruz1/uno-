@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { EngineError } from "@/engine/errors";
-import { convertPdfIsolated } from "@/engine/isolated";
+import { convertPdfIsolated, EngineIsolationError } from "@/engine/isolated";
 import type { ProgressEvent } from "@/engine/types";
 import { syntheticPdf } from "./fixtures/synthetic-pdf";
 
@@ -36,7 +36,7 @@ describe("isolated engine process", () => {
   it("kills work that exceeds a short non-production deadline", async () => {
     const input = await syntheticPdf();
     await expect(convertPdfIsolated(input, SAFE_OUTPUT, undefined, undefined, { timeoutMs: 1 }))
-      .rejects.toSatisfy(hasSafeCode("invalid_pdf"));
+      .rejects.toBeInstanceOf(EngineIsolationError);
   }, 10_000);
 
   it("kills the child and returns a safe error when progress handling fails", async () => {
@@ -44,7 +44,7 @@ describe("isolated engine process", () => {
     await expect(convertPdfIsolated(input, SAFE_OUTPUT, undefined, () => {
       throw new Error("caller detail must not cross the isolation boundary");
     }, { timeoutMs: 30_000 }))
-      .rejects.toSatisfy(hasSafeCode("invalid_pdf"));
+      .rejects.toBeInstanceOf(EngineIsolationError);
   }, 35_000);
 
   it("drains asynchronous progress after the child sends its terminal result", async () => {

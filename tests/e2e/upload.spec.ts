@@ -1,9 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { PDFDocument } from "pdf-lib";
 import { mailLink } from "./helpers/mail";
+import { syntheticPdf } from "../fixtures/synthetic-pdf";
 
-test("private dashboard upload validates and uploads a synthetic PDF", async ({ page }) => {
-  test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires local PostgreSQL, Redis, S3 and Mailpit");
+test("private dashboard conversion validates, processes and downloads a synthetic PDF", async ({ page }) => {
+  test.setTimeout(90_000);
+  test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires local PostgreSQL, Redis, S3, Mailpit and worker");
   const origin = "http://127.0.0.1:3100";
   const email = `uno-upload-e2e-${crypto.randomUUID()}@example.test`;
   const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, { headers: { origin }, data: { name: "Operador Upload", email, password: "Synthetic-upload-password", callbackURL: "/verify-email?verified=1" } });
@@ -15,10 +16,26 @@ test("private dashboard upload validates and uploads a synthetic PDF", async ({ 
   await file.setInputFiles({ name: "invalid.pdf", mimeType: "application/pdf", buffer: Buffer.from("invalid") });
   await expect(page.getByRole("alert").filter({ hasText: /assinatura PDF/ })).toBeVisible();
   await page.getByRole("button", { name: "Escolher outro arquivo" }).click();
-  const doc = await PDFDocument.create();
-  doc.addPage([283.4646, 425.1969]); doc.addPage([283.4646, 425.1969]);
-  await file.setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer: Buffer.from(await doc.save()) });
-  await expect(page.getByText("Arquivo enviado", { exact: true })).toBeVisible({ timeout: 20_000 });
+  const buffer = Buffer.from(await syntheticPdf());
+  await file.setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer });
+  await expect(page.getByText("Não foi possível unificar este PDF", { exact: true })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("Esta conversão não consumiu uma etiqueta da sua cota.")).toBeVisible();
+  await page.getByRole("button", { name: "Nova conversão", exact: true }).click();
+  await page.getByLabel("Personalizado", { exact: false }).check();
+  await page.getByLabel("Largura (mm)", { exact: true }).fill("100");
+  await page.getByLabel("Altura (mm)", { exact: true }).fill("250");
+  await expect(page.getByLabel("Altura (mm)", { exact: true })).toHaveValue("250");
+  await page.getByLabel("Selecionar arquivo PDF", { exact: true }).setInputFiles({ name: "synthetic.pdf", mimeType: "application/pdf", buffer });
+  await expect(page.getByText("Duas páginas. Uma etiqueta.", { exact: true })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByRole("heading", { name: "Antes", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Depois", exact: true })).toBeVisible();
+  await expect(page.getByRole("img", { name: "Antes, página 1", exact: true })).toHaveCount(1, { timeout: 20_000 });
+  await expect(page.getByRole("img", { name: "Antes, página 2", exact: true })).toHaveCount(1);
+  await expect(page.getByRole("img", { name: "Depois, página 1", exact: true })).toHaveCount(1, { timeout: 20_000 });
   await expect(page.getByText("synthetic.pdf", { exact: true })).toBeVisible();
+  const download = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Baixar PDF", exact: true }).click();
+  expect((await download).suggestedFilename()).toMatch(/^uno-[0-9a-f-]+\.pdf$/);
+  await expect(page.getByRole("link", { name: "Imprimir", exact: true })).toHaveAttribute("target", "_blank");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 });

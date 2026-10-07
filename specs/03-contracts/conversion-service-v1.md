@@ -53,6 +53,19 @@ todos os itens aceitos. A conclusão de cada item é independente.
 
 ## Leitura e download
 
+O painel envia `POST /api/dashboard/conversions` com `uploadIntentId`, `size`
+e template opcional. A resposta aceita é `202` com `id`, `status: "queued"`,
+`progress: 0`, `createdAt` e `requestId`. Um retry de intenção já consumida não
+cria outra conversão; `409 upload_already_consumed` pode incluir o ID existente
+da mesma organização para recuperar uma resposta perdida.
+
+`GET /api/dashboard/conversions/:id` retorna o DTO validado em
+`src/lib/conversion-model.ts`: estado/progresso reais, versão, dimensão,
+timestamps, eventos de etapas e erro seguro. `download` e `original` contêm
+somente URLs HTTP(S) assinadas e expiração; existem após conclusão validada e
+enquanto os artefatos estiverem disponíveis. O preview original não é liberado
+para um PDF cuja análise de segurança falhou.
+
 Consultas, eventos, preview original, download e reprocessamento exigem ID e
 organização. Downloads existem somente para registros concluídos e artefatos
 não expirados. Retornar URLs assinadas de até cinco minutos e `no-store`.
