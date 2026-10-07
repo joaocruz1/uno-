@@ -1,0 +1,614 @@
+import { sql } from "drizzle-orm";
+import {
+  boolean,
+  check,
+  foreignKey,
+  index,
+  integer,
+  jsonb,
+  numeric,
+  pgEnum,
+  pgTable,
+  primaryKey,
+  text,
+  timestamp,
+  unique,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+
+const uuidDefault = sql`gen_random_uuid()::text`;
+const now = sql`now()`;
+
+export const platformRoleEnum = pgEnum("platform_role", ["USER", "ADMIN"]);
+export const membershipRoleEnum = pgEnum("membership_role", ["OWNER", "ADMIN", "MEMBER"]);
+export const planIdEnum = pgEnum("plan_id", ["FREE", "STARTER", "PRO", "BUSINESS"]);
+export const subscriptionStatusEnum = pgEnum("subscription_status", [
+  "INCOMPLETE",
+  "TRIALING",
+  "ACTIVE",
+  "PAST_DUE",
+  "CANCELED",
+  "UNPAID",
+  "PAUSED",
+]);
+export const templateStatusEnum = pgEnum("template_status", ["DRAFT", "RELEASED", "RETIRED"]);
+export const conversionStatusEnum = pgEnum("conversion_status", [
+  "queued",
+  "processing",
+  "completed",
+  "failed",
+  "deleting",
+  "deleted",
+]);
+export const batchStatusEnum = pgEnum("batch_status", [
+  "queued",
+  "processing",
+  "completed",
+  "failed",
+  "deleting",
+  "deleted",
+]);
+export const pageRoleEnum = pgEnum("page_role", ["logistics", "danfe"]);
+export const pageKindEnum = pgEnum("page_kind", ["digital", "scanned"]);
+export const usageReservationStatusEnum = pgEnum("usage_reservation_status", [
+  "RESERVED",
+  "CONFIRMED",
+  "RELEASED",
+]);
+export const requestStatusEnum = pgEnum("request_status", ["PENDING", "COMPLETED", "FAILED"]);
+export const outboxStatusEnum = pgEnum("outbox_status", ["PENDING", "PROCESSING", "PUBLISHED", "FAILED"]);
+export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESSING", "DELIVERED", "FAILED"]);
+export const stripeEventStatusEnum = pgEnum("stripe_event_status", ["PROCESSING", "PROCESSED", "FAILED"]);
+
+// Better Auth 1.7.7 core tables. Property names stay canonical for the adapter;
+// physical names are snake_case for PostgreSQL tooling and raw SQL.
+export const user = pgTable(
+  "user",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    name: text("name").notNull(),
+    email: text("email").notNull(),
+    emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
+    platformRole: platformRoleEnum("platform_role").notNull().default("USER"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [uniqueIndex("user_email_uq").on(table.email)],
+);
+
+export const session = pgTable(
+  "session",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    token: text("token").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+  },
+  (table) => [uniqueIndex("session_token_uq").on(table.token), index("session_user_id_idx").on(table.userId)],
+);
+
+export const account = pgTable(
+  "account",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    accountId: text("account_id").notNull(),
+    providerId: text("provider_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: timestamp("access_token_expires_at", { withTimezone: true }),
+    refreshTokenExpiresAt: timestamp("refresh_token_expires_at", { withTimezone: true }),
+    scope: text("scope"),
+    password: text("password"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    index("account_user_id_idx").on(table.userId),
+    uniqueIndex("account_provider_account_uq").on(table.providerId, table.accountId),
+  ],
+);
+
+export const verification = pgTable(
+  "verification",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [index("verification_identifier_idx").on(table.identifier)],
+);
+
+export const organizations = pgTable(
+  "organizations",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    name: text("name").notNull(),
+    slug: text("slug").notNull(),
+    ownerUserId: text("owner_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [uniqueIndex("organizations_slug_uq").on(table.slug), index("organizations_owner_user_id_idx").on(table.ownerUserId)],
+);
+
+export const memberships = pgTable(
+  "memberships",
+  {
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    role: membershipRoleEnum("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    primaryKey({ name: "memberships_pk", columns: [table.organizationId, table.userId] }),
+    index("memberships_user_id_idx").on(table.userId),
+    index("memberships_org_role_idx").on(table.organizationId, table.role),
+  ],
+);
+
+export const subscriptions = pgTable(
+  "subscriptions",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    planId: planIdEnum("plan_id").notNull().default("FREE"),
+    status: subscriptionStatusEnum("status").notNull().default("ACTIVE"),
+    stripeCustomerId: text("stripe_customer_id"),
+    stripeSubscriptionId: text("stripe_subscription_id"),
+    stripePriceId: text("stripe_price_id"),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("subscriptions_organization_id_uq").on(table.organizationId),
+    uniqueIndex("subscriptions_stripe_customer_id_uq").on(table.stripeCustomerId).where(sql`${table.stripeCustomerId} is not null`),
+    uniqueIndex("subscriptions_stripe_subscription_id_uq").on(table.stripeSubscriptionId).where(sql`${table.stripeSubscriptionId} is not null`),
+  ],
+);
+
+export const templates = pgTable(
+  "templates",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    key: text("key").notNull(),
+    version: text("version").notNull(),
+    displayName: text("display_name").notNull(),
+    engineVersion: text("engine_version").notNull(),
+    status: templateStatusEnum("status").notNull().default("DRAFT"),
+    definition: jsonb("definition").notNull().$type<Record<string, unknown>>(),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("templates_key_version_uq").on(table.key, table.version),
+    index("templates_status_key_idx").on(table.status, table.key),
+  ],
+);
+
+export const usagePeriods = pgTable(
+  "usage_periods",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    limit: integer("limit").notNull(),
+    reserved: integer("reserved").notNull().default(0),
+    confirmed: integer("confirmed").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("usage_periods_org_period_uq").on(table.organizationId, table.periodStart, table.periodEnd),
+    unique("usage_periods_org_id_uq").on(table.organizationId, table.id),
+    check("usage_periods_dates_ck", sql`${table.periodEnd} > ${table.periodStart}`),
+    check("usage_periods_limit_ck", sql`${table.limit} >= 0`),
+    check("usage_periods_counters_ck", sql`${table.reserved} >= 0 and ${table.confirmed} >= 0 and ${table.reserved} + ${table.confirmed} <= ${table.limit}`),
+  ],
+);
+
+export const uploadIntents = pgTable(
+  "upload_intents",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    objectKey: text("object_key").notNull(),
+    contentType: text("content_type").notNull().default("application/pdf"),
+    contentLength: integer("content_length").notNull(),
+    checksumSha256: text("checksum_sha256"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("upload_intents_object_key_uq").on(table.objectKey),
+    unique("upload_intents_org_id_uq").on(table.organizationId, table.id),
+    index("upload_intents_org_expires_idx").on(table.organizationId, table.expiresAt),
+    index("upload_intents_created_by_user_id_idx").on(table.createdByUserId),
+    check("upload_intents_content_length_ck", sql`${table.contentLength} > 0`),
+  ],
+);
+
+export const batches = pgTable(
+  "batches",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    status: batchStatusEnum("status").notNull().default("queued"),
+    itemCount: integer("item_count").notNull(),
+    completedCount: integer("completed_count").notNull().default(0),
+    failedCount: integer("failed_count").notNull().default(0),
+    progress: integer("progress").notNull().default(0),
+    zipObjectKey: text("zip_object_key"),
+    artifactsExpireAt: timestamp("artifacts_expire_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    unique("batches_org_id_uq").on(table.organizationId, table.id),
+    index("batches_org_status_created_idx").on(table.organizationId, table.status, table.createdAt),
+    index("batches_created_by_user_id_idx").on(table.createdByUserId),
+    check("batches_item_count_ck", sql`${table.itemCount} > 0`),
+    check("batches_counts_ck", sql`${table.completedCount} >= 0 and ${table.failedCount} >= 0 and ${table.completedCount} + ${table.failedCount} <= ${table.itemCount}`),
+    check("batches_progress_ck", sql`${table.progress} between 0 and 100`),
+  ],
+);
+
+export const conversions = pgTable(
+  "conversions",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    batchId: text("batch_id"),
+    uploadIntentId: text("upload_intent_id"),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => templates.id, { onDelete: "restrict" }),
+    templateVersion: text("template_version").notNull(),
+    engineVersion: text("engine_version").notNull(),
+    status: conversionStatusEnum("status").notNull().default("queued"),
+    progress: integer("progress").notNull().default(0),
+    outputPreset: text("output_preset").notNull(),
+    outputWidthMm: numeric("output_width_mm", { precision: 6, scale: 2 }).notNull(),
+    outputHeightMm: numeric("output_height_mm", { precision: 6, scale: 2 }).notNull(),
+    inputObjectKey: text("input_object_key").notNull(),
+    outputObjectKey: text("output_object_key"),
+    sourceByteLength: integer("source_byte_length").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(3),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    suggestedSize: text("suggested_size"),
+    queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().default(now),
+    processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    artifactsExpireAt: timestamp("artifacts_expire_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("conversions_org_id_uq").on(table.organizationId, table.id),
+    index("conversions_org_status_created_idx").on(table.organizationId, table.status, table.createdAt),
+    index("conversions_org_batch_id_idx").on(table.organizationId, table.batchId),
+    index("conversions_template_id_idx").on(table.templateId),
+    index("conversions_created_by_user_id_idx").on(table.createdByUserId),
+    foreignKey({ name: "conversions_org_batch_fk", columns: [table.organizationId, table.batchId], foreignColumns: [batches.organizationId, batches.id] }).onDelete("cascade"),
+    foreignKey({ name: "conversions_org_upload_intent_fk", columns: [table.organizationId, table.uploadIntentId], foreignColumns: [uploadIntents.organizationId, uploadIntents.id] }).onDelete("restrict"),
+    check("conversions_progress_ck", sql`${table.progress} between 0 and 100`),
+    check("conversions_attempts_ck", sql`${table.attempts} >= 0 and ${table.maxAttempts} > 0 and ${table.attempts} <= ${table.maxAttempts}`),
+    check("conversions_source_byte_length_ck", sql`${table.sourceByteLength} > 0`),
+    check("conversions_output_size_ck", sql`${table.outputWidthMm} between 50 and 210 and ${table.outputHeightMm} between 50 and 300`),
+  ],
+);
+
+export const conversionPages = pgTable(
+  "conversion_pages",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    conversionId: text("conversion_id").notNull(),
+    pageNumber: integer("page_number").notNull(),
+    role: pageRoleEnum("role").notNull(),
+    kind: pageKindEnum("kind").notNull(),
+    rotationDegrees: integer("rotation_degrees").notNull().default(0),
+    widthPoints: numeric("width_points", { precision: 10, scale: 3 }).notNull(),
+    heightPoints: numeric("height_points", { precision: 10, scale: 3 }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("conversion_pages_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("conversion_pages_conversion_page_uq").on(table.conversionId, table.pageNumber),
+    index("conversion_pages_org_conversion_idx").on(table.organizationId, table.conversionId),
+    foreignKey({ name: "conversion_pages_org_conversion_fk", columns: [table.organizationId, table.conversionId], foreignColumns: [conversions.organizationId, conversions.id] }).onDelete("cascade"),
+    check("conversion_pages_page_number_ck", sql`${table.pageNumber} in (1, 2)`),
+    check("conversion_pages_rotation_ck", sql`${table.rotationDegrees} in (0, 90, 180, 270)`),
+    check("conversion_pages_dimensions_ck", sql`${table.widthPoints} > 0 and ${table.heightPoints} > 0`),
+  ],
+);
+
+export const processingEvents = pgTable(
+  "processing_events",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull(),
+    conversionId: text("conversion_id").notNull(),
+    stage: text("stage").notNull(),
+    progress: integer("progress").notNull(),
+    attempt: integer("attempt").notNull(),
+    durationMs: integer("duration_ms"),
+    metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    index("processing_events_org_conversion_created_idx").on(table.organizationId, table.conversionId, table.createdAt),
+    foreignKey({ name: "processing_events_org_conversion_fk", columns: [table.organizationId, table.conversionId], foreignColumns: [conversions.organizationId, conversions.id] }).onDelete("cascade"),
+    check("processing_events_progress_ck", sql`${table.progress} between 0 and 100`),
+    check("processing_events_attempt_ck", sql`${table.attempt} > 0`),
+    check("processing_events_duration_ck", sql`${table.durationMs} is null or ${table.durationMs} >= 0`),
+  ],
+);
+
+export const usageReservations = pgTable(
+  "usage_reservations",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull(),
+    usagePeriodId: text("usage_period_id").notNull(),
+    conversionId: text("conversion_id").notNull(),
+    units: integer("units").notNull().default(1),
+    status: usageReservationStatusEnum("status").notNull().default("RESERVED"),
+    reservedAt: timestamp("reserved_at", { withTimezone: true }).notNull().default(now),
+    confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
+    releasedAt: timestamp("released_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("usage_reservations_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("usage_reservations_conversion_uq").on(table.conversionId),
+    index("usage_reservations_org_period_status_idx").on(table.organizationId, table.usagePeriodId, table.status),
+    foreignKey({ name: "usage_reservations_org_period_fk", columns: [table.organizationId, table.usagePeriodId], foreignColumns: [usagePeriods.organizationId, usagePeriods.id] }).onDelete("restrict"),
+    foreignKey({ name: "usage_reservations_org_conversion_fk", columns: [table.organizationId, table.conversionId], foreignColumns: [conversions.organizationId, conversions.id] }).onDelete("cascade"),
+    check("usage_reservations_units_ck", sql`${table.units} > 0`),
+  ],
+);
+
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    keyHash: text("key_hash").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("api_keys_hash_uq").on(table.keyHash),
+    unique("api_keys_org_id_uq").on(table.organizationId, table.id),
+    index("api_keys_org_active_idx").on(table.organizationId, table.createdAt).where(sql`${table.revokedAt} is null`),
+    index("api_keys_created_by_user_id_idx").on(table.createdByUserId),
+  ],
+);
+
+export const apiRequests = pgTable(
+  "api_requests",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    apiKeyId: text("api_key_id"),
+    requestId: text("request_id").notNull(),
+    method: text("method").notNull(),
+    route: text("route").notNull(),
+    idempotencyKey: text("idempotency_key"),
+    requestHash: text("request_hash"),
+    status: requestStatusEnum("status").notNull().default("PENDING"),
+    responseStatus: integer("response_status"),
+    responseBody: jsonb("response_body").$type<Record<string, unknown>>(),
+    resourceType: text("resource_type"),
+    resourceId: text("resource_id"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("api_requests_request_id_uq").on(table.requestId),
+    uniqueIndex("api_requests_org_route_idempotency_uq").on(table.organizationId, table.route, table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
+    index("api_requests_org_created_idx").on(table.organizationId, table.createdAt),
+    foreignKey({ name: "api_requests_org_api_key_fk", columns: [table.organizationId, table.apiKeyId], foreignColumns: [apiKeys.organizationId, apiKeys.id] }).onDelete("restrict"),
+  ],
+);
+
+export const outboxEvents = pgTable(
+  "outbox_events",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    type: text("type").notNull(),
+    aggregateType: text("aggregate_type").notNull(),
+    aggregateId: text("aggregate_id").notNull(),
+    deduplicationKey: text("deduplication_key").notNull(),
+    payload: jsonb("payload").notNull().$type<Record<string, unknown>>(),
+    status: outboxStatusEnum("status").notNull().default("PENDING"),
+    attempts: integer("attempts").notNull().default(0),
+    availableAt: timestamp("available_at", { withTimezone: true }).notNull().default(now),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("outbox_events_deduplication_key_uq").on(table.deduplicationKey),
+    unique("outbox_events_org_id_uq").on(table.organizationId, table.id),
+    index("outbox_events_pending_idx").on(table.availableAt, table.createdAt).where(sql`${table.status} in ('PENDING', 'FAILED')`),
+    check("outbox_events_attempts_ck", sql`${table.attempts} >= 0`),
+  ],
+);
+
+export const webhookEndpoints = pgTable(
+  "webhook_endpoints",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    secretCiphertext: text("secret_ciphertext").notNull(),
+    secretIv: text("secret_iv").notNull(),
+    secretAuthTag: text("secret_auth_tag").notNull(),
+    encryptionKeyVersion: text("encryption_key_version").notNull(),
+    subscribedEvents: text("subscribed_events").array().notNull(),
+    active: boolean("active").notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("webhook_endpoints_org_id_uq").on(table.organizationId, table.id),
+    index("webhook_endpoints_org_active_idx").on(table.organizationId, table.active),
+    index("webhook_endpoints_created_by_user_id_idx").on(table.createdByUserId),
+    check("webhook_endpoints_events_ck", sql`cardinality(${table.subscribedEvents}) > 0`),
+  ],
+);
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull(),
+    endpointId: text("endpoint_id").notNull(),
+    outboxEventId: text("outbox_event_id").notNull(),
+    status: deliveryStatusEnum("status").notNull().default("PENDING"),
+    attemptCount: integer("attempt_count").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().default(now),
+    deliveredAt: timestamp("delivered_at", { withTimezone: true }),
+    lastResponseStatus: integer("last_response_status"),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("webhook_deliveries_endpoint_event_uq").on(table.endpointId, table.outboxEventId),
+    unique("webhook_deliveries_org_id_uq").on(table.organizationId, table.id),
+    index("webhook_deliveries_due_idx").on(table.nextAttemptAt, table.createdAt).where(sql`${table.status} in ('PENDING', 'FAILED')`),
+    foreignKey({ name: "webhook_deliveries_org_endpoint_fk", columns: [table.organizationId, table.endpointId], foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id] }).onDelete("cascade"),
+    foreignKey({ name: "webhook_deliveries_org_outbox_fk", columns: [table.organizationId, table.outboxEventId], foreignColumns: [outboxEvents.organizationId, outboxEvents.id] }).onDelete("cascade"),
+    check("webhook_deliveries_attempt_count_ck", sql`${table.attemptCount} between 0 and 6`),
+  ],
+);
+
+export const webhookDeliveryAttempts = pgTable(
+  "webhook_delivery_attempts",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull(),
+    deliveryId: text("delivery_id").notNull(),
+    attemptNumber: integer("attempt_number").notNull(),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+    responseStatus: integer("response_status"),
+    error: text("error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("webhook_delivery_attempts_delivery_number_uq").on(table.deliveryId, table.attemptNumber),
+    index("webhook_delivery_attempts_org_delivery_idx").on(table.organizationId, table.deliveryId),
+    foreignKey({ name: "webhook_attempts_org_delivery_fk", columns: [table.organizationId, table.deliveryId], foreignColumns: [webhookDeliveries.organizationId, webhookDeliveries.id] }).onDelete("cascade"),
+    check("webhook_attempts_number_ck", sql`${table.attemptNumber} between 1 and 6`),
+  ],
+);
+
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").references(() => organizations.id, { onDelete: "set null" }),
+    actorUserId: text("actor_user_id").references(() => user.id, { onDelete: "set null" }),
+    actorType: text("actor_type").notNull(),
+    action: text("action").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id"),
+    metadata: jsonb("metadata").notNull().default({}).$type<Record<string, unknown>>(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    index("audit_logs_org_created_idx").on(table.organizationId, table.createdAt),
+    index("audit_logs_actor_user_id_idx").on(table.actorUserId),
+    index("audit_logs_resource_idx").on(table.resourceType, table.resourceId),
+  ],
+);
+
+export const processedStripeEvents = pgTable(
+  "processed_stripe_events",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    stripeEventId: text("stripe_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    payloadHash: text("payload_hash").notNull(),
+    status: stripeEventStatusEnum("status").notNull().default("PROCESSING"),
+    error: text("error"),
+    receivedAt: timestamp("received_at", { withTimezone: true }).notNull().default(now),
+    processedAt: timestamp("processed_at", { withTimezone: true }),
+  },
+  (table) => [
+    uniqueIndex("processed_stripe_events_event_id_uq").on(table.stripeEventId),
+    index("processed_stripe_events_status_received_idx").on(table.status, table.receivedAt),
+  ],
+);
+
+export type DbUser = typeof user.$inferSelect;
+export type Organization = typeof organizations.$inferSelect;
+export type Conversion = typeof conversions.$inferSelect;
+export type UsagePeriod = typeof usagePeriods.$inferSelect;

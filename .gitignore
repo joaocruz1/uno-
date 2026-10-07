@@ -1,0 +1,12 @@
+node_modules/
+.next/
+.env*
+!.env.example
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+tests/fixtures/private/
+output/
+.tmp/
+.DS_Store

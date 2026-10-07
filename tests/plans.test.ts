@@ -1,0 +1,3 @@
+import { describe, it, expect } from "vitest";
+import { PLANS } from "@/lib/plans";
+describe("commercial entitlements", () => { it("reserves API for paid developer plans", () => { expect(PLANS.FREE.api).toBe(false); expect(PLANS.STARTER.api).toBe(false); expect(PLANS.PRO.api).toBe(true); expect(PLANS.BUSINESS.api).toBe(true); }); it("keeps upload/batch/retention limits monotonic", () => { const plans=Object.values(PLANS); for(let i=1;i<plans.length;i++){ expect(plans[i].monthlyLimit).toBeGreaterThan(plans[i-1].monthlyLimit); expect(plans[i].maxFileMB).toBeGreaterThanOrEqual(plans[i-1].maxFileMB); expect(plans[i].retentionDays).toBeGreaterThan(plans[i-1].retentionDays); } }); });
