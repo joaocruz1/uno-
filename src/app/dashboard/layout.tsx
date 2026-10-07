@@ -8,6 +8,9 @@ import { getPlanCatalog } from "@/lib/plans";
 import { isPlatformAdmin } from "@/server/auth/actor";
 import { requireActor } from "@/server/http";
 
+// Authenticated area: never prerender at build time, when no database is available.
+export const dynamic = "force-dynamic";
+
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let actor;
   try {

@@ -5,6 +5,9 @@ import Link from "next/link";
 import { AdminNav } from "@/components/admin/admin-nav";
 import { requireAdminPage } from "@/server/admin/page";
 
+// Authenticated area: never prerender at build time, when no database is available.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = { title: "Administração", robots: { index: false, follow: false } };
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {

@@ -6,6 +6,9 @@ import { OrganizationRecovery } from "@/components/settings/organization-recover
 import { AppError } from "@/lib/errors";
 import { requireIdentity } from "@/server/auth/actor";
 
+// Authenticated area: never prerender at build time, when no database is available.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = { title: "Nova organização", robots: { index: false, follow: false } };
 
 export default async function NewOrganizationPage() {
