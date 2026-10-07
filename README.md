@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="public/uno-logo.png" alt="UNO — Duas páginas. Uma etiqueta." width="420">
+  <img src="docs/assets/logo.png" alt="UNO — Duas páginas. Uma etiqueta." width="460">
 </p>
 
 <p align="center">
