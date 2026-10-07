@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@11.19.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "scripts": {
     "dev": "next dev",
@@ -19,7 +19,8 @@
     "worker": "node --env-file-if-exists=.env.local --import tsx src/workers/index.ts",
     "test:e2e": "playwright test",
     "check": "node scripts/verify-phase.mjs",
-    "dev:s3": "node --env-file-if-exists=.env.local scripts/local-s3.mjs"
+    "dev:s3": "node --env-file-if-exists=.env.local scripts/local-s3.mjs",
+    "proof:print": "node --env-file-if-exists=.env.local --import tsx scripts/generate-print-proof.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",

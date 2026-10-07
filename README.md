@@ -45,3 +45,25 @@ não representam recursos certificados em produção.
 
 Use somente dados sintéticos nos testes versionados. O PDF real fornecido pelo
 usuário, suas imagens, textos e códigos ficam fora de Git e telemetria.
+
+## Engine e impressão
+
+A engine usa seis etapas independentes e incorpora regiões do PDF digital,
+preservando o conteúdo original. O worker deve usar o processo isolado;
+Tesseract local com português e inglês auxilia arquivos escaneados.
+
+O formato padrão de 100 × 150 mm pode ser insuficiente. A engine bloqueia
+composições que não cabem na escala original. O exemplo privado passou na
+validação automática em 100 × 250 mm; isso não certifica sua impressão.
+
+Gere candidatos exclusivamente sintéticos com dimensões explícitas:
+
+```bash
+pnpm proof:print --width 100 --height 250
+pnpm proof:print --width 100 --height 250 --additional
+pnpm proof:print --width 100 --height 250 --scanned
+```
+
+Cada pacote privado de desenvolvimento inclui entrada, saída, relatório e
+hashes. Siga [o protocolo físico](docs/printing-validation.md) antes de liberar
+uma combinação template/tamanho em produção.

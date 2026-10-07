@@ -24,7 +24,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
   membership/role enforcement, session security, onboarding, and tenant tests.
 - [x] **CODE + AUTOMATED PASS — 04 Upload:** private object upload, MIME/signature/size
   validation, plan limits, safe metadata, and no document contents in telemetry.
-- [ ] **NOT VERIFIED — 05 Engine:** six contract stages, initial versioned
+- [x] **CODE + AUTOMATED PASS — 05 Engine:** six contract stages, initial versioned
   template, synthetic fixtures, digital embedding, scan OCR guidance, typed
   failures, 203/300 dpi validation, and code equivalence.
 - [ ] **NOT VERIFIED — 06 Conversion:** BullMQ/Redis enqueue and worker, atomic
@@ -94,12 +94,12 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 
 ## Private sample and release evidence
 
-- [ ] **NOT VERIFIED:** initial detector/layout validated locally against the
+- [x] **AUTOMATED PASS:** initial detector/layout validated locally against the
   user-supplied private sample without persisting its bytes or extracted values
   in Git, logs, telemetry, screenshots, or CI artifacts.
-- [ ] **NOT VERIFIED:** synthetic two-page digital fixture covers equivalent
+- [x] **AUTOMATED PASS:** synthetic two-page digital fixture covers equivalent
   geometry, codes, text blocks, whitespace, and additional information.
-- [ ] **NOT VERIFIED:** synthetic scanned fixture covers OCR-assisted detection
+- [x] **AUTOMATED PASS:** synthetic scanned fixture covers OCR-assisted detection
   at representative quality and rotation.
 - [ ] **NOT VERIFIED:** physical 100 × 150 mm feasibility is proven; until then,
   that composition remains an unverified hypothesis and must not be advertised
