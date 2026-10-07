@@ -14,10 +14,10 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 
 ## Phases
 
-- [ ] **NOT VERIFIED — 01 Foundation:** independent Next.js/TypeScript project,
+- [x] **CODE + AUTOMATED PASS — 01 Foundation:** independent Next.js/TypeScript project,
   package boundaries, Drizzle/PostgreSQL model, local Docker Compose services,
   environment validation, CI, health checks, and baseline documentation.
-- [ ] **NOT VERIFIED — 02 Design and landing:** UNO Red Noir identity,
+- [x] **CODE + AUTOMATED PASS — 02 Design and landing:** UNO Red Noir identity,
   Manrope/Inter, complete responsive landing, accessible system components, and
   supported loading/empty/error states.
 - [ ] **NOT VERIFIED — 03 Authentication:** Better Auth flows, organizations,
