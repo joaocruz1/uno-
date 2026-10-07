@@ -306,6 +306,9 @@ export const conversions = pgTable(
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     batchId: text("batch_id"),
     uploadIntentId: text("upload_intent_id"),
+    sourceConversionId: text("source_conversion_id"),
+    reprocessIdempotencyKey: text("reprocess_idempotency_key"),
+    reprocessRequestHash: text("reprocess_request_hash"),
     templateId: text("template_id")
       .notNull()
       .references(() => templates.id, { onDelete: "restrict" }),
@@ -344,14 +347,20 @@ export const conversions = pgTable(
   (table) => [
     unique("conversions_org_id_uq").on(table.organizationId, table.id),
     index("conversions_org_status_created_idx").on(table.organizationId, table.status, table.createdAt),
+    index("conversions_org_created_id_idx").on(table.organizationId, table.createdAt, table.id),
+    index("conversions_org_source_created_idx").on(table.organizationId, table.source, table.createdAt, table.id),
     index("conversions_org_batch_id_idx").on(table.organizationId, table.batchId),
     index("conversions_template_id_idx").on(table.templateId),
     index("conversions_processing_lease_idx").on(table.processingLeaseExpiresAt).where(sql`${table.status} = 'processing'`),
     uniqueIndex("conversions_upload_intent_uq").on(table.uploadIntentId).where(sql`${table.uploadIntentId} is not null`),
     uniqueIndex("conversions_input_object_key_uq").on(table.inputObjectKey),
+    uniqueIndex("conversions_reprocess_idempotency_uq")
+      .on(table.organizationId, table.sourceConversionId, table.reprocessIdempotencyKey)
+      .where(sql`${table.sourceConversionId} is not null and ${table.reprocessIdempotencyKey} is not null`),
     index("conversions_created_by_user_id_idx").on(table.createdByUserId),
     foreignKey({ name: "conversions_org_batch_fk", columns: [table.organizationId, table.batchId], foreignColumns: [batches.organizationId, batches.id] }).onDelete("cascade"),
     foreignKey({ name: "conversions_org_upload_intent_fk", columns: [table.organizationId, table.uploadIntentId], foreignColumns: [uploadIntents.organizationId, uploadIntents.id] }).onDelete("restrict"),
+    foreignKey({ name: "conversions_org_source_conversion_fk", columns: [table.organizationId, table.sourceConversionId], foreignColumns: [table.organizationId, table.id] }).onDelete("restrict"),
     check("conversions_progress_ck", sql`${table.progress} between 0 and 100`),
     check("conversions_attempts_ck", sql`${table.attempts} >= 0 and ${table.maxAttempts} > 0 and ${table.attempts} <= ${table.maxAttempts}`),
     check(
@@ -368,6 +377,11 @@ export const conversions = pgTable(
       sql`${table.originalFileName} is null or (char_length(${table.originalFileName}) between 1 and 160 and position('/' in ${table.originalFileName}) = 0 and position(chr(92) in ${table.originalFileName}) = 0 and ${table.originalFileName} !~ '[[:cntrl:]]')`,
     ),
     check("conversions_output_size_ck", sql`${table.outputWidthMm} between 50 and 210 and ${table.outputHeightMm} between 50 and 300`),
+    check("conversions_source_conversion_ck", sql`${table.sourceConversionId} is null or ${table.sourceConversionId} <> ${table.id}`),
+    check(
+      "conversions_reprocess_idempotency_ck",
+      sql`(${table.sourceConversionId} is null and ${table.reprocessIdempotencyKey} is null and ${table.reprocessRequestHash} is null) or (${table.sourceConversionId} is not null and ${table.reprocessIdempotencyKey} is not null and ${table.reprocessRequestHash} is not null and char_length(${table.reprocessIdempotencyKey}) between 16 and 128 and ${table.reprocessRequestHash} ~ '^[0-9a-f]{64}$')`,
+    ),
   ],
 );
 

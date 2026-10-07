@@ -1,6 +1,7 @@
 import { and, count, eq, gt, lte } from "drizzle-orm";
 
 import { conversions, getDb, usagePeriods } from "@/db";
+import { ButtonLink } from "@/components/ui";
 import { PLANS } from "@/lib/plans";
 import { requireActor } from "@/server/http";
 
@@ -45,6 +46,7 @@ export default async function DashboardPage() {
       <section className="mt-8 rounded-xl border border-dashed border-white/10 bg-[#050505] p-8 text-center">
         <h2 className="font-heading text-xl font-semibold">Sua próxima etiqueta começa aqui</h2>
         <p className="mx-auto mt-2 max-w-lg text-sm leading-6 text-zinc-500">Envie uma etiqueta logística com a DANFE para criar uma página pronta para impressão.</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-3"><ButtonLink href="/dashboard/process">Nova conversão</ButtonLink><ButtonLink href="/dashboard/history" variant="secondary">Ver histórico</ButtonLink></div>
       </section>
     </div>
   );

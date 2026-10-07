@@ -50,3 +50,11 @@ Desktop/mobile visual review performed; headline spacing and demo layout correct
 - Read-only architecture and QA reviews approved after regression fixes for live duplicate jobs, pre-claim failures, commit uncertainty and output publication races. Persisted claims and versions remain authoritative.
 - Synthetic full upload → actual progress → result comparison → download/print flow passed Chromium, Firefox, WebKit and mobile. The insufficient format fails without confirmed usage. PDF previews render with versioned local PDF.js assets and omit credentials on signed requests.
 - Worker restarted with final reviewed code. Local native services demonstrate integration behavior; production providers, container memory limits and physical template releases remain unverified.
+
+## Phase 07 — History and reprocessing
+
+- Full lint/typecheck, 85 tests and production build passed; six native/OCR cases are opt-in.
+- Sixteen focused tests cover literal search, filter-bound stable pagination, dates, tenant references, missing/expired files, retention during HEAD/row-lock waits, immutable copies, independent reservations, plan/template revalidation and lost/unknown commit outcomes.
+- Native PostgreSQL/S3 concurrency passed: equivalent simultaneous reprocess requests return one child, one reservation and one outbox event; conflicting parameters return 409. Final migration/constraint state validated locally.
+- Chromium, Firefox, WebKit and mobile passed failed 100×150 source → searchable history → original dimensions retained → new 100×250 conversion → preview/download. Confirmed usage is one; the original failure does not consume quota.
+- Read-only architecture/security and UI QA reviews approved. Reprocessing preserves the original preset/template unless changed, uses a stable retry key and hides stale detail actions during navigation. No production release or physical certification is implied.

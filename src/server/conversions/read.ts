@@ -68,14 +68,39 @@ export async function readConversion(
     eq(processingEvents.conversionId, conversionId),
   )).orderBy(asc(processingEvents.createdAt));
 
-  const canDownload = conversion.status === "completed" && conversion.outputObjectKey && conversion.artifactsExpireAt &&
-    conversion.artifactsExpireAt > dependencies.now();
-  const signed = canDownload
-    ? await Promise.all([
-      dependencies.storage.signDownload(conversion.outputObjectKey as string, 300),
-      dependencies.storage.signDownload(conversion.inputObjectKey, 300),
-    ])
-    : undefined;
+  const initialRemainingMs = conversion.artifactsExpireAt
+    ? conversion.artifactsExpireAt.getTime() - dependencies.now().getTime()
+    : 0;
+  const canDownload = conversion.status === "completed" && conversion.outputObjectKey && initialRemainingMs >= 1_000;
+  let signed: Awaited<ReturnType<StorageGateway["signDownload"]>>[] | undefined;
+  if (canDownload) {
+    try {
+      const [outputHead, inputHead] = await Promise.all([
+        dependencies.storage.head(conversion.outputObjectKey as string),
+        dependencies.storage.head(conversion.inputObjectKey),
+      ]);
+      if (outputHead.contentLength < 1 || inputHead.contentLength < 1) {
+        throw new AppError("artifact_unavailable", "Os arquivos desta conversão não estão disponíveis.", 410);
+      }
+      const remainingMs = conversion.artifactsExpireAt
+        ? conversion.artifactsExpireAt.getTime() - dependencies.now().getTime()
+        : 0;
+      if (remainingMs < 1_000) {
+        signed = undefined;
+      } else {
+      const expiresInSeconds = Math.min(300, Math.floor(remainingMs / 1_000));
+      signed = await Promise.all([
+        dependencies.storage.signDownload(conversion.outputObjectKey as string, expiresInSeconds),
+        dependencies.storage.signDownload(conversion.inputObjectKey, expiresInSeconds),
+      ]);
+      }
+    } catch (error) {
+      if (error instanceof AppError && error.code === "upload_not_found") {
+        throw new AppError("artifact_unavailable", "Os arquivos desta conversão não estão disponíveis.", 410);
+      }
+      throw error;
+    }
+  }
   return {
     id: conversion.id,
     status: conversion.status as "queued" | "processing" | "completed" | "failed",

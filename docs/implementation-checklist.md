@@ -30,7 +30,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 06 Conversion:** BullMQ/Redis enqueue and worker, atomic
   quota lifecycle, persisted real progress, retry recovery, comparison, signed
   download, print, and retention metadata.
-- [ ] **NOT VERIFIED — 07 History:** organization-scoped search/filter,
+- [x] **CODE + AUTOMATED PASS — 07 History:** organization-scoped search/filter,
   conversion detail, safe errors, signed re-download, and reprocessing as a new
   charged conversion.
 - [ ] **NOT VERIFIED — 08 Batches:** plan-count validation, atomic reservation,

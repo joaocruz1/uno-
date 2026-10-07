@@ -1,0 +1,9 @@
+ALTER TABLE "conversions" ADD COLUMN "source_conversion_id" text;--> statement-breakpoint
+ALTER TABLE "conversions" ADD COLUMN "reprocess_idempotency_key" text;--> statement-breakpoint
+ALTER TABLE "conversions" ADD COLUMN "reprocess_request_hash" text;--> statement-breakpoint
+ALTER TABLE "conversions" ADD CONSTRAINT "conversions_org_source_conversion_fk" FOREIGN KEY ("organization_id","source_conversion_id") REFERENCES "public"."conversions"("organization_id","id") ON DELETE restrict ON UPDATE no action;--> statement-breakpoint
+CREATE INDEX "conversions_org_created_id_idx" ON "conversions" USING btree ("organization_id","created_at","id");--> statement-breakpoint
+CREATE INDEX "conversions_org_source_created_idx" ON "conversions" USING btree ("organization_id","source","created_at","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "conversions_reprocess_idempotency_uq" ON "conversions" USING btree ("organization_id","source_conversion_id","reprocess_idempotency_key") WHERE "conversions"."source_conversion_id" is not null and "conversions"."reprocess_idempotency_key" is not null;--> statement-breakpoint
+ALTER TABLE "conversions" ADD CONSTRAINT "conversions_source_conversion_ck" CHECK ("conversions"."source_conversion_id" is null or "conversions"."source_conversion_id" <> "conversions"."id");--> statement-breakpoint
+ALTER TABLE "conversions" ADD CONSTRAINT "conversions_reprocess_idempotency_ck" CHECK (("conversions"."source_conversion_id" is null and "conversions"."reprocess_idempotency_key" is null and "conversions"."reprocess_request_hash" is null) or ("conversions"."source_conversion_id" is not null and "conversions"."reprocess_idempotency_key" is not null and "conversions"."reprocess_request_hash" is not null and char_length("conversions"."reprocess_idempotency_key") between 16 and 128 and "conversions"."reprocess_request_hash" ~ '^[0-9a-f]{64}$'));

@@ -38,6 +38,8 @@ pnpm check
 pnpm test:e2e
 # Com PostgreSQL, Redis, Mailpit e app local em 127.0.0.1:3100:
 UNO_LOCAL_AUTH_E2E=1 pnpm exec playwright test tests/e2e/auth.spec.ts
+# Com S3 e worker adicionais:
+UNO_LOCAL_UPLOAD_E2E=1 pnpm exec playwright test tests/e2e/history.spec.ts
 ```
 
 Os requisitos e contratos estão em `specs/`; o estado verificável de cada fase
