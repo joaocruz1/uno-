@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { Readable } from "node:stream";
 
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -72,6 +73,15 @@ class MemoryStorage implements StorageGateway {
     this.operations.push(`delete:${key}`);
     this.objects.delete(key);
   }
+  async openReadStream(key: string) {
+    const bytes = this.objects.get(key);
+    if (!bytes) throw new AppError("upload_not_found", "missing", 404);
+    return Readable.from([bytes]);
+  }
+  async beginMultipartUpload() { return "upload-id"; }
+  async uploadPart() { return "etag"; }
+  async completeMultipartUpload() {}
+  async abortMultipartUpload() {}
 }
 
 const storage = new MemoryStorage();

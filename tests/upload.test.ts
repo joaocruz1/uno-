@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { Readable } from "node:stream";
 
 import { describe, expect, it } from "vitest";
 
@@ -58,6 +59,11 @@ class MemoryStorage implements StorageGateway {
 
   async putBytes() {}
   async delete() {}
+  async openReadStream() { return Readable.from([this.bytes]); }
+  async beginMultipartUpload() { return "upload-id"; }
+  async uploadPart() { return "etag"; }
+  async completeMultipartUpload() {}
+  async abortMultipartUpload() {}
 }
 
 function intent(overrides: Partial<UploadIntentRecord> = {}): UploadIntentRecord {

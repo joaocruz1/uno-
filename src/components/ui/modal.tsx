@@ -1,7 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRef, type ReactNode } from "react";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 type ModalProps = {
   open: boolean;
@@ -12,19 +13,22 @@ type ModalProps = {
 };
 
 export function Modal({ open, onClose, title, description, children }: ModalProps) {
-  if (!open) return null;
+  const returnFocus = useRef<HTMLElement | null>(null);
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={onClose}>
-      <section className="w-full max-w-lg rounded-2xl border border-white/10 bg-[#090909] p-6 shadow-2xl" role="dialog" aria-modal="true" aria-labelledby="modal-title" onMouseDown={(event) => event.stopPropagation()}>
+    <DialogPrimitive.Root open={open} onOpenChange={next => { if (!next) onClose(); }}>
+      <DialogPrimitive.Portal>
+      <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm"/>
+      <DialogPrimitive.Content {...(!description ? { "aria-describedby": undefined } : {})} onOpenAutoFocus={() => { returnFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; }} onCloseAutoFocus={event => { event.preventDefault(); if (returnFocus.current?.isConnected) returnFocus.current.focus(); }} className="fixed left-1/2 top-1/2 z-50 max-h-[90dvh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-2xl border border-white/10 bg-[#090909] p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 id="modal-title" className="font-heading text-xl font-bold">{title}</h2>
-            {description ? <p className="mt-1 text-sm text-zinc-400">{description}</p> : null}
+            <DialogPrimitive.Title className="font-heading text-xl font-bold">{title}</DialogPrimitive.Title>
+            {description ? <DialogPrimitive.Description className="mt-1 text-sm text-zinc-400">{description}</DialogPrimitive.Description> : null}
           </div>
-          <button className="rounded-full p-2 text-zinc-400 hover:bg-white/10 hover:text-white" onClick={onClose} aria-label="Fechar janela"><X size={18} /></button>
+          <DialogPrimitive.Close asChild><button type="button" className="rounded-full p-2 text-zinc-400 hover:bg-white/10 hover:text-white focus-visible:outline-2 focus-visible:outline-uno-red" aria-label="Fechar janela"><X size={18} /></button></DialogPrimitive.Close>
         </div>
         <div className="mt-5">{children}</div>
-      </section>
-    </div>
+      </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

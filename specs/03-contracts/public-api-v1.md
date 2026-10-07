@@ -80,11 +80,14 @@ the whole batch.
 
 Return `id`, `status`, aggregate `progress`, counts by state, item summaries,
 and timestamps. Batch status is `queued`, `processing`, `completed`, or `failed`.
-After every item is terminal, the batch is `completed` when at least one output
+After every item is terminal, keep `processing` with `phase: "packaging"` until
+the ZIP is durably published. Then the batch is `completed` when at least one output
 succeeded and `failed` when no output succeeded; an unrecoverable batch-level
 orchestration error also produces `failed`. A completed batch includes an
 expiring signed ZIP URL and expiry for successful outputs, and may expose failed
 item errors without leaking file contents.
+An exhausted archive retry produces `failed/archive_failed` while preserving
+successful individual downloads and their confirmed usage.
 
 ## GET `/api/v1/usage`
 

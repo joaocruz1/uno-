@@ -58,3 +58,12 @@ Desktop/mobile visual review performed; headline spacing and demo layout correct
 - Native PostgreSQL/S3 concurrency passed: equivalent simultaneous reprocess requests return one child, one reservation and one outbox event; conflicting parameters return 409. Final migration/constraint state validated locally.
 - Chromium, Firefox, WebKit and mobile passed failed 100×150 source → searchable history → original dimensions retained → new 100×250 conversion → preview/download. Confirmed usage is one; the original failure does not consume quota.
 - Read-only architecture/security and UI QA reviews approved. Reprocessing preserves the original preset/template unless changed, uses a stable retry key and hides stale detail actions during navigation. No production release or physical certification is implied.
+
+## Phase 08 — Batches
+
+- Full lint, strict typecheck, 94 tests and production build passed; seven native/OCR cases remain opt-in. The mock typing correction also removed lint warnings.
+- Independent private upload sessions prepare immutable items before one atomic batch admission. Individual conversions retain their own quota lifecycle; ZIP packaging includes only successful outputs.
+- Native PostgreSQL concurrency passed: twelve equivalent submissions produced one batch and two reservations. Migration application and rerun passed.
+- Chromium, Firefox, WebKit and mobile passed eight synthetic end-to-end cases with the final restarted worker: dialog focus/Escape, accepted batch, stable ZIP filename/download, insufficient-format failure, no ZIP for zero successes and released quota.
+- Architecture/security re-review approved effective archive deadlines (including providers ignoring cancellation), stable staging keys tracked until signed uploads expire, and publication/cleanup row-lock races. ZIP64 uses bounded multipart buffers and actual persisted aggregate progress.
+- Local integration evidence does not certify physical printing, real R2 settings or deployment memory. Aggregate parent/ZIP/finalization/child memory must be measured before setting production resource limits.

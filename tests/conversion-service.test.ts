@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Readable } from "node:stream";
 
 import type { StorageGateway } from "@/server/storage";
 import { conversionJobId } from "@/server/queue/conversion-queue";
@@ -26,6 +27,11 @@ function storage() {
     read: vi.fn(async (key) => objects.get(key) ?? Buffer.alloc(0)),
     putBytes: vi.fn(async (key, bytes) => { objects.set(key, Buffer.from(bytes)); }),
     delete: vi.fn(async (key) => { objects.delete(key); }),
+    openReadStream: vi.fn(async (key) => Readable.from([objects.get(key) ?? Buffer.alloc(0)])),
+    beginMultipartUpload: vi.fn(async () => "upload-id"),
+    uploadPart: vi.fn(async () => "etag"),
+    completeMultipartUpload: vi.fn(async () => undefined),
+    abortMultipartUpload: vi.fn(async () => undefined),
   };
   return { gateway, objects };
 }

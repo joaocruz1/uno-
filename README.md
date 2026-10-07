@@ -50,6 +50,20 @@ não representam recursos certificados em produção.
 Use somente dados sintéticos nos testes versionados. O PDF real fornecido pelo
 usuário, suas imagens, textos e códigos ficam fora de Git e telemetria.
 
+## Lotes
+
+No painel, selecione PDFs, prepare os arquivos e confirme o lote. A preparação
+não reserva cota; a confirmação reserva todos os itens em uma transação. Falhas
+individuais liberam suas unidades, e o ZIP inclui somente resultados aprovados.
+Downloads individuais continuam disponíveis se o empacotamento falhar.
+
+Sessões de preparação duram 24h, com links PUT de até cinco minutos emitidos
+por arquivo. Arquivos maiores que 20 MB são finalizados pelo worker. Pausar o
+envio permite retomá-lo; arquivos já enviados podem terminar a validação.
+Os limites operacionais estão em `.env.example`: prazo da sessão, máximo de
+saída ZIP e timeout de empacotamento. O worker usa ZIP64 e multipart por
+streaming, sem carregar o lote inteiro em memória.
+
 ## Engine e impressão
 
 A engine usa seis etapas independentes e incorpora regiões do PDF digital,

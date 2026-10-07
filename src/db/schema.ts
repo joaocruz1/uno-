@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   foreignKey,
@@ -49,6 +50,9 @@ export const batchStatusEnum = pgEnum("batch_status", [
   "deleting",
   "deleted",
 ]);
+export const batchUploadSessionStatusEnum = pgEnum("batch_upload_session_status", ["OPEN", "ACCEPTED", "EXPIRED"]);
+export const batchUploadItemStatusEnum = pgEnum("batch_upload_item_status", ["PENDING", "UPLOADING", "PREPARING", "READY", "FAILED"]);
+export const batchArchiveStatusEnum = pgEnum("batch_archive_status", ["PENDING", "PACKAGING", "READY", "FAILED"]);
 export const pageRoleEnum = pgEnum("page_role", ["logistics", "danfe"]);
 export const pageKindEnum = pgEnum("page_kind", ["digital", "scanned"]);
 export const usageReservationStatusEnum = pgEnum("usage_reservation_status", [
@@ -267,6 +271,67 @@ export const uploadIntents = pgTable(
   ],
 );
 
+export const batchUploadSessions = pgTable(
+  "batch_upload_sessions",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    status: batchUploadSessionStatusEnum("status").notNull().default("OPEN"),
+    templateReference: text("template_reference").notNull(),
+    outputPreset: text("output_preset").notNull(),
+    outputWidthMm: numeric("output_width_mm", { precision: 6, scale: 2 }).notNull(),
+    outputHeightMm: numeric("output_height_mm", { precision: 6, scale: 2 }).notNull(),
+    acceptedBatchId: text("accepted_batch_id"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("batch_upload_sessions_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("batch_upload_sessions_accepted_batch_uq").on(table.acceptedBatchId).where(sql`${table.acceptedBatchId} is not null`),
+    index("batch_upload_sessions_org_status_expires_idx").on(table.organizationId, table.status, table.expiresAt),
+    check("batch_upload_sessions_size_ck", sql`${table.outputWidthMm} between 50 and 210 and ${table.outputHeightMm} between 50 and 300`),
+  ],
+);
+
+export const batchUploadItems = pgTable(
+  "batch_upload_items",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    sessionId: text("session_id").notNull(),
+    clientItemId: text("client_item_id").notNull(),
+    originalFileName: text("original_file_name").notNull(),
+    contentLength: integer("content_length").notNull(),
+    expectedSha256: text("expected_sha256"),
+    status: batchUploadItemStatusEnum("status").notNull().default("PENDING"),
+    stagingObjectKey: text("staging_object_key"),
+    stagingExpiresAt: timestamp("staging_expires_at", { withTimezone: true }),
+    readyObjectKey: text("ready_object_key"),
+    readySha256: text("ready_sha256"),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("batch_upload_items_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("batch_upload_items_session_client_uq").on(table.sessionId, table.clientItemId),
+    uniqueIndex("batch_upload_items_staging_key_uq").on(table.stagingObjectKey).where(sql`${table.stagingObjectKey} is not null`),
+    uniqueIndex("batch_upload_items_ready_key_uq").on(table.readyObjectKey).where(sql`${table.readyObjectKey} is not null`),
+    index("batch_upload_items_org_status_idx").on(table.organizationId, table.status),
+    foreignKey({ name: "batch_upload_items_org_session_fk", columns: [table.organizationId, table.sessionId], foreignColumns: [batchUploadSessions.organizationId, batchUploadSessions.id] }).onDelete("cascade"),
+    check("batch_upload_items_content_length_ck", sql`${table.contentLength} > 0`),
+    check("batch_upload_items_client_id_ck", sql`char_length(${table.clientItemId}) between 1 and 128 and ${table.clientItemId} !~ '[[:cntrl:]]'`),
+    check("batch_upload_items_sha_ck", sql`${table.expectedSha256} is null or ${table.expectedSha256} ~ '^[0-9a-f]{64}$'`),
+    check("batch_upload_items_ready_sha_ck", sql`${table.readySha256} is null or ${table.readySha256} ~ '^[0-9a-f]{64}$'`),
+    check("batch_upload_items_name_ck", sql`char_length(${table.originalFileName}) between 1 and 160 and position('/' in ${table.originalFileName}) = 0 and position(chr(92) in ${table.originalFileName}) = 0 and ${table.originalFileName} !~ '[[:cntrl:]]'`),
+    check("batch_upload_items_ready_ck", sql`${table.status} <> 'READY' or (${table.readyObjectKey} is not null and ${table.readySha256} is not null and ${table.completedAt} is not null)`),
+  ],
+);
+
 export const batches = pgTable(
   "batches",
   {
@@ -275,12 +340,24 @@ export const batches = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    uploadSessionId: text("upload_session_id"),
+    idempotencyKey: text("idempotency_key"),
+    requestHash: text("request_hash"),
     status: batchStatusEnum("status").notNull().default("queued"),
+    phase: text("phase").notNull().default("queued"),
     itemCount: integer("item_count").notNull(),
     completedCount: integer("completed_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
     progress: integer("progress").notNull().default(0),
     zipObjectKey: text("zip_object_key"),
+    zipByteLength: bigint("zip_byte_length", { mode: "number" }),
+    archiveStatus: batchArchiveStatusEnum("archive_status").notNull().default("PENDING"),
+    archiveAttempts: integer("archive_attempts").notNull().default(0),
+    archiveMaxAttempts: integer("archive_max_attempts").notNull().default(3),
+    archiveToken: text("archive_token"),
+    archiveLeaseExpiresAt: timestamp("archive_lease_expires_at", { withTimezone: true }),
+    archiveErrorCode: text("archive_error_code"),
+    archiveErrorMessage: text("archive_error_message"),
     artifactsExpireAt: timestamp("artifacts_expire_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
@@ -288,11 +365,19 @@ export const batches = pgTable(
   },
   (table) => [
     unique("batches_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("batches_upload_session_uq").on(table.uploadSessionId).where(sql`${table.uploadSessionId} is not null`),
+    uniqueIndex("batches_org_idempotency_uq").on(table.organizationId, table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
     index("batches_org_status_created_idx").on(table.organizationId, table.status, table.createdAt),
     index("batches_created_by_user_id_idx").on(table.createdByUserId),
+    index("batches_archive_lease_idx").on(table.archiveLeaseExpiresAt).where(sql`${table.phase} = 'packaging'`),
+    foreignKey({ name: "batches_org_upload_session_fk", columns: [table.organizationId, table.uploadSessionId], foreignColumns: [batchUploadSessions.organizationId, batchUploadSessions.id] }).onDelete("restrict"),
     check("batches_item_count_ck", sql`${table.itemCount} > 0`),
     check("batches_counts_ck", sql`${table.completedCount} >= 0 and ${table.failedCount} >= 0 and ${table.completedCount} + ${table.failedCount} <= ${table.itemCount}`),
     check("batches_progress_ck", sql`${table.progress} between 0 and 100`),
+    check("batches_phase_ck", sql`${table.phase} in ('queued','processing','packaging','completed','failed')`),
+    check("batches_idempotency_ck", sql`(${table.idempotencyKey} is null and ${table.requestHash} is null) or (${table.idempotencyKey} is not null and ${table.requestHash} is not null and char_length(${table.idempotencyKey}) between 16 and 128 and ${table.requestHash} ~ '^[0-9a-f]{64}$')`),
+    check("batches_archive_attempts_ck", sql`${table.archiveAttempts} >= 0 and ${table.archiveMaxAttempts} > 0 and ${table.archiveAttempts} <= ${table.archiveMaxAttempts}`),
+    check("batches_archive_claim_ck", sql`(${table.archiveStatus} = 'PACKAGING' and ${table.archiveToken} is not null and ${table.archiveLeaseExpiresAt} is not null) or (${table.archiveStatus} <> 'PACKAGING' and ${table.archiveToken} is null and ${table.archiveLeaseExpiresAt} is null)`),
   ],
 );
 

@@ -33,7 +33,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 07 History:** organization-scoped search/filter,
   conversion detail, safe errors, signed re-download, and reprocessing as a new
   charged conversion.
-- [ ] **NOT VERIFIED — 08 Batches:** plan-count validation, atomic reservation,
+- [x] **CODE + AUTOMATED PASS — 08 Batches:** plan-count validation, atomic reservation,
   independent items, aggregate real progress, partial failure behavior, private
   ZIP generation, and signed ZIP download.
 - [ ] **NOT VERIFIED — 09 Stripe:** monthly plans and configurable limits,

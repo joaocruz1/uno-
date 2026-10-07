@@ -12,3 +12,7 @@ export function authEnvironment() {
 export function allowDraftTemplates(): boolean {
   return process.env.NODE_ENV !== "production" && process.env.UNO_ALLOW_DRAFT_TEMPLATES === "true";
 }
+export function positiveIntegerEnv(name: string, fallback: number): number {
+  const parsed = Number(process.env[name]);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}

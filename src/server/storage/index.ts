@@ -1,11 +1,16 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
+  UploadPartCommand,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { Readable } from "node:stream";
 
 import { AppError } from "@/lib/errors";
 
@@ -39,6 +44,11 @@ export interface StorageGateway {
   read(key: string, maxBytes: number): Promise<Buffer>;
   putBytes(key: string, bytes: Buffer, contentType: string, maxBytes: number): Promise<void>;
   delete(key: string): Promise<void>;
+  openReadStream(key: string, abortSignal?: AbortSignal): Promise<Readable>;
+  beginMultipartUpload(key: string, contentType: string, abortSignal?: AbortSignal): Promise<string>;
+  uploadPart(key: string, uploadId: string, partNumber: number, bytes: Buffer, abortSignal?: AbortSignal): Promise<string>;
+  completeMultipartUpload(key: string, uploadId: string, parts: Array<{ partNumber: number; etag: string }>, abortSignal?: AbortSignal): Promise<void>;
+  abortMultipartUpload(key: string, uploadId: string, abortSignal?: AbortSignal): Promise<void>;
 }
 
 type StorageState = { client?: S3Client; gateway?: StorageGateway };
@@ -194,6 +204,59 @@ class S3StorageGateway implements StorageGateway {
   async delete(key: string): Promise<void> {
     try {
       await client().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async openReadStream(key: string, abortSignal?: AbortSignal): Promise<Readable> {
+    try {
+      const output = await client().send(new GetObjectCommand({ Bucket: bucket(), Key: key }), { abortSignal });
+      if (!output.Body || !(Symbol.asyncIterator in Object(output.Body))) {
+        throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+      }
+      return Readable.from(output.Body as AsyncIterable<Uint8Array>);
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async beginMultipartUpload(key: string, contentType: string, abortSignal?: AbortSignal): Promise<string> {
+    try {
+      const output = await client().send(new CreateMultipartUploadCommand({ Bucket: bucket(), Key: key, ContentType: contentType }), { abortSignal });
+      if (!output.UploadId) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+      return output.UploadId;
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async uploadPart(key: string, uploadId: string, partNumber: number, bytes: Buffer, abortSignal?: AbortSignal): Promise<string> {
+    try {
+      const output = await client().send(new UploadPartCommand({
+        Bucket: bucket(), Key: key, UploadId: uploadId, PartNumber: partNumber, Body: bytes, ContentLength: bytes.length,
+      }), { abortSignal });
+      if (!output.ETag) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+      return output.ETag;
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async completeMultipartUpload(key: string, uploadId: string, parts: Array<{ partNumber: number; etag: string }>, abortSignal?: AbortSignal): Promise<void> {
+    try {
+      await client().send(new CompleteMultipartUploadCommand({
+        Bucket: bucket(), Key: key, UploadId: uploadId,
+        MultipartUpload: { Parts: parts.map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })) },
+      }), { abortSignal });
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async abortMultipartUpload(key: string, uploadId: string, abortSignal?: AbortSignal): Promise<void> {
+    try {
+      await client().send(new AbortMultipartUploadCommand({ Bucket: bucket(), Key: key, UploadId: uploadId }), { abortSignal });
     } catch (error) {
       throw storageError(error);
     }

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
 import { cn } from "./utils";
+import { cva } from "class-variance-authority";
+import { Slot } from "@radix-ui/react-slot";
 
 const variants = {
   primary: "bg-uno-red text-white shadow-[0_0_28px_rgba(239,35,60,.24)] hover:bg-[#ff334b]",
@@ -20,12 +22,16 @@ const sizes = {
   md: "h-11 px-5 text-sm",
   lg: "h-13 px-7 text-sm",
 } as const;
+const buttonVariants = cva("inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50", {
+  variants: { variant: variants, size: sizes }, defaultVariants: { variant: "primary", size: "md" },
+});
 
-export function Button({ className, variant = "primary", size = "md", type = "button", ...props }: SharedProps & ButtonHTMLAttributes<HTMLButtonElement>) {
+export function Button({ className, variant = "primary", size = "md", type = "button", asChild = false, ...props }: SharedProps & ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) {
+  const Component = asChild ? Slot : "button";
   return (
-    <button
-      type={type}
-      className={cn("inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50", variants[variant], sizes[size], className)}
+    <Component
+      {...(!asChild ? { type } : {})}
+      className={cn(buttonVariants({ variant, size }), className)}
       {...props}
     />
   );
@@ -35,7 +41,7 @@ export function ButtonLink({ className, variant = "primary", size = "md", childr
   return (
     <Link
       href={href}
-      className={cn("inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red focus-visible:ring-offset-2 focus-visible:ring-offset-black", variants[variant], sizes[size], className)}
+      className={cn(buttonVariants({ variant, size }), className)}
       {...props}
     >
       {children}
