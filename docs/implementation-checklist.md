@@ -20,7 +20,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 02 Design and landing:** UNO Red Noir identity,
   Manrope/Inter, complete responsive landing, accessible system components, and
   supported loading/empty/error states.
-- [ ] **NOT VERIFIED — 03 Authentication:** Better Auth flows, organizations,
+- [x] **CODE + AUTOMATED PASS — 03 Authentication:** Better Auth flows, organizations,
   membership/role enforcement, session security, onboarding, and tenant tests.
 - [ ] **NOT VERIFIED — 04 Upload:** private object upload, MIME/signature/size
   validation, plan limits, safe metadata, and no document contents in telemetry.
