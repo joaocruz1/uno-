@@ -1,7 +1,7 @@
 import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
 
 import { EngineError } from "./errors";
-import { DIMENSION_TOLERANCE_PT, isTemplateOuterFrame, PAGE_HEIGHT_PT, PAGE_WIDTH_PT } from "./template";
+import { isTemplateOuterFrame, supportedPageDimensions } from "./template";
 import type { Analysis, AnalyzedPage, Analyzer, PdfRect, TextEvidence } from "./types";
 
 type PdfTextItem = { str: string; width: number; height: number; transform: number[] };
@@ -22,8 +22,7 @@ function textBox(item: PdfTextItem): PdfRect {
 }
 
 function supportedDimensions(width: number, height: number): boolean {
-  return Math.abs(width - PAGE_WIDTH_PT) <= DIMENSION_TOLERANCE_PT &&
-    Math.abs(height - PAGE_HEIGHT_PT) <= DIMENSION_TOLERANCE_PT;
+  return supportedPageDimensions(width, height);
 }
 
 function multiply(first: Matrix, second: Matrix): Matrix {

@@ -5,6 +5,7 @@ import {
 } from "@/server/batch-uploads";
 import { processPendingBatchArchives } from "@/server/batches/archive";
 import { reconcilePendingBatches } from "@/server/batches";
+import { cleanupExpiredApiPreparations } from "@/server/api-ingestion";
 
 export type RunningBatchWorker = { close(): Promise<void> };
 
@@ -19,6 +20,7 @@ export function startBatchWorker(): RunningBatchWorker {
       await finalizePreparingBatchUploads();
       await cleanupExpiredBatchUploadSessions();
       await cleanupExpiredBatchStagingObjects();
+      await cleanupExpiredApiPreparations();
       await reconcilePendingBatches();
       await processPendingBatchArchives();
     } catch {

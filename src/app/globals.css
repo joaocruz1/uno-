@@ -67,6 +67,56 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
 .legal-copy p { margin-top: .75rem; }
 .legal-copy code, article code { color: #fda4af; font-size: .9em; }
 
+/* Landing motion and graphic elements */
+.reveal { transition: opacity .7s cubic-bezier(.22, 1, .36, 1), transform .7s cubic-bezier(.22, 1, .36, 1); }
+.reveal-pending { opacity: 0; transform: translateY(26px); }
+.grid-pan {
+  background-image: linear-gradient(rgba(255,255,255,.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  animation: grid-pan 14s linear infinite;
+}
+@keyframes grid-pan { to { background-position: 32px 32px; } }
+.corner-mark { position: absolute; z-index: 2; width: 14px; height: 14px; margin: -6px; border-left: 2px solid var(--uno-red); border-top: 2px solid var(--uno-red); pointer-events: none; }
+.live-dot { width: 6px; height: 6px; border-radius: 999px; background: var(--uno-red); box-shadow: 0 0 0 0 rgba(239,35,60,.7); animation: live-dot 1.8s ease-out infinite; }
+@keyframes live-dot { 70% { box-shadow: 0 0 0 8px rgba(239,35,60,0); } 100% { box-shadow: 0 0 0 0 rgba(239,35,60,0); } }
+.sheet-slot { transition: transform .9s cubic-bezier(.22, 1, .36, 1), opacity .6s; }
+.sheet-float { animation: sheet-float 6s ease-in-out infinite; }
+.sheet-float-late { animation-delay: -3s; }
+@keyframes sheet-float { 50% { translate: 0 -12px; } }
+.scan-beam { box-shadow: 0 0 22px 7px rgba(239,35,60,.55); animation: scan-beam 1.4s ease-in-out infinite alternate; }
+@keyframes scan-beam { to { translate: 0 250px; } }
+.drop-target { animation: drop-pulse 2.6s ease-in-out infinite; backdrop-filter: blur(4px); transition: background-color .25s, border-color .25s, color .25s; }
+@keyframes drop-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(239,35,60,.35); } 50% { box-shadow: 0 0 0 18px rgba(239,35,60,0); } }
+.label-rise { animation: label-rise .8s cubic-bezier(.22, 1, .36, 1) both; }
+@keyframes label-rise { from { opacity: 0; transform: translateY(24px) scale(.94); } }
+.hero-orb { position: absolute; z-index: 0; border-radius: 999px; filter: blur(70px); pointer-events: none; animation: orb-drift 16s ease-in-out infinite alternate; }
+@keyframes orb-drift { to { transform: translate3d(40px, -30px, 0) scale(1.15); } }
+.barcode-rain { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; mask-image: linear-gradient(to bottom, transparent, black 25%, black 60%, transparent); }
+.barcode-rain span { position: absolute; top: -30%; width: 46px; height: 130px; opacity: .07; background: repeating-linear-gradient(90deg, #fff 0 2px, transparent 2px 5px, #fff 5px 6px, transparent 6px 10px); animation: barcode-fall linear infinite; }
+@keyframes barcode-fall { to { transform: translateY(900px); } }
+.headline-sweep { background: linear-gradient(100deg, var(--uno-red) 0%, var(--uno-red) 40%, #ffb3bd 50%, var(--uno-red) 60%, var(--uno-red) 100%); background-size: 250% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: headline-sweep 5s ease-in-out infinite; }
+@keyframes headline-sweep { 0%, 35% { background-position: 100% 0; } 75%, 100% { background-position: 0 0; } }
+.marquee { mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent); }
+.marquee-track { animation: marquee 32s linear infinite; }
+.marquee:hover .marquee-track { animation-play-state: paused; }
+@keyframes marquee { to { transform: translateX(-100%); } }
+.step-line { position: absolute; left: 0; top: -1px; height: 2px; width: 100%; transform-origin: left; background: linear-gradient(90deg, var(--uno-red), transparent); animation: step-line 4.5s ease-in-out infinite; }
+@keyframes step-line { 0% { transform: scaleX(0); opacity: 1; } 60% { transform: scaleX(1); opacity: 1; } 100% { transform: scaleX(1); opacity: 0; } }
+.glow-card { position: relative; transition: transform .35s cubic-bezier(.22, 1, .36, 1), border-color .35s; }
+.glow-card::after { position: absolute; inset: 0; content: ""; pointer-events: none; opacity: 0; background: radial-gradient(420px circle at 20% 0%, rgba(239,35,60,.16), transparent 60%); transition: opacity .35s; }
+.glow-card:hover { transform: translateY(-4px); border-color: rgba(239,35,60,.45); }
+.glow-card:hover::after { opacity: 1; }
+.glow-card svg { transition: transform .35s cubic-bezier(.22, 1, .36, 1); }
+.glow-card:hover svg { transform: translateY(-3px) scale(1.12); }
+.batch-bar { animation: batch-bar 5s ease-in-out infinite; }
+@keyframes batch-bar { 0% { width: 8%; } 70%, 100% { width: 74%; } }
+.batch-row { animation: batch-row 5s ease-in-out infinite both; }
+@keyframes batch-row { 0%, 15% { opacity: .25; } 35%, 100% { opacity: 1; } }
+.zip-bob { animation: sheet-float 5s ease-in-out infinite; }
+.cta-pulse { animation: cta-pulse 6s ease-in-out infinite alternate; }
+@keyframes cta-pulse { from { opacity: .6; transform: scale(1); } to { opacity: 1; transform: scale(1.12); } }
+.ruler { background-image: repeating-linear-gradient(90deg, rgba(255,255,255,.28) 0 1px, transparent 1px 8px); height: 6px; }
+
 @media (max-width: 640px) {
   .page-shell { width: min(100% - 1.25rem, 1180px); }
   .label-sheet { padding: .55rem; }

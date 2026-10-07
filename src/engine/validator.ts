@@ -95,11 +95,13 @@ export class RenderedPdfValidator implements Validator {
         throw new EngineError("validation_failed");
       }
       if (layout.regions.some((region) => !insidePage(region.outputBox, layout.widthPt, layout.heightPt)) ||
-        layout.protectedCodes.some((code) => !insidePage(code.outputBox, layout.widthPt, layout.heightPt))) {
+        layout.protectedCodes.some((code) => !insidePage(code.outputBox, layout.widthPt, layout.heightPt)) ||
+        (layout.productHeader !== undefined && !insidePage(layout.productHeader.box, layout.widthPt, layout.heightPt))) {
         throw new EngineError("validation_failed");
       }
+      // The summarized fiscal page is represented by the strip, not by embedded regions.
       const uncoveredContent = layout.extraction.contentBoxes.some((content) =>
-        !layout.regions.some((region) => region.pageNumber === content.pageNumber &&
+        content.pageNumber !== layout.fiscalStrip?.pageNumber && !layout.regions.some((region) => region.pageNumber === content.pageNumber &&
           content.box.left >= region.box.left - 0.2 && content.box.right <= region.box.right + 0.2 &&
           content.box.bottom >= region.box.bottom - 0.2 && content.box.top <= region.box.top + 0.2),
       );
@@ -145,6 +147,10 @@ export class RenderedPdfValidator implements Validator {
               throw new EngineError("codes_unreadable");
             }
             if (inputValue !== outputValue) throw new EngineError("validation_failed");
+            // The printed fiscal data must describe the very key the barcode carries.
+            if (code.id === layout.fiscalStrip?.codeId && outputValue !== layout.fiscalStrip.summary.accessKey) {
+              throw new EngineError("validation_failed");
+            }
           }
         }
       } finally {

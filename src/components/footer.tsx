@@ -12,7 +12,7 @@ export function Footer() {
     <footer className="border-t border-white/[.07] bg-[#030303]">
       <div className="page-shell grid gap-12 py-14 md:grid-cols-[1.3fr_2fr]">
         <div>
-          <Link href="/" className="inline-flex items-center gap-3"><Image src="/uno.svg" width={30} height={30} alt="" /><span className="font-heading text-xl font-extrabold tracking-[-.05em]">UNO</span></Link>
+          <Link href="/" className="inline-flex items-center gap-3"><Image src="/uno-logo.png" width={780} height={256} alt="UNO — Duas páginas. Uma etiqueta." className="h-12 w-auto" /></Link>
           <p className="mt-4 max-w-xs text-sm leading-6 text-zinc-500">Etiquetas logísticas e DANFEs recompostas em uma página pronta para o seu fluxo de impressão.</p>
         </div>
         <div className="grid grid-cols-2 gap-8 sm:grid-cols-3">

@@ -18,7 +18,7 @@ eventos perdidos; não confiar em querystrings de retorno do Checkout.
 
 Preços e limites podem ser definidos por UNO_PLAN_<FREE|STARTER|PRO|BUSINESS>_
 PRICE_BRL_CENTS, MONTHLY_LIMIT, MAX_FILE_MB, BATCH_LIMIT, RETENTION_DAYS e RATE_LIMIT.
-Exemplo: UNO_PLAN_PRO_PRICE_BRL_CENTS=5900. Configuração inválida falha explicitamente;
+Exemplo: UNO_PLAN_PRO_PRICE_BRL_CENTS=4900. Configuração inválida falha explicitamente;
 os limites de segurança da engine e infraestrutura continuam aplicáveis.
 
 Mudanças dentro de um período não zeram contadores. A capacidade contábil pode

@@ -1,7 +1,7 @@
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { headers as nextHeaders } from "next/headers";
 
-import { getDb, memberships, organizations, subscriptions, user } from "@/db";
+import { getDb, memberships, organizations, subscriptions, user, type UnoDatabase } from "@/db";
 import { AppError } from "@/lib/errors";
 import { effectivePlanId } from "@/server/billing/entitlements";
 
@@ -10,11 +10,15 @@ import { ensureDefaultOrganization } from "./organization";
 
 export const SELECTED_ORGANIZATION_COOKIE = "uno_selected_organization";
 
-export type Actor = {
+/** Verified identity. It carries no organization authorization by itself. */
+export type Identity = {
   userId: string;
   email: string;
   name: string;
   platformRole: "USER" | "ADMIN";
+};
+
+export type Actor = Identity & {
   organizationId: string;
   organizationName: string;
   membershipRole: "OWNER" | "ADMIN" | "MEMBER";
@@ -40,7 +44,13 @@ async function requestHeaders(provided?: Headers): Promise<Headers> {
   return provided ?? nextHeaders();
 }
 
-export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
+/**
+ * Authenticates a verified identity without requiring any organization.
+ * Listing, switching and creating organizations and accepting invitations use
+ * it so a removed member can still recover. The platform role is re-read from
+ * the database on every request.
+ */
+export async function requireIdentity(providedHeaders?: Headers, database: UnoDatabase = getDb()): Promise<Identity> {
   const incomingHeaders = await requestHeaders(providedHeaders);
   let authSession: Awaited<ReturnType<ReturnType<typeof getAuth>["api"]["getSession"]>>;
   try {
@@ -54,19 +64,30 @@ export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
     throw new AppError("email_not_verified", "Confirme seu e-mail antes de continuar.", 403);
   }
 
-  const database = getDb();
-  try {
-    await ensureDefaultOrganization({ id: authSession.user.id, name: authSession.user.name }, database);
-  } catch {
-    throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
-  }
+  const rows = await database.select({ email: user.email, name: user.name, emailVerified: user.emailVerified, platformRole: user.platformRole })
+    .from(user).where(eq(user.id, authSession.user.id)).limit(1);
+  const current = rows[0];
+  if (!current) throw new AppError("unauthorized", "Autenticação necessária.", 401);
+  if (!current.emailVerified) throw new AppError("email_not_verified", "Confirme seu e-mail antes de continuar.", 403);
+  return { userId: authSession.user.id, email: current.email, name: current.name, platformRole: current.platformRole };
+}
 
-  const selected = cookieValue(incomingHeaders.get("cookie"), SELECTED_ORGANIZATION_COOKIE);
-  const selectedOrganizationId = isUuid(selected) ? selected : undefined;
-  const filters = [eq(memberships.userId, authSession.user.id)];
-  if (selectedOrganizationId) filters.push(eq(memberships.organizationId, selectedOrganizationId));
+/** Reads the selected-organization preference. It is never an authorization. */
+export function selectedOrganizationPreference(headers: Headers): string | undefined {
+  const selected = cookieValue(headers.get("cookie"), SELECTED_ORGANIZATION_COOKIE);
+  return isUuid(selected) ? selected : undefined;
+}
 
-  const rows = await database
+/**
+ * Resolves the organization the identity currently works in. The cookie is a
+ * preference only: when it points to an organization the user no longer
+ * belongs to, the oldest current membership is used instead.
+ */
+export async function resolveActor(identity: Identity, preferredOrganizationId: string | undefined, database: UnoDatabase = getDb()): Promise<Actor> {
+  const preference = preferredOrganizationId
+    ? sql`case when ${memberships.organizationId} = ${preferredOrganizationId} then 0 else 1 end`
+    : sql`1`;
+  const load = () => database
     .select({
       organizationId: organizations.id,
       organizationName: organizations.name,
@@ -75,26 +96,32 @@ export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
       subscriptionStatus: subscriptions.status,
       currentPeriodStart: subscriptions.currentPeriodStart,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
-      platformRole: user.platformRole,
     })
     .from(memberships)
     .innerJoin(organizations, eq(organizations.id, memberships.organizationId))
-    .innerJoin(user, eq(user.id, memberships.userId))
     .leftJoin(subscriptions, eq(subscriptions.organizationId, organizations.id))
-    .where(and(...filters))
-    .orderBy(asc(memberships.createdAt))
+    .where(eq(memberships.userId, identity.userId))
+    .orderBy(preference, asc(memberships.createdAt), asc(memberships.organizationId))
     .limit(1);
 
-  const membership = rows[0];
+  let membership = (await load())[0];
   if (!membership) {
-    throw new AppError(selectedOrganizationId ? "not_found" : "forbidden", selectedOrganizationId ? "Organização não encontrada." : "Acesso negado.", selectedOrganizationId ? 404 : 403);
+    // Only reached without any membership. Provisioning is a no-op when the
+    // personal organization already existed, so nothing is ever restored.
+    let created: string | null;
+    try {
+      created = await ensureDefaultOrganization({ id: identity.userId, name: identity.name }, database);
+    } catch {
+      throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    }
+    if (created) membership = (await load())[0];
+  }
+  if (!membership) {
+    throw new AppError("organization_required", "Você não participa de nenhuma organização.", 403);
   }
 
   return {
-    userId: authSession.user.id,
-    email: authSession.user.email,
-    name: authSession.user.name,
-    platformRole: membership.platformRole,
+    ...identity,
     organizationId: membership.organizationId,
     organizationName: membership.organizationName,
     membershipRole: membership.membershipRole,
@@ -107,15 +134,31 @@ export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
   };
 }
 
+export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
+  const incomingHeaders = await requestHeaders(providedHeaders);
+  const database = getDb();
+  const identity = await requireIdentity(incomingHeaders, database);
+  return resolveActor(identity, selectedOrganizationPreference(incomingHeaders), database);
+}
+
 function configuredAdminEmails(): ReadonlySet<string> {
   return new Set((process.env.ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
 }
 
+/** Platform administration needs BOTH the stored role and the operational allowlist. */
+export function isPlatformAdmin(identity: Pick<Identity, "email" | "platformRole">): boolean {
+  return identity.platformRole === "ADMIN" && configuredAdminEmails().has(identity.email.trim().toLowerCase());
+}
+
 export async function requireAdmin(providedHeaders?: Headers): Promise<Actor> {
   const actor = await requireActor(providedHeaders);
-  const allowedByEnvironment = configuredAdminEmails().has(actor.email.toLowerCase());
-  if (actor.platformRole !== "ADMIN" || !allowedByEnvironment) {
-    throw new AppError("forbidden", "Acesso negado.", 403);
-  }
+  if (!isPlatformAdmin(actor)) throw new AppError("forbidden", "Acesso negado.", 403);
   return actor;
+}
+
+/** Same rule as requireAdmin, without depending on any organization membership. */
+export async function requirePlatformAdmin(providedHeaders?: Headers): Promise<Identity> {
+  const identity = await requireIdentity(providedHeaders);
+  if (!isPlatformAdmin(identity)) throw new AppError("forbidden", "Acesso negado.", 403);
+  return identity;
 }

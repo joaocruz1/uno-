@@ -1,6 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import { getDb, templates, type UnoDatabase } from "@/db";
+import { listTemplateDefinitions } from "@/engine/templates";
 import { ENGINE_VERSION, TEMPLATE_KEY, TEMPLATE_VERSION } from "@/engine/types";
 import { allowDraftTemplates } from "@/lib/env";
 import { AppError } from "@/lib/errors";
@@ -13,17 +14,21 @@ export const INITIAL_TEMPLATE = `${TEMPLATE_KEY}@${TEMPLATE_VERSION}`;
 type TemplateRow = typeof templates.$inferSelect;
 export type TemplateEligibility = Pick<TemplateRow, "engineVersion" | "status" | "definition" | "releasedAt">;
 
+/** Development only: registers every engine layout as a draft so it can be exercised before release. */
 export async function seedInitialDraftTemplate(database: Pick<UnoDatabase, "insert"> = getDb()): Promise<void> {
   if (process.env.NODE_ENV === "production") return;
-  await database.insert(templates).values({
-    id: INITIAL_TEMPLATE_ID,
-    key: TEMPLATE_KEY,
-    version: TEMPLATE_VERSION,
-    displayName: "Mercado Livre",
-    engineVersion: ENGINE_VERSION,
-    status: "DRAFT",
-    definition: { releasedSizes: [] },
-  }).onConflictDoNothing({ target: [templates.key, templates.version] });
+  for (const definition of listTemplateDefinitions()) {
+    const initial = definition.key === TEMPLATE_KEY && definition.version === TEMPLATE_VERSION;
+    await database.insert(templates).values({
+      ...(initial ? { id: INITIAL_TEMPLATE_ID } : {}),
+      key: definition.key,
+      version: definition.version,
+      displayName: definition.displayName,
+      engineVersion: ENGINE_VERSION,
+      status: "DRAFT",
+      definition: { releasedSizes: [] },
+    }).onConflictDoNothing({ target: [templates.key, templates.version] });
+  }
 }
 
 export function parseTemplateReference(value = INITIAL_TEMPLATE): { key: string; version: string } {

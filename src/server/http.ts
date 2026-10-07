@@ -41,7 +41,7 @@ export function errorResponse(error: unknown, id = requestId()): Response {
   };
   const headers: Record<string, string> = { "cache-control": "no-store" };
   const retryAfterSeconds = appError.details?.retryAfterSeconds;
-  if (appError.status === 429 && typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds)) {
+  if ((appError.status === 429 || appError.status === 409) && typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds)) {
     headers["retry-after"] = String(Math.max(1, Math.ceil(retryAfterSeconds)));
   }
   return Response.json(body, { status: appError.status, headers });

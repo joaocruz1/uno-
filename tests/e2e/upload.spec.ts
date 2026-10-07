@@ -38,4 +38,17 @@ test("private dashboard conversion validates, processes and downloads a syntheti
   expect((await download).suggestedFilename()).toMatch(/^uno-[0-9a-f-]+\.pdf$/);
   await expect(page.getByRole("link", { name: "Imprimir", exact: true })).toHaveAttribute("target", "_blank");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+
+  // Compact format: product header + label + summarized DANFE on the default 100 x 150 mm.
+  await page.getByRole("button", { name: "Nova conversão", exact: true }).click();
+  await page.getByLabel("100 × 150 mm", { exact: false }).check();
+  await page.getByLabel("Produto", { exact: true }).fill("Produto sintetico de teste");
+  await page.getByLabel("Qtd.", { exact: true }).fill("2");
+  await page.getByLabel("SKU", { exact: true }).fill("SKU-SINTETICO-01");
+  await page.getByLabel("Variação", { exact: true }).fill("Cor: Verde");
+  await page.getByLabel("Selecionar arquivo PDF", { exact: true }).setInputFiles({
+    name: "synthetic-fiscal.pdf", mimeType: "application/pdf", buffer: Buffer.from(await syntheticPdf({ fiscalSummary: true })),
+  });
+  await expect(page.getByText("Duas páginas. Uma etiqueta.", { exact: true })).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("100 × 150 mm", { exact: false }).first()).toBeVisible();
 });

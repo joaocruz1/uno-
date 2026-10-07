@@ -40,7 +40,7 @@ class FakeProvider implements BillingProvider {
 
   async createCustomer() { return { id: "cus_org" }; }
   async retrievePrice(priceId: string) {
-    return { id: priceId, active: true, currency: "brl", unitAmount: 5_900, recurringInterval: "month", recurringIntervalCount: 1 };
+    return { id: priceId, active: true, currency: "brl", unitAmount: 4_900, recurringInterval: "month", recurringIntervalCount: 1 };
   }
   async createCheckout(input: Parameters<BillingProvider["createCheckout"]>[0], idempotencyKey: string) {
     this.checkoutCalls.push({ input, idempotencyKey });
@@ -57,7 +57,7 @@ class FakeProvider implements BillingProvider {
 
 async function migrate() {
   const directory = fileURLToPath(new URL("../drizzle", import.meta.url));
-  const names = (await readdir(directory)).filter((name) => /^000[0-6]_.*\.sql$/.test(name)).sort();
+  const names = (await readdir(directory)).filter((name) => /^\d{4}_.*\.sql$/.test(name)).sort();
   for (const name of names) {
     const migration = await readFile(`${directory}/${name}`, "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) if (statement.trim()) await pglite.exec(statement);

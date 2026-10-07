@@ -1,0 +1,16 @@
+.git
+.github
+.next
+.tmp
+node_modules
+coverage
+test-results
+playwright-report
+output
+tests
+docs
+specs
+.env*
+!.env.example
+*.tsbuildinfo
+public/pdfjs

@@ -108,3 +108,37 @@ single quota reservation. An internal retry reuses the conversion, pinned
 versions, and reservation. Logs, traces, and metrics include identifiers,
 states, versions, and timings only; never document bytes, rendered pages, OCR
 text, decoded code values, addresses, tax data, or names.
+
+# Amendment 2026-10-07 — compact fiscal strip (product owner decision)
+
+The product owner requires the output to match the common marketplace
+"etiqueta + DANFE simplificada" format on one 100 × 150 mm label. This amends
+the whitespace/region rules above for templates that declare `compactFiscal`:
+
+- When the fiscal page is **digital** and its operation type, number, series,
+  issue date and 44-digit access key are read exactly from PDF text — and the
+  series and number printed agree with those embedded in the key — the output is
+  the logistics regions followed by a strip: title bar "DANFE SIMPLIFICADA -
+  ETIQUETA", one line (Tipo, NF, Série, Emissão), the **original** access-key
+  barcode (full width, a central horizontal band) and the key digits. Other
+  fiscal-page content (protocol, issuer/recipient lines, additional
+  information) is intentionally not reproduced.
+- The logistics regions stay at original scale when they fit and may shrink
+  uniformly down to 85 %; below that the conversion fails `format_too_small`.
+- The validator still decodes every code at 203/300 dpi, compares input and
+  output, and additionally requires the strip barcode to equal the printed key.
+- Scanned fiscal pages, or any doubt in the fields, keep the previous behavior
+  (all regions embedded, no summarization). OCR text is never printed.
+
+Whether the summarized strip is acceptable in place of the full simplified
+DANFE for a given operation is a fiscal/compliance decision of the operator and
+is **NOT VERIFIED** here; physical print proof remains required per size.
+
+## Product header (same amendment)
+
+`ConversionRequest` may carry `product { quantity, title, sku?, variation? }`
+supplied by the caller. The layout reserves a dashed box above the logistics
+regions. When present in compact mode, blank bands above and below each
+logistics region's real content are trimmed and the label may shrink uniformly
+down to 80 %; below that the conversion fails `format_too_small`. Code
+equivalence is still decoded at 203 and 300 dpi on every output.

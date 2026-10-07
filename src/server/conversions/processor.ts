@@ -15,15 +15,15 @@ import {
 import { confirmUsage, releaseUsage } from "@/db/usage";
 import { EngineError } from "@/engine/errors";
 import { convertPdfIsolated } from "@/engine/isolated";
+import { findTemplateDefinition } from "@/engine/templates";
 import {
   ENGINE_VERSION,
-  TEMPLATE_KEY,
-  TEMPLATE_VERSION,
   type ConversionResult,
   type OutputSize,
   type ProgressEvent,
 } from "@/engine/types";
 import { outputSizeSchema } from "@/lib/label-size";
+import type { ProductHeader } from "@/lib/product-header";
 import { getStorage, type StorageGateway } from "@/server/storage";
 
 import { assertTemplateEligible, type TemplateEligibility } from "./templates";
@@ -41,6 +41,7 @@ export type ClaimRow = {
   outputPreset: string;
   outputWidthMm: string;
   outputHeightMm: string;
+  productHeader?: ProductHeader | null;
   templateKey: string;
   templateVersion: string;
   engineVersion: string;
@@ -69,6 +70,7 @@ export type ProcessorDependencies = {
     size: OutputSize,
     template: string,
     onProgress: (event: ProgressEvent) => Promise<void>,
+    options?: { product?: ProductHeader },
   ): Promise<ConversionResult>;
   randomId(): string;
   now(): Date;
@@ -107,6 +109,7 @@ export async function claimConversion(conversionId: string, token: string, depen
       outputPreset: conversions.outputPreset,
       outputWidthMm: conversions.outputWidthMm,
       outputHeightMm: conversions.outputHeightMm,
+      productHeader: conversions.productHeader,
       templateKey: templates.key,
       templateVersion: conversions.templateVersion,
       engineVersion: conversions.engineVersion,
@@ -280,7 +283,7 @@ export function assertProcessingClaimSupported(claim: ClaimRow): void {
       "A versão do processador desta conversão não está disponível.",
     );
   }
-  if (claim.templateKey !== TEMPLATE_KEY || claim.templateVersion !== TEMPLATE_VERSION) {
+  if (!findTemplateDefinition(claim.templateKey, claim.templateVersion)) {
     throw new ProcessingContractError(
       "unsupported_template_version",
       "A versão do modelo desta conversão não está disponível.",
@@ -561,6 +564,7 @@ export async function processConversion(conversionId: string, dependencies: Proc
         if (claimLost) throw new Error("conversion_claim_lost");
         await persistProgress(claim, event, dependencies);
       },
+      claim.productHeader ? { product: claim.productHeader } : {},
     );
     assertEngineResultMatchesClaim(claim, result);
     if (claimLost || !await stillOwnsClaim(claim, dependencies)) return;

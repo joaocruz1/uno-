@@ -14,8 +14,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   EngineError,
-  MercadoLivreDetector,
-  MercadoLivreExtractor,
+  TemplateDetector,
+  TemplateExtractor,
   PdfAnalyzer,
   RenderedPdfValidator,
   SafeLayoutEngine,
@@ -68,8 +68,8 @@ describe("UNO PDF engine pipeline", () => {
   it("fails validation when a non-code fiscal region is removed from otherwise valid output", async () => {
     const input = await syntheticPdf();
     const analysis = await new PdfAnalyzer().analyze(input);
-    const detection = await new MercadoLivreDetector().detect(analysis);
-    const extraction = await new MercadoLivreExtractor().extract(analysis, detection);
+    const detection = await new TemplateDetector().detect(analysis);
+    const extraction = await new TemplateExtractor().extract(analysis, detection);
     const layout = await new SafeLayoutEngine().layout(extraction, SAFE_OUTPUT);
     const composed = await new VectorPdfComposer().compose(layout);
     const tampered = await PDFDocument.load(composed.bytes);
@@ -100,8 +100,8 @@ describe("UNO PDF engine pipeline", () => {
     const bytes = await source.save();
     const analysis = await new PdfAnalyzer().analyze(bytes);
     expect(analysis.pages[1].pathBoxes).toContainEqual({ left: 20, bottom: 170, right: 40, top: 180 });
-    const detection = await new MercadoLivreDetector().detect(analysis);
-    const extraction = await new MercadoLivreExtractor().extract(analysis, detection);
+    const detection = await new TemplateDetector().detect(analysis);
+    const extraction = await new TemplateExtractor().extract(analysis, detection);
     expect(extraction.regions.some((region) => region.pageNumber === 2 &&
       region.box.left <= 20 && region.box.right >= 40 && region.box.bottom <= 170 && region.box.top >= 180)).toBe(true);
     const result = await convertPdf(bytes, SAFE_OUTPUT);
@@ -121,8 +121,8 @@ describe("UNO PDF engine pipeline", () => {
     expect(analysis.pages[1].pathBoxes.some((box) =>
       Math.abs(box.left - 20) < 0.01 && Math.abs(box.bottom - 170) < 0.01 &&
       Math.abs(box.right - 40) < 0.01 && Math.abs(box.top - 180) < 0.01)).toBe(true);
-    const detection = await new MercadoLivreDetector().detect(analysis);
-    const extraction = await new MercadoLivreExtractor().extract(analysis, detection);
+    const detection = await new TemplateDetector().detect(analysis);
+    const extraction = await new TemplateExtractor().extract(analysis, detection);
     expect(extraction.regions.some((region) => region.pageNumber === 2 &&
       region.box.left <= 20 && region.box.right >= 40 && region.box.bottom <= 170 && region.box.top >= 180)).toBe(true);
     const result = await convertPdf(bytes, SAFE_OUTPUT);

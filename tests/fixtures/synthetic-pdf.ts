@@ -23,6 +23,8 @@ export const SYNTHETIC_CODES = {
   logisticsBarcode: "SYNTH-001",
   logisticsQr: "https://example.invalid/synthetic/uno/001",
   danfeBarcode: "35100100000000000000",
+  /** Synthetic 44-digit access key: series 001, number 000000123. */
+  danfeAccessKey: "35261000000000000000550010000001231000000000",
 } as const;
 
 export type SyntheticPdfOptions = {
@@ -32,6 +34,8 @@ export type SyntheticPdfOptions = {
   unknown?: boolean;
   additionalInformation?: boolean;
   scanned?: boolean;
+  /** Prints the simplified DANFE header fields and a 44-digit key barcode. */
+  fiscalSummary?: boolean;
 };
 
 function yFromTop(top: number, fontSize: number): number {
@@ -60,7 +64,7 @@ function drawStructuralOuterFrame(page: PDFPage) {
   );
 }
 
-async function barcode(document: PDFDocument, text: string, width: number): Promise<PDFImage> {
+async function barcode(document: PDFDocument, text: string, width: number, paddingwidth = 16): Promise<PDFImage> {
   const png = await bwipjs.toBuffer({
     bcid: "code128",
     text,
@@ -68,17 +72,17 @@ async function barcode(document: PDFDocument, text: string, width: number): Prom
     height: 14,
     width,
     includetext: false,
-    paddingwidth: 16,
+    paddingwidth,
     paddingheight: 8,
     backgroundcolor: "FFFFFF",
   });
   return document.embedPng(png);
 }
 
-async function codeImages(document: PDFDocument) {
+async function codeImages(document: PDFDocument, fiscalSummary = false) {
   const [logistics, danfe, qr] = await Promise.all([
     barcode(document, SYNTHETIC_CODES.logisticsBarcode, 60),
-    barcode(document, SYNTHETIC_CODES.danfeBarcode, 80),
+    fiscalSummary ? barcode(document, SYNTHETIC_CODES.danfeAccessKey, 80, 3) : barcode(document, SYNTHETIC_CODES.danfeBarcode, 80),
     QRCode.toBuffer(SYNTHETIC_CODES.logisticsQr, { type: "png", width: 400, margin: 4, errorCorrectionLevel: "M" })
       .then((bytes) => document.embedPng(bytes)),
   ]);
@@ -113,10 +117,18 @@ async function drawDanfe(document: PDFDocument, page: PDFPage, options: Syntheti
   drawStructuralOuterFrame(page);
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
-  const images = await codeImages(document);
+  const images = await codeImages(document, options.fiscalSummary);
   const title = options.unknown ? "DOCUMENTO FISCAL SINTETICO" : "DANFE";
   const key = options.unknown ? "REFERENCIA NUMERICA" : "CHAVE DE ACESSO";
-  drawText(page, key, 8, 7, regular);
+  drawText(page, key, 8, 7, regular, options.fiscalSummary ? 141 : 9);
+  if (options.fiscalSummary) {
+    drawText(page, "1 - Saida", 10, 5, regular, 20);
+    drawText(page, "Numero", 17, 5, regular, 20);
+    drawText(page, "123/Serie 1", 17, 5, regular, 43);
+    drawText(page, "Emissao", 24, 5, regular, 20);
+    drawText(page, "06/10/2026", 24, 5, regular, 43);
+    drawText(page, SYNTHETIC_CODES.danfeAccessKey, 18, 5, regular, 111);
+  }
   page.drawImage(images.danfe, { x: 20.126, y: 312.0384, width: 226.7717, height: 56.6929 });
   drawText(page, "REMETENTE DE TESTE - CNPJ 00.000.000/0000-00", 132, 6.5, regular);
   drawText(page, "DESTINATARIO TESTE SINTETICO", 160, 6.5, regular);

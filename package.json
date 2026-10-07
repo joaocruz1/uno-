@@ -20,6 +20,8 @@
     "test:e2e": "playwright test",
     "check": "node scripts/verify-phase.mjs",
     "dev:s3": "node --env-file-if-exists=.env.local scripts/local-s3.mjs",
+    "stripe:setup": "node --import tsx scripts/stripe-setup.ts",
+    "admin:local": "node --env-file-if-exists=.env.local --import tsx scripts/create-local-admin.ts",
     "proof:print": "node --env-file-if-exists=.env.local --import tsx scripts/generate-print-proof.ts"
   },
   "dependencies": {
@@ -36,6 +38,7 @@
     "archiver": "^8.0.0",
     "better-auth": "^1.7.7",
     "bullmq": "^6.3.11",
+    "busboy": "^1.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "drizzle-orm": "^0.45.3",
@@ -61,6 +64,7 @@
     "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/archiver": "^8.0.0",
+    "@types/busboy": "^1.5.4",
     "@types/bwip-js": "^4.0.0",
     "@types/node": "^26.6.4",
     "@types/nodemailer": "^8.0.2",

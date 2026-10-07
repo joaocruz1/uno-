@@ -15,7 +15,7 @@ export function Navbar() {
     <header className="fixed inset-x-0 top-4 z-40 px-4">
       <nav className="mx-auto flex h-16 max-w-5xl items-center justify-between rounded-full border border-white/10 bg-black/70 px-4 shadow-[0_12px_50px_rgba(0,0,0,.45)] backdrop-blur-xl" aria-label="Navegação principal">
         <Link href="/" className="flex items-center gap-2.5 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red">
-          <Image src="/uno.svg" width={28} height={28} alt="" priority />
+          <Image src="/uno-icon.png" width={28} height={28} alt="" priority />
           <span className="font-heading text-lg font-extrabold tracking-[-.05em]">UNO</span>
         </Link>
         <div className="hidden items-center gap-1 md:flex">

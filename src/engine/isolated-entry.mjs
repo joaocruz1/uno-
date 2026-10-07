@@ -45,6 +45,7 @@ async function run(message) {
       message.size,
       typeof message.selectedTemplate === "string" ? message.selectedTemplate : undefined,
       async (event) => send({ type: "progress", event }),
+      message.product && typeof message.product === "object" ? { product: message.product } : {},
     );
     await send({ type: "result", result });
   } catch (error) {

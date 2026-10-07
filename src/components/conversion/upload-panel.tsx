@@ -13,6 +13,7 @@ import { useRef, useState, type DragEvent } from "react";
 
 import { Button, Input, Progress } from "@/components/ui";
 import { outputSizeSchema, type OutputSize } from "@/lib/label-size";
+import { productHeaderSchema, type ProductHeader } from "@/lib/product-header";
 
 const PDF_CONTENT_TYPE = "application/pdf";
 const MEBIBYTE = 1_024 * 1_024;
@@ -39,6 +40,7 @@ export type UploadedFile = {
   fileSize: number;
   checksumSha256?: string;
   output: OutputSize;
+  product?: ProductHeader;
 };
 
 export type UploadPanelProps = {
@@ -130,6 +132,10 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
   const [preset, setPreset] = useState<OutputPreset>("100x150");
   const [customWidth, setCustomWidth] = useState("100");
   const [customHeight, setCustomHeight] = useState("150");
+  const [productTitle, setProductTitle] = useState("");
+  const [productSku, setProductSku] = useState("");
+  const [productVariation, setProductVariation] = useState("");
+  const [productQuantity, setProductQuantity] = useState("1");
   const busy = phase === "preparing" || phase === "requesting" || phase === "uploading";
   const maxBytes = maxFileMB * MEBIBYTE;
 
@@ -179,6 +185,17 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
     try {
       const chosenOutput = outputSizeSchema.safeParse(currentOutput());
       if (!chosenOutput.success) throw new Error("Informe largura entre 50 e 210 mm e altura entre 50 e 300 mm.");
+      let chosenProduct: ProductHeader | undefined;
+      if (productTitle.trim() || productSku.trim() || productVariation.trim()) {
+        const parsedProduct = productHeaderSchema.safeParse({
+          quantity: Number(productQuantity),
+          title: productTitle,
+          ...(productSku.trim() ? { sku: productSku } : {}),
+          ...(productVariation.trim() ? { variation: productVariation } : {}),
+        });
+        if (!parsedProduct.success) throw new Error("Para imprimir o produto, informe o nome e uma quantidade de 1 a 9999.");
+        chosenProduct = parsedProduct.data;
+      }
       setPhase("preparing");
       const { checksumSha256 } = await inspectPdf(nextFile);
       if (operationRef.current !== operation) return;
@@ -211,6 +228,7 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
         fileSize: nextFile.size,
         checksumSha256,
         output: chosenOutput.data,
+        ...(chosenProduct ? { product: chosenProduct } : {}),
       };
       activeRequestRef.current = null;
       setProgress(100);
@@ -356,6 +374,17 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
             <p className="col-span-2 text-[11px] leading-5 text-zinc-600">Largura de 50 a 210 mm e altura de 50 a 300 mm.</p>
           </div>
         ) : null}
+
+        <fieldset className="mt-6 border-t border-white/[.07] pt-5" disabled={busy || phase === "uploaded"}>
+          <legend className="font-heading text-sm font-semibold text-zinc-200">Produto no topo da etiqueta <span className="font-normal text-zinc-600">(opcional)</span></legend>
+          <p className="mt-2 text-[11px] leading-5 text-zinc-600">Preencha antes de selecionar o PDF para imprimir quantidade, produto e SKU acima da etiqueta. O arquivo não traz esses dados.</p>
+          <div className="mt-3 grid grid-cols-4 gap-3">
+            <label className="col-span-3 text-xs text-zinc-500">Produto<Input className="mt-2" maxLength={140} value={productTitle} onChange={(event) => setProductTitle(event.currentTarget.value)} /></label>
+            <label className="text-xs text-zinc-500">Qtd.<Input className="mt-2" type="number" min={1} max={9999} step={1} value={productQuantity} onChange={(event) => setProductQuantity(event.currentTarget.value)} /></label>
+            <label className="col-span-2 text-xs text-zinc-500">SKU<Input className="mt-2" maxLength={60} value={productSku} onChange={(event) => setProductSku(event.currentTarget.value)} /></label>
+            <label className="col-span-2 text-xs text-zinc-500">Variação<Input className="mt-2" maxLength={60} placeholder="Cor: Verde" value={productVariation} onChange={(event) => setProductVariation(event.currentTarget.value)} /></label>
+          </div>
+        </fieldset>
 
         <div className="mt-7 flex gap-3 border-t border-white/[.07] pt-5 text-xs leading-5 text-zinc-500">
           <ShieldCheck className="mt-0.5 shrink-0 text-uno-red" size={17} />

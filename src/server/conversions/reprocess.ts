@@ -40,6 +40,7 @@ type SourceConversion = {
   sourceByteLength: number;
   artifactsExpireAt: Date | null;
   outputPreset: string;
+  productHeader?: { quantity: number; title: string; sku?: string; variation?: string } | null;
   outputWidthMm: string;
   outputHeightMm: string;
   templateKey: string;
@@ -170,6 +171,7 @@ async function loadSource(
     sourceByteLength: conversions.sourceByteLength,
     artifactsExpireAt: conversions.artifactsExpireAt,
     outputPreset: conversions.outputPreset,
+    productHeader: conversions.productHeader,
     outputWidthMm: conversions.outputWidthMm,
     outputHeightMm: conversions.outputHeightMm,
     templateKey: templates.key,
@@ -334,6 +336,7 @@ export async function commitReprocessedConversion(input: CommitInput, database: 
       progress: 0,
       currentStage: "queued",
       outputPreset: input.request.size.preset,
+      productHeader: source.productHeader ?? null,
       outputWidthMm: String(dimensions.widthMm),
       outputHeightMm: String(dimensions.heightMm),
       inputObjectKey: input.snapshotKey,

@@ -13,36 +13,35 @@ export function defaultOrganizationName(name: string): string {
 }
 
 /**
- * Repairs or creates the deterministic personal organization for a user.
- * One SQL statement keeps organization, owner membership and free subscription
- * atomic. A paid subscription is never downgraded during a repair.
+ * Creates the deterministic personal organization for a user exactly once.
+ * The organization id equals the user id, so its existence is the durable
+ * marker that provisioning already happened. Later calls are no-ops: they
+ * never restore a removed membership, never elevate a role and never touch an
+ * existing subscription. Returns the organization id only when it was created.
  */
 export async function ensureDefaultOrganization(
   member: ProvisionedUser,
   database: Pick<UnoDatabase, "execute"> = getDb(),
-): Promise<string> {
+): Promise<string | null> {
   const subscriptionId = crypto.randomUUID();
   const result = await database.execute(sql`
-    with ensured_organization as (
+    with created_organization as (
       insert into organizations (id, name, slug, owner_user_id)
       values (${member.id}, ${defaultOrganizationName(member.name)}, ${`org-${member.id}`}, ${member.id})
-      on conflict (id) do update
-        set updated_at = organizations.updated_at
-        where organizations.owner_user_id = excluded.owner_user_id
+      on conflict do nothing
       returning id
-    ), ensured_membership as (
+    ), created_membership as (
       insert into memberships (organization_id, user_id, role)
-      select id, ${member.id}, 'OWNER'::membership_role from ensured_organization
-      on conflict (organization_id, user_id) do update set role = 'OWNER', updated_at = now()
-    ), ensured_subscription as (
+      select id, ${member.id}, 'OWNER'::membership_role from created_organization
+      on conflict do nothing
+    ), created_subscription as (
       insert into subscriptions (id, organization_id, plan_id, status)
-      select ${subscriptionId}, id, 'FREE'::plan_id, 'ACTIVE'::subscription_status from ensured_organization
-      on conflict (organization_id) do nothing
+      select ${subscriptionId}, id, 'FREE'::plan_id, 'ACTIVE'::subscription_status from created_organization
+      on conflict do nothing
     )
-    select id as organization_id from ensured_organization
+    select id as organization_id from created_organization
   `);
 
   const row = result.rows[0] as { organization_id?: string } | undefined;
-  if (!row?.organization_id) throw new Error("Default organization could not be provisioned");
-  return row.organization_id;
+  return row?.organization_id ?? null;
 }

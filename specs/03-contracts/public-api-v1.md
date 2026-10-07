@@ -153,3 +153,12 @@ Use `401` for invalid/missing keys, `403` for plan or scope denial, `404` for an
 absent or other-organization resource, `413` for file size, `422` for validly
 encoded but unprocessable input, and `5xx` only for service failures. Logs and
 errors must not contain document bytes or extracted personal/fiscal values.
+
+# Amendment 2026-10-07 — optional product header
+
+`POST /api/v1/conversions` additionally accepts `productTitle` (required when
+any product field is present, ≤ 140 chars), `quantity` (integer 1–9999, default
+1), `sku` and `variation` (≤ 60 chars each). They are printed in a picking box
+above the label, are never derived from the document, and participate in the
+idempotency fingerprint. Invalid values return `400 invalid_request`.
+`POST /api/v1/batches` rejects these fields. The addition is backward compatible.

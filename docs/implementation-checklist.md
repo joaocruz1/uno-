@@ -39,23 +39,26 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 09 Stripe:** monthly plans and configurable limits,
   Checkout, Customer Portal, idempotent events, reconciliation, entitlements,
   and no overage/watermark behavior.
-- [ ] **NOT VERIFIED — 10 Public API:** all `/api/v1` contract routes, hashed
+- [x] **CODE + AUTOMATED PASS — 10 Public API:** all `/api/v1` contract routes, hashed
   show-once Bearer keys, idempotency, organization scope, Pro/Business access,
   per-plan rate limits, and cURL/JavaScript/Node/Python documentation.
-- [ ] **NOT VERIFIED — 11 Webhooks:** dashboard endpoint management, show-once
+- [x] **CODE + AUTOMATED PASS — 11 Webhooks:** dashboard endpoint management, show-once
   secret, exact-body HMAC-SHA-256 signatures, three event types, deduplication,
   delivery history, and retries at 1m/5m/30m/2h/12h.
-- [ ] **NOT VERIFIED — 12 Administration:** authorized support/admin views for
+- [x] **CODE + AUTOMATED PASS — 12 Administration:** authorized support/admin views for
   organizations, subscriptions, usage, conversions, failures, jobs, and template
   releases with auditability and no document-content exposure.
-- [ ] **NOT VERIFIED — 13 Security:** tenant-isolation tests, least privilege,
+- [x] **CODE + AUTOMATED PASS — 13 Security:** tenant-isolation tests, least privilege,
   input hardening, secret redaction, private R2 policy, signed URL expiry, key
   hashing/revocation, webhook replay controls, dependency review, and retention
   cleanup.
-- [ ] **NOT VERIFIED — 14 QA:** lint, strict typecheck, unit/integration/E2E,
+- [ ] **PARTIAL — 14 QA (local automated gates pass; Safari/Firefox reruns,
+  OCR timing and the independent security/spec audits are recorded in
+  `docs/validation.md`):** lint, strict typecheck, unit/integration/E2E,
   concurrency/idempotency/recovery tests, Chrome/Safari/Firefox/mobile, digital
   performance target, measured OCR performance, and full spec/security audits.
-- [ ] **NOT VERIFIED — 15 Production:** Vercel site/dashboard, Railway API and
+- [ ] **NOT VERIFIED — 15 Production (artifacts prepared in `Dockerfile` and
+  `docs/deploy.md`, never built or deployed):** Vercel site/dashboard, Railway API and
   worker, production PostgreSQL/Redis/R2, Stripe/Resend/Sentry/PostHog setup,
   migrations, monitoring/alerts, backups, cleanup schedule, rollback/runbooks,
   and release approval.

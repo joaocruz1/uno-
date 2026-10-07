@@ -1,10 +1,10 @@
 import { execFile, fork, type ChildProcess } from "node:child_process";
-import { chmod, mkdtemp, rm } from "node:fs/promises";
+import { chmod, lstat, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EngineError, type EngineErrorCode } from "./errors";
-import type { ConversionResult, OutputSize, ProgressEvent, ProgressHandler } from "./types";
+import type { ConversionResult, OutputSize, ProductHeader, ProgressEvent, ProgressHandler } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 90_000;
 const MAX_TIMEOUT_MS = 120_000;
@@ -16,6 +16,9 @@ const MIN_RSS_MB = 128;
 const MAX_RSS_MB = 1_024;
 const MAX_INPUT_BYTES = 100 * 1_024 * 1_024;
 const RSS_POLL_INTERVAL_MS = 250;
+const WORKSPACE_PREFIX = "uno-engine-";
+const WORKSPACE_NAME = /^uno-engine-[A-Za-z0-9]{6}$/;
+const MIN_ABANDONED_WORKSPACE_AGE_MS = 2 * MAX_TIMEOUT_MS;
 
 const ENGINE_ERROR_CODES = new Set<EngineErrorCode>([
   "invalid_pdf",
@@ -31,6 +34,8 @@ const ENGINE_ERROR_CODES = new Set<EngineErrorCode>([
 ]);
 
 type IsolationOptions = {
+  /** Caller-supplied picking data drawn above the label. */
+  product?: ProductHeader;
   timeoutMs?: number;
   maxHeapMb?: number;
   maxRssMb?: number;
@@ -221,6 +226,51 @@ async function stopChildAndRemoveWorkspace(child: ChildProcess, jobDirectory: st
 }
 
 /**
+ * Removes private per-run workspaces left behind when a parent process died
+ * before its own cleanup ran. Only real directories created by this module
+ * (name pattern, owned by this user, private mode) and older than `maxAgeMs`
+ * are removed. Symbolic links are never followed: a link in place of a
+ * workspace is ignored and links inside one are unlinked, not traversed.
+ * `root` is an operator/test override; it must never come from a request.
+ */
+export async function recoverAbandonedEngineWorkspaces(
+  options: { maxAgeMs: number; now?: Date; root?: string },
+): Promise<number> {
+  if (!Number.isSafeInteger(options.maxAgeMs) || options.maxAgeMs < MIN_ABANDONED_WORKSPACE_AGE_MS) {
+    throw new RangeError("maxAgeMs must not be shorter than twice the engine deadline");
+  }
+  const root = options.root ?? tmpdir();
+  const now = (options.now ?? new Date()).getTime();
+  const ownerId = typeof process.getuid === "function" ? process.getuid() : undefined;
+  let names: string[];
+  try {
+    if (!(await lstat(root)).isDirectory()) return 0;
+    names = await readdir(root);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const name of names) {
+    if (!WORKSPACE_NAME.test(name)) continue;
+    const directory = join(root, name);
+    try {
+      const entry = await lstat(directory);
+      if (
+        entry.isSymbolicLink() || !entry.isDirectory() ||
+        (ownerId !== undefined && entry.uid !== ownerId) ||
+        (process.platform !== "win32" && (entry.mode & 0o077) !== 0) ||
+        now - Math.max(entry.mtimeMs, entry.birthtimeMs) < options.maxAgeMs
+      ) continue;
+      await rm(directory, { recursive: true, force: true });
+      removed += 1;
+    } catch {
+      // Left for the next pass; a workspace that vanished meanwhile is fine.
+    }
+  }
+  return removed;
+}
+
+/**
  * Converts one PDF in a bounded, disposable Node process. The child receives
  * exactly one job and is terminated on every success or failure path.
  */
@@ -243,7 +293,7 @@ export async function convertPdfIsolated(
 
   let jobDirectory = "";
   try {
-    jobDirectory = await mkdtemp(join(tmpdir(), "uno-engine-"));
+    jobDirectory = await mkdtemp(join(tmpdir(), WORKSPACE_PREFIX));
     await chmod(jobDirectory, 0o700);
   } catch {
     if (jobDirectory) {
@@ -358,6 +408,7 @@ export async function convertPdfIsolated(
           bytes: Uint8Array.from(bytes),
           size,
           selectedTemplate,
+          ...(options.product ? { product: options.product } : {}),
         },
         (error) => {
           if (error) fail();

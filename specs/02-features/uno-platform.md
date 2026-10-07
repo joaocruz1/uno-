@@ -68,9 +68,9 @@ template is rejected; there is no generic or best-effort fallback.
 | Plan | Monthly price | Labels/month | Max file | Max batch | Retention |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Free | R$ 0 | 10 | 5 MB | 1 | 7 days |
-| Starter | R$ 29 | 300 | 20 MB | 50 | 30 days |
-| Pro | R$ 59 | 2,000 | 50 MB | 100 | 90 days |
-| Business | R$ 149 | 10,000 | 100 MB | 500 | 180 days |
+| Starter | R$ 19 | 300 | 20 MB | 50 | 30 days |
+| Pro | R$ 49 | 2,000 | 50 MB | 100 | 90 days |
+| Business | R$ 139 | 10,000 | 100 MB | 500 | 180 days |
 
 - Values and limits are configuration, with the table above as the initial
   production defaults.

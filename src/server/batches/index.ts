@@ -319,7 +319,7 @@ export async function reconcileBatch(batchId: string, database: UnoDatabase = ge
   await database.transaction(async (transaction) => {
     const rows = await transaction.select().from(batches).where(eq(batches.id, batchId)).limit(1).for("update");
     const batch = rows[0];
-    if (!batch || batch.status === "completed" || batch.status === "failed") return;
+    if (!batch || (batch.status !== "queued" && batch.status !== "processing")) return;
     const counts = await aggregateBatch(batch.id, transaction);
     const allTerminal = counts.total > 0 && counts.completed + counts.failed === counts.total;
     const now = new Date();
@@ -354,6 +354,14 @@ export async function reconcileBatch(batchId: string, database: UnoDatabase = ge
   });
 }
 
+const notRetired = sql`${batches.status} not in ('deleting','deleted')`;
+
+/** A closed batch reports the aggregate stored at completion, so later child tombstones cannot change it. */
+function closedAggregate(row: typeof batches.$inferSelect): Aggregate | null {
+  if (row.status !== "completed" && row.status !== "failed") return null;
+  return { total: row.itemCount, queued: 0, processing: 0, completed: row.completedCount, failed: row.failedCount, progress: 100 };
+}
+
 function mapArchiveStatus(status: "PENDING" | "PACKAGING" | "READY" | "FAILED") {
   return status.toLowerCase() as "pending" | "packaging" | "ready" | "failed";
 }
@@ -378,11 +386,12 @@ async function batchDetailFromRow(row: typeof batches.$inferSelect, counts: Aggr
 }
 
 export async function readBatch(organizationId: string, batchId: string, database: UnoDatabase = getDb()): Promise<BatchDetail> {
-  const scoped = await database.select({ id: batches.id }).from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId))).limit(1);
+  const scoped = await database.select({ id: batches.id }).from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId), notRetired)).limit(1);
   if (!scoped[0]) throw new AppError("not_found", "Lote não encontrado.", 404);
   await reconcileBatch(batchId, database);
-  const rows = await database.select().from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId))).limit(1);
-  return batchDetailFromRow(rows[0]!, await aggregateBatch(batchId, database));
+  const rows = await database.select().from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId), notRetired)).limit(1);
+  if (!rows[0]) throw new AppError("not_found", "Lote não encontrado.", 404);
+  return batchDetailFromRow(rows[0], closedAggregate(rows[0]) ?? await aggregateBatch(batchId, database));
 }
 
 const batchesQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(50).default(20), cursor: z.uuid().optional() });
@@ -406,7 +415,7 @@ export async function listBatches(organizationId: string, rawQuery: unknown = {}
   const rows = await database.select().from(batches).where(and(...conditions))
     .orderBy(desc(batches.createdAt), desc(batches.id)).limit(query.limit + 1);
   const page = rows.slice(0, query.limit);
-  const items = await Promise.all(page.map(async (row) => batchDetailFromRow(row, await aggregateBatch(row.id, database))));
+  const items = await Promise.all(page.map(async (row) => batchDetailFromRow(row, closedAggregate(row) ?? await aggregateBatch(row.id, database))));
   return batchListSchema.parse({ items, nextCursor: rows.length > query.limit ? page.at(-1)!.id : null });
 }
 
@@ -418,9 +427,13 @@ export async function listBatchItems(
   database: UnoDatabase = getDb(),
 ): Promise<BatchItemsPage> {
   const query = itemsQuerySchema.parse(rawQuery);
-  const batch = await database.select({ id: batches.id }).from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId))).limit(1);
+  const batch = await database.select({ id: batches.id }).from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId), notRetired)).limit(1);
   if (!batch[0]) throw new AppError("not_found", "Lote não encontrado.", 404);
-  const conditions = [eq(conversions.organizationId, organizationId), eq(conversions.batchId, batchId)];
+  const conditions = [
+    eq(conversions.organizationId, organizationId),
+    eq(conversions.batchId, batchId),
+    sql`${conversions.status} not in ('deleting','deleted')`,
+  ];
   if (query.cursor) conditions.push(lt(conversions.id, query.cursor));
   const rows = await database.select().from(conversions).where(and(...conditions)).orderBy(desc(conversions.id)).limit(query.limit + 1);
   const page = rows.slice(0, query.limit);
@@ -443,11 +456,14 @@ export async function signBatchDownload(
   batchId: string,
   dependencies: Pick<BatchDependencies, "database" | "storage" | "now"> = defaults(),
 ) {
-  const rows = await dependencies.database.select().from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId))).limit(1);
+  const rows = await dependencies.database.select().from(batches).where(and(eq(batches.organizationId, organizationId), eq(batches.id, batchId), notRetired)).limit(1);
   const batch = rows[0];
   if (!batch) throw new AppError("not_found", "Lote não encontrado.", 404);
   if (batch.status !== "completed" || batch.archiveStatus !== "READY" || !batch.zipObjectKey || !batch.artifactsExpireAt) {
     throw new AppError("archive_unavailable", "O arquivo do lote não está disponível.", 410);
+  }
+  if (batch.artifactsExpireAt.getTime() - dependencies.now().getTime() < 1_000) {
+    throw new AppError("archive_unavailable", "O arquivo do lote expirou.", 410);
   }
   await dependencies.storage.head(batch.zipObjectKey).catch((error) => {
     if (error instanceof AppError && error.code === "upload_not_found") throw new AppError("archive_unavailable", "O arquivo do lote não está disponível.", 410);

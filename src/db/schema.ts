@@ -61,8 +61,10 @@ export const usageReservationStatusEnum = pgEnum("usage_reservation_status", [
   "RELEASED",
 ]);
 export const requestStatusEnum = pgEnum("request_status", ["PENDING", "COMPLETED", "FAILED"]);
+export const apiRequestUploadStatusEnum = pgEnum("api_request_upload_status", ["PREPARING", "READY", "COMMITTED", "ABORTED"]);
 export const outboxStatusEnum = pgEnum("outbox_status", ["PENDING", "PROCESSING", "PUBLISHED", "FAILED"]);
-export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESSING", "DELIVERED", "FAILED"]);
+export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESSING", "DELIVERED", "FAILED", "CANCELED"]);
+export const invitationStatusEnum = pgEnum("invitation_status", ["PENDING", "ACCEPTED", "REVOKED"]);
 export const stripeEventStatusEnum = pgEnum("stripe_event_status", ["PROCESSING", "PROCESSED", "FAILED"]);
 export const billingCheckoutStatusEnum = pgEnum("billing_checkout_status", ["CREATING", "OPEN", "COMPLETED", "EXPIRED", "FAILED"]);
 
@@ -170,6 +172,7 @@ export const memberships = pgTable(
     primaryKey({ name: "memberships_pk", columns: [table.organizationId, table.userId] }),
     index("memberships_user_id_idx").on(table.userId),
     index("memberships_org_role_idx").on(table.organizationId, table.role),
+    uniqueIndex("memberships_one_owner_uq").on(table.organizationId).where(sql`${table.role} = 'OWNER'`),
   ],
 );
 
@@ -374,6 +377,7 @@ export const batches = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    apiKeyId: text("api_key_id"),
     uploadSessionId: text("upload_session_id"),
     idempotencyKey: text("idempotency_key"),
     requestHash: text("request_hash"),
@@ -393,6 +397,9 @@ export const batches = pgTable(
     archiveErrorCode: text("archive_error_code"),
     archiveErrorMessage: text("archive_error_message"),
     artifactsExpireAt: timestamp("artifacts_expire_at", { withTimezone: true }),
+    retentionToken: text("retention_token"),
+    retentionLeaseExpiresAt: timestamp("retention_lease_expires_at", { withTimezone: true }),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
     completedAt: timestamp("completed_at", { withTimezone: true }),
@@ -403,8 +410,11 @@ export const batches = pgTable(
     uniqueIndex("batches_org_idempotency_uq").on(table.organizationId, table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
     index("batches_org_status_created_idx").on(table.organizationId, table.status, table.createdAt),
     index("batches_created_by_user_id_idx").on(table.createdByUserId),
+    index("batches_api_key_id_idx").on(table.apiKeyId),
+    index("batches_retention_idx").on(table.artifactsExpireAt).where(sql`${table.status} <> 'deleted'`),
     index("batches_archive_lease_idx").on(table.archiveLeaseExpiresAt).where(sql`${table.phase} = 'packaging'`),
     foreignKey({ name: "batches_org_upload_session_fk", columns: [table.organizationId, table.uploadSessionId], foreignColumns: [batchUploadSessions.organizationId, batchUploadSessions.id] }).onDelete("restrict"),
+    foreignKey({ name: "batches_org_api_key_fk", columns: [table.organizationId, table.apiKeyId], foreignColumns: [apiKeys.organizationId, apiKeys.id] }).onDelete("restrict"),
     check("batches_item_count_ck", sql`${table.itemCount} > 0`),
     check("batches_counts_ck", sql`${table.completedCount} >= 0 and ${table.failedCount} >= 0 and ${table.completedCount} + ${table.failedCount} <= ${table.itemCount}`),
     check("batches_progress_ck", sql`${table.progress} between 0 and 100`),
@@ -423,6 +433,7 @@ export const conversions = pgTable(
       .notNull()
       .references(() => organizations.id, { onDelete: "cascade" }),
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    apiKeyId: text("api_key_id"),
     batchId: text("batch_id"),
     uploadIntentId: text("upload_intent_id"),
     sourceConversionId: text("source_conversion_id"),
@@ -455,10 +466,13 @@ export const conversions = pgTable(
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     suggestedSize: text("suggested_size"),
+    productHeader: jsonb("product_header").$type<{ quantity: number; title: string; sku?: string; variation?: string }>(),
     queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().default(now),
     processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),
     artifactsExpireAt: timestamp("artifacts_expire_at", { withTimezone: true }),
+    retentionToken: text("retention_token"),
+    retentionLeaseExpiresAt: timestamp("retention_lease_expires_at", { withTimezone: true }),
     deletedAt: timestamp("deleted_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
@@ -477,7 +491,10 @@ export const conversions = pgTable(
       .on(table.organizationId, table.sourceConversionId, table.reprocessIdempotencyKey)
       .where(sql`${table.sourceConversionId} is not null and ${table.reprocessIdempotencyKey} is not null`),
     index("conversions_created_by_user_id_idx").on(table.createdByUserId),
+    index("conversions_api_key_id_idx").on(table.apiKeyId),
+    index("conversions_retention_idx").on(table.artifactsExpireAt).where(sql`${table.status} <> 'deleted'`),
     foreignKey({ name: "conversions_org_batch_fk", columns: [table.organizationId, table.batchId], foreignColumns: [batches.organizationId, batches.id] }).onDelete("cascade"),
+    foreignKey({ name: "conversions_org_api_key_fk", columns: [table.organizationId, table.apiKeyId], foreignColumns: [apiKeys.organizationId, apiKeys.id] }).onDelete("restrict"),
     foreignKey({ name: "conversions_org_upload_intent_fk", columns: [table.organizationId, table.uploadIntentId], foreignColumns: [uploadIntents.organizationId, uploadIntents.id] }).onDelete("restrict"),
     foreignKey({ name: "conversions_org_source_conversion_fk", columns: [table.organizationId, table.sourceConversionId], foreignColumns: [table.organizationId, table.id] }).onDelete("restrict"),
     check("conversions_progress_ck", sql`${table.progress} between 0 and 100`),
@@ -616,18 +633,57 @@ export const apiRequests = pgTable(
     idempotencyKey: text("idempotency_key"),
     requestHash: text("request_hash"),
     status: requestStatusEnum("status").notNull().default("PENDING"),
+    attempts: integer("attempts").notNull().default(1),
     responseStatus: integer("response_status"),
     responseBody: jsonb("response_body").$type<Record<string, unknown>>(),
     resourceType: text("resource_type"),
     resourceId: text("resource_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     completedAt: timestamp("completed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
   },
   (table) => [
     uniqueIndex("api_requests_request_id_uq").on(table.requestId),
+    unique("api_requests_org_id_uq").on(table.organizationId, table.id),
     uniqueIndex("api_requests_org_route_idempotency_uq").on(table.organizationId, table.route, table.idempotencyKey).where(sql`${table.idempotencyKey} is not null`),
     index("api_requests_org_created_idx").on(table.organizationId, table.createdAt),
     foreignKey({ name: "api_requests_org_api_key_fk", columns: [table.organizationId, table.apiKeyId], foreignColumns: [apiKeys.organizationId, apiKeys.id] }).onDelete("restrict"),
+    check("api_requests_attempts_ck", sql`${table.attempts} > 0`),
+  ],
+);
+
+export const apiRequestUploads = pgTable(
+  "api_request_uploads",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull(),
+    apiRequestId: text("api_request_id").notNull(),
+    attempt: integer("attempt").notNull(),
+    ordinal: integer("ordinal").notNull(),
+    objectKey: text("object_key").notNull(),
+    multipartUploadId: text("multipart_upload_id"),
+    status: apiRequestUploadStatusEnum("status").notNull().default("PREPARING"),
+    originalFileName: text("original_file_name").notNull(),
+    contentType: text("content_type").notNull(),
+    contentLength: integer("content_length"),
+    checksumSha256: text("checksum_sha256"),
+    cleanupAfter: timestamp("cleanup_after", { withTimezone: true }).notNull(),
+    committedAt: timestamp("committed_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("api_request_uploads_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("api_request_uploads_request_attempt_ordinal_uq").on(table.apiRequestId, table.attempt, table.ordinal),
+    uniqueIndex("api_request_uploads_object_key_uq").on(table.objectKey),
+    index("api_request_uploads_cleanup_idx").on(table.status, table.cleanupAfter),
+    foreignKey({ name: "api_request_uploads_org_request_fk", columns: [table.organizationId, table.apiRequestId], foreignColumns: [apiRequests.organizationId, apiRequests.id] }).onDelete("cascade"),
+    check("api_request_uploads_ordinal_ck", sql`${table.ordinal} >= 0`),
+    check("api_request_uploads_attempt_ck", sql`${table.attempt} > 0`),
+    check("api_request_uploads_content_length_ck", sql`${table.contentLength} is null or ${table.contentLength} > 0`),
+    check("api_request_uploads_sha_ck", sql`${table.checksumSha256} is null or ${table.checksumSha256} ~ '^[0-9a-f]{64}$'`),
+    check("api_request_uploads_name_ck", sql`char_length(${table.originalFileName}) between 1 and 160 and position('/' in ${table.originalFileName}) = 0 and position(chr(92) in ${table.originalFileName}) = 0 and ${table.originalFileName} !~ '[[:cntrl:]]'`),
+    check("api_request_uploads_ready_ck", sql`${table.status} in ('PREPARING', 'ABORTED') or (${table.contentLength} is not null and ${table.checksumSha256} is not null)`),
   ],
 );
 
@@ -674,6 +730,7 @@ export const webhookEndpoints = pgTable(
     encryptionKeyVersion: text("encryption_key_version").notNull(),
     subscribedEvents: text("subscribed_events").array().notNull(),
     active: boolean("active").notNull().default(true),
+    disabledAt: timestamp("disabled_at", { withTimezone: true }),
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
@@ -693,6 +750,10 @@ export const webhookDeliveries = pgTable(
     organizationId: text("organization_id").notNull(),
     endpointId: text("endpoint_id").notNull(),
     outboxEventId: text("outbox_event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    body: text("body").notNull(),
+    claimToken: text("claim_token"),
+    leaseExpiresAt: timestamp("lease_expires_at", { withTimezone: true }),
     status: deliveryStatusEnum("status").notNull().default("PENDING"),
     attemptCount: integer("attempt_count").notNull().default(0),
     nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }).notNull().default(now),
@@ -706,6 +767,8 @@ export const webhookDeliveries = pgTable(
     uniqueIndex("webhook_deliveries_endpoint_event_uq").on(table.endpointId, table.outboxEventId),
     unique("webhook_deliveries_org_id_uq").on(table.organizationId, table.id),
     index("webhook_deliveries_due_idx").on(table.nextAttemptAt, table.createdAt).where(sql`${table.status} in ('PENDING', 'FAILED')`),
+    index("webhook_deliveries_org_created_idx").on(table.organizationId, table.createdAt),
+    index("webhook_deliveries_lease_idx").on(table.leaseExpiresAt).where(sql`${table.status} = 'PROCESSING'`),
     foreignKey({ name: "webhook_deliveries_org_endpoint_fk", columns: [table.organizationId, table.endpointId], foreignColumns: [webhookEndpoints.organizationId, webhookEndpoints.id] }).onDelete("cascade"),
     foreignKey({ name: "webhook_deliveries_org_outbox_fk", columns: [table.organizationId, table.outboxEventId], foreignColumns: [outboxEvents.organizationId, outboxEvents.id] }).onDelete("cascade"),
     check("webhook_deliveries_attempt_count_ck", sql`${table.attemptCount} between 0 and 6`),
@@ -731,6 +794,66 @@ export const webhookDeliveryAttempts = pgTable(
     index("webhook_delivery_attempts_org_delivery_idx").on(table.organizationId, table.deliveryId),
     foreignKey({ name: "webhook_attempts_org_delivery_fk", columns: [table.organizationId, table.deliveryId], foreignColumns: [webhookDeliveries.organizationId, webhookDeliveries.id] }).onDelete("cascade"),
     check("webhook_attempts_number_ck", sql`${table.attemptNumber} between 1 and 6`),
+  ],
+);
+
+export const organizationInvitations = pgTable(
+  "organization_invitations",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: membershipRoleEnum("role").notNull().default("MEMBER"),
+    tokenHash: text("token_hash").notNull(),
+    status: invitationStatusEnum("status").notNull().default("PENDING"),
+    invitedByUserId: text("invited_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    acceptedByUserId: text("accepted_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("organization_invitations_token_hash_uq").on(table.tokenHash),
+    unique("organization_invitations_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("organization_invitations_pending_email_uq").on(table.organizationId, table.email).where(sql`${table.status} = 'PENDING'`),
+    index("organization_invitations_org_created_idx").on(table.organizationId, table.createdAt),
+    index("organization_invitations_invited_by_user_id_idx").on(table.invitedByUserId),
+    index("organization_invitations_accepted_by_user_id_idx").on(table.acceptedByUserId),
+    check("organization_invitations_role_ck", sql`${table.role} in ('ADMIN', 'MEMBER')`),
+    check("organization_invitations_email_ck", sql`${table.email} = lower(${table.email}) and char_length(${table.email}) between 3 and 320`),
+    check("organization_invitations_token_hash_ck", sql`${table.tokenHash} ~ '^[0-9a-f]{64}$'`),
+  ],
+);
+
+export const templateReleases = pgTable(
+  "template_releases",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    templateId: text("template_id")
+      .notNull()
+      .references(() => templates.id, { onDelete: "restrict" }),
+    templateVersion: text("template_version").notNull(),
+    engineVersion: text("engine_version").notNull(),
+    widthMm: numeric("width_mm", { precision: 6, scale: 2 }).notNull(),
+    heightMm: numeric("height_mm", { precision: 6, scale: 2 }).notNull(),
+    automaticReport: jsonb("automatic_report").notNull().$type<Record<string, unknown>>(),
+    automaticReportSha256: text("automatic_report_sha256").notNull(),
+    physicalProof: jsonb("physical_proof").notNull().$type<Record<string, unknown>>(),
+    physicalProofSha256: text("physical_proof_sha256").notNull(),
+    evidenceSha256: text("evidence_sha256").notNull(),
+    attestedByUserId: text("attested_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("template_releases_template_size_uq").on(table.templateId, table.widthMm, table.heightMm),
+    index("template_releases_attested_by_user_id_idx").on(table.attestedByUserId),
+    check("template_releases_size_ck", sql`${table.widthMm} between 50 and 210 and ${table.heightMm} between 50 and 300`),
+    check("template_releases_sha_ck", sql`${table.automaticReportSha256} ~ '^[0-9a-f]{64}$' and ${table.physicalProofSha256} ~ '^[0-9a-f]{64}$' and ${table.evidenceSha256} ~ '^[0-9a-f]{64}$'`),
   ],
 );
 

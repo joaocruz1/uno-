@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode } from "react";
+import type { AnchorHTMLAttributes, ButtonHTMLAttributes, ReactNode, Ref } from "react";
 import { cn } from "./utils";
 import { cva } from "class-variance-authority";
 import { Slot } from "@radix-ui/react-slot";
@@ -26,7 +26,7 @@ const buttonVariants = cva("inline-flex items-center justify-center gap-2 rounde
   variants: { variant: variants, size: sizes }, defaultVariants: { variant: "primary", size: "md" },
 });
 
-export function Button({ className, variant = "primary", size = "md", type = "button", asChild = false, ...props }: SharedProps & ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean }) {
+export function Button({ className, variant = "primary", size = "md", type = "button", asChild = false, ...props }: SharedProps & ButtonHTMLAttributes<HTMLButtonElement> & { asChild?: boolean; ref?: Ref<HTMLButtonElement> }) {
   const Component = asChild ? Slot : "button";
   return (
     <Component

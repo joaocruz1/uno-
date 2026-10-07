@@ -43,7 +43,7 @@ export interface StorageGateway {
   getRange(key: string, maxBytes: number): Promise<Buffer>;
   read(key: string, maxBytes: number): Promise<Buffer>;
   putBytes(key: string, bytes: Buffer, contentType: string, maxBytes: number): Promise<void>;
-  delete(key: string): Promise<void>;
+  delete(key: string, abortSignal?: AbortSignal): Promise<void>;
   openReadStream(key: string, abortSignal?: AbortSignal): Promise<Readable>;
   beginMultipartUpload(key: string, contentType: string, abortSignal?: AbortSignal): Promise<string>;
   uploadPart(key: string, uploadId: string, partNumber: number, bytes: Buffer, abortSignal?: AbortSignal): Promise<string>;
@@ -201,9 +201,9 @@ class S3StorageGateway implements StorageGateway {
     }
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(key: string, abortSignal?: AbortSignal): Promise<void> {
     try {
-      await client().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+      await client().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }), { abortSignal });
     } catch (error) {
       throw storageError(error);
     }

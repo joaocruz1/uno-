@@ -3,7 +3,7 @@
 import { FileText, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-export function PdfCanvasPreview({ url, title, expectedPages }: { url: string; title: string; expectedPages: 1 | 2 }) {
+export function PdfCanvasPreview({ url, data, title, expectedPages, className }: { url?: string; data?: Uint8Array; title: string; expectedPages: 1 | 2; className?: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "unavailable">("loading");
 
@@ -13,9 +13,16 @@ export function PdfCanvasPreview({ url, title, expectedPages }: { url: string; t
     let renderTask: import("pdfjs-dist").RenderTask | undefined;
     const render = async () => {
       try {
-        const response = await fetch(url, { signal: controller.signal, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
-        if (!response.ok || Number(response.headers.get("content-length")) > 150 * 1_024 * 1_024) throw new Error("preview_unavailable");
-        const bytes = new Uint8Array(await response.arrayBuffer());
+        let bytes: Uint8Array;
+        if (data) {
+          // pdf.js transfers the buffer to its worker; keep the caller's copy intact.
+          bytes = data.slice();
+        } else {
+          if (!url) throw new Error("preview_unavailable");
+          const response = await fetch(url, { signal: controller.signal, cache: "no-store", credentials: "omit", referrerPolicy: "no-referrer" });
+          if (!response.ok || Number(response.headers.get("content-length")) > 150 * 1_024 * 1_024) throw new Error("preview_unavailable");
+          bytes = new Uint8Array(await response.arrayBuffer());
+        }
         if (controller.signal.aborted) return;
         if (bytes.length > 150 * 1_024 * 1_024) throw new Error("preview_unavailable");
         const pdfjs = await import("pdfjs-dist");
@@ -61,9 +68,9 @@ export function PdfCanvasPreview({ url, title, expectedPages }: { url: string; t
       renderTask?.cancel();
       void loadingTask?.destroy().catch(() => undefined);
     };
-  }, [url, title, expectedPages]);
+  }, [url, data, title, expectedPages]);
 
-  return <div className="relative h-[480px] overflow-auto bg-white sm:h-[560px]">
+  return <div className={className ?? "relative h-[480px] overflow-auto bg-white sm:h-[560px]"}>
     {phase === "loading" ? <div className="absolute inset-0 grid place-content-center text-center text-zinc-600" role="status"><LoaderCircle className="mx-auto mb-4 animate-spin motion-reduce:animate-none"/><p className="text-sm">Preparando a visualização</p></div> : null}
     {phase === "unavailable" ? <div className="grid h-full place-content-center p-8 text-center text-zinc-700"><FileText className="mx-auto mb-4"/><p className="text-sm">A visualização está indisponível. Use “Abrir PDF” para conferir o arquivo.</p></div> : null}
     <div ref={container} className="space-y-3"/>

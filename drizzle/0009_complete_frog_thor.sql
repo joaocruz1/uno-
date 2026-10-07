@@ -1,0 +1,1 @@
+ALTER TABLE "conversions" ADD COLUMN "product_header" jsonb;

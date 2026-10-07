@@ -96,7 +96,7 @@ export function ConversionFlow({ planName, maxFileMB }: { planName: string; maxF
     setCreating(true);
     setCreationError(undefined);
     try {
-      const response = await fetch("/api/dashboard/conversions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadIntentId: file.intentId, size: file.output }), cache: "no-store" });
+      const response = await fetch("/api/dashboard/conversions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ uploadIntentId: file.intentId, size: file.output, ...(file.product ? { product: file.product } : {}) }), cache: "no-store" });
       const body: unknown = await response.json();
       if (operation.current !== token) return;
       if (!response.ok) {

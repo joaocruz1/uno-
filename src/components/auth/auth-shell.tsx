@@ -15,8 +15,7 @@ export function AuthShell({
       <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(239,35,60,.18),transparent_34rem)]" />
       <div className="relative w-full max-w-md">
         <Link href="/" className="mb-8 flex items-center justify-center gap-3" aria-label="UNO — página inicial">
-          <Image src="/uno.svg" width={34} height={34} alt="" priority />
-          <span className="font-heading text-2xl font-extrabold tracking-tight">UNO</span>
+          <Image src="/uno-logo.png" width={780} height={256} alt="UNO — Duas páginas. Uma etiqueta." priority className="h-16 w-auto" />
         </Link>
         <section className="rounded-2xl border border-white/[.08] bg-[#080808] p-6 shadow-2xl shadow-black sm:p-8">
           <h1 className="font-heading text-2xl font-bold tracking-tight sm:text-3xl">{title}</h1>

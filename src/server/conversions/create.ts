@@ -13,6 +13,7 @@ import {
 } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { AppError } from "@/lib/errors";
+import { productHeaderSchema } from "@/lib/product-header";
 import { outputSizeSchema, sizeDimensions } from "@/lib/label-size";
 import type { Actor } from "@/server/auth/actor";
 import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
@@ -31,6 +32,7 @@ export const createConversionInputSchema = z.object({
   uploadIntentId: z.uuid(),
   template: z.string().max(128).optional(),
   size: outputSizeSchema,
+  product: productHeaderSchema.optional(),
 }).strict();
 
 export type CreateConversionInput = z.infer<typeof createConversionInputSchema>;
@@ -168,6 +170,7 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
       outputPreset: input.request.size.preset,
       outputWidthMm: String(dimensions.widthMm),
       outputHeightMm: String(dimensions.heightMm),
+      productHeader: input.request.product ?? null,
       inputObjectKey: input.snapshotKey,
       inputSha256: input.upload.checksumSha256,
       sourceByteLength: input.upload.contentLength,

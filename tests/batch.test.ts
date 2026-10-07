@@ -103,7 +103,7 @@ class MemoryStorage implements StorageGateway {
 
 async function applyMigrations() {
   const directory = fileURLToPath(new URL("../drizzle", import.meta.url));
-  const names = (await readdir(directory)).filter((name) => /^000[0-6]_.*\.sql$/.test(name)).sort();
+  const names = (await readdir(directory)).filter((name) => /^\d{4}_.*\.sql$/.test(name)).sort();
   for (const name of names) {
     const migration = await readFile(`${directory}/${name}`, "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {

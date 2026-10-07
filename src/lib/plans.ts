@@ -17,9 +17,9 @@ export type PlanDefinition = {
 
 const DEFAULT_PLANS: Record<PlanId, PlanDefinition> = {
   FREE: { name: "Free", price: 0, priceBrlCents: 0, monthlyLimit: 10, maxFileMB: 5, batchLimit: 1, retentionDays: 7, api: false, rateLimit: 30 },
-  STARTER: { name: "Starter", price: 29, priceBrlCents: 2_900, monthlyLimit: 300, maxFileMB: 20, batchLimit: 50, retentionDays: 30, api: false, rateLimit: 30 },
-  PRO: { name: "Pro", price: 59, priceBrlCents: 5_900, monthlyLimit: 2_000, maxFileMB: 50, batchLimit: 100, retentionDays: 90, api: true, rateLimit: 60 },
-  BUSINESS: { name: "Business", price: 149, priceBrlCents: 14_900, monthlyLimit: 10_000, maxFileMB: 100, batchLimit: 500, retentionDays: 180, api: true, rateLimit: 120 },
+  STARTER: { name: "Starter", price: 19, priceBrlCents: 1_900, monthlyLimit: 300, maxFileMB: 20, batchLimit: 50, retentionDays: 30, api: false, rateLimit: 30 },
+  PRO: { name: "Pro", price: 49, priceBrlCents: 4_900, monthlyLimit: 2_000, maxFileMB: 50, batchLimit: 100, retentionDays: 90, api: true, rateLimit: 60 },
+  BUSINESS: { name: "Business", price: 139, priceBrlCents: 13_900, monthlyLimit: 10_000, maxFileMB: 100, batchLimit: 500, retentionDays: 180, api: true, rateLimit: 120 },
 };
 
 const CONFIGURABLE_NUMBERS = {
