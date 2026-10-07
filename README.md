@@ -1,104 +1,169 @@
-# UNO
+<p align="center">
+  <img src="public/uno-logo.png" alt="UNO — Duas páginas. Uma etiqueta." width="420">
+</p>
 
-Duas páginas. Uma etiqueta. Projeto independente em Next.js, com painel e API
-compartilhando serviços, PostgreSQL, Redis e armazenamento S3 privado.
+<p align="center">
+  <strong>Duas páginas. Uma etiqueta.</strong><br>
+  Une a etiqueta de envio e a DANFE do marketplace em uma única etiqueta 100 × 150 mm pronta para imprimir.
+</p>
 
-## Desenvolvimento
+<p align="center">
+  <img src="docs/assets/landing.png" alt="Página inicial do UNO, com a área para soltar o PDF e testar sem cadastro" width="900">
+</p>
 
-Requer Node.js 24, pnpm e os serviços definidos em `compose.yaml`.
+## O que é
+
+Quem vende em marketplace recebe, para cada pedido, um PDF de duas páginas: a
+etiqueta logística e a DANFE simplificada. Isso significa duas etiquetas
+térmicas por pacote. O UNO lê esse PDF e devolve **uma** etiqueta 10 × 15 com:
+
+1. um cabeçalho opcional de separação (quantidade, produto, SKU e variação);
+2. a etiqueta logística original, sem os espaços em branco;
+3. uma faixa "DANFE SIMPLIFICADA – ETIQUETA" com tipo, NF, série, emissão e o
+   código de barras original da chave de acesso.
+
+<p align="center">
+  <img src="docs/assets/landing-resultado.png" alt="Resultado do teste gratuito: etiqueta unificada renderizada com botão de download" width="900">
+</p>
+
+O conteúdo vem do próprio PDF: as regiões digitais são incorporadas como vetor
+(sem rasterizar), os campos fiscais são lidos do texto do documento e conferidos
+contra a chave de acesso, e todos os códigos de barras e QR são decodificados na
+saída a 203 e 300 dpi e comparados com os da entrada. Se algo não fecha, a
+conversão falha com um motivo claro em vez de gerar uma etiqueta "por tentativa".
+
+## Funcionalidades
+
+- **Conversão individual** pelo painel, com progresso real, comparação antes/depois, download e impressão.
+- **Teste sem cadastro** na página inicial: uma etiqueta, processada em memória, sem armazenamento.
+- **Lotes** com envio retomável e saída em ZIP.
+- **Histórico** pesquisável e reprocessamento.
+- **API pública** assíncrona e idempotente (`/api/v1`) para ERPs, com chaves Bearer exibidas uma única vez.
+- **Webhooks** assinados (HMAC-SHA-256), com novas tentativas e proteção contra SSRF.
+- **Organizações**, membros, convites por e-mail e transferência de propriedade.
+- **Assinaturas** via Stripe Checkout e Customer Portal, com cota mensal atômica.
+- **Administração**: financeiro, clientes, atividade, chaves de API, conexões e liberação de templates.
+- **Retenção**: remoção automática dos arquivos conforme o plano.
+
+## Como funciona a engine
+
+```
+PDF original → Analyzer → Template Detector → Content Extractor → Layout Engine → PDF Composer → Validator → PDF final
+```
+
+Cada layout de marketplace ou transportadora é uma **definição versionada** em
+[`src/engine/templates/`](src/engine/templates): dimensões da página, faixas
+úteis, âncoras de detecção, códigos protegidos e, opcionalmente, como resumir a
+página fiscal. As seis etapas são genéricas; um novo layout é uma nova definição.
+Hoje existe um template: **Mercado Livre 1.0.0**. Um documento desconhecido ou
+ambíguo é recusado — não há "melhor esforço".
+
+## Stack
+
+| Camada | Tecnologia |
+| --- | --- |
+| Aplicação | Next.js 16 (App Router), React 19, TypeScript estrito |
+| Interface | Tailwind CSS 4, Radix UI, Motion, Lucide |
+| Banco | PostgreSQL + Drizzle ORM |
+| Fila e limites | Redis + BullMQ |
+| Arquivos | S3 compatível (Cloudflare R2 em produção), sempre privado |
+| PDF | pdf-lib, PDF.js, @napi-rs/canvas, ZXing; Tesseract para PDFs escaneados |
+| Autenticação | Better Auth |
+| Cobrança | Stripe |
+| E-mail | Resend (Mailpit em desenvolvimento) |
+| Observabilidade | Sentry e PostHog, opcionais e sem conteúdo de documento |
+| Testes | Vitest + PGlite, Playwright |
+
+## Rodando localmente
+
+Requer Node.js 24 e pnpm (`corepack enable`). Os serviços locais estão em
+[`compose.yaml`](compose.yaml): PostgreSQL, Redis, MinIO e Mailpit.
 
 ```bash
 pnpm install --frozen-lockfile
-cp .env.example .env.local
+cp .env.example .env.local      # defina BETTER_AUTH_SECRET (32+ caracteres) e WEBHOOK_ENCRYPTION_KEY
 docker compose up -d
-# Configure BETTER_AUTH_SECRET (mínimo 32 caracteres) e WEBHOOK_ENCRYPTION_KEY.
 pnpm db:migrate
-pnpm dev
-# Em outro terminal:
-pnpm worker
+pnpm dev                        # aplicação
+pnpm worker                     # em outro terminal: conversões, lotes, webhooks e retenção
 ```
 
-O envio de e-mails local usa Mailpit em `http://localhost:8025`. Produção usa
-Resend. Configure o bucket privado `uno` e CORS com a origem exata do painel,
-métodos PUT/GET/HEAD e cabeçalhos de upload. Nunca habilite acesso público.
+Sem Docker, use serviços equivalentes nas mesmas portas; para o armazenamento há
+um emulador: `pnpm dev:s3`. Em desenvolvimento, `UNO_ALLOW_DRAFT_TEMPLATES=true`
+permite usar o template antes da liberação.
 
-Sem Docker, serviços locais equivalentes podem ser usados nas mesmas portas.
-Para o emulador S3 de desenvolvimento:
+Comandos úteis:
+
+| Comando | O que faz |
+| --- | --- |
+| `pnpm check` | lint, typecheck, testes e build de produção |
+| `pnpm test:e2e` | testes de navegador (Chromium, Firefox, WebKit e mobile) |
+| `pnpm admin:local [email]` | cria ou promove um administrador local |
+| `pnpm stripe:setup <arquivo .env>` | cria planos, preços e portal na conta Stripe daquele arquivo |
+| `pnpm proof:print --width 100 --height 150` | gera um candidato sintético para a prova de impressão |
+
+## API em 30 segundos
 
 ```bash
-# .env.local: S3_ACCESS_KEY_ID=S3RVER, S3_SECRET_ACCESS_KEY=S3RVER
-# APP_URL deve corresponder à origem usada no navegador.
-node --env-file=.env.local scripts/local-s3.mjs
+curl "$UNO_API_URL/api/v1/conversions" \
+  -H "Authorization: Bearer $UNO_API_KEY" \
+  -H "Idempotency-Key: pedido-0001" \
+  -F "file=@pedido.pdf;type=application/pdf" \
+  -F "productTitle=Nome do produto" -F "quantity=2" -F "sku=SKU-01"
+# 202 → consulte GET /api/v1/conversions/{id} ou receba o webhook conversion.completed
 ```
 
-## Qualidade e estado
+Referência completa, com exemplos em JavaScript, Node.js e Python, em
+[`docs/api-v1.md`](docs/api-v1.md).
 
-```bash
-pnpm check
-pnpm test:e2e
-# Com PostgreSQL, Redis, Mailpit e app local em 127.0.0.1:3100:
-UNO_LOCAL_AUTH_E2E=1 pnpm exec playwright test tests/e2e/auth.spec.ts
-# Com S3 e worker adicionais:
-UNO_LOCAL_UPLOAD_E2E=1 pnpm exec playwright test tests/e2e/history.spec.ts
+## Estrutura
+
+```
+src/engine/      pipeline de PDF e definições de template
+src/server/      serviços: conversões, lotes, API, webhooks, cobrança, organizações, admin, retenção
+src/workers/     processo de fila e manutenção
+src/app/         páginas e rotas (site, painel, admin, /api)
+specs/           especificação do produto, contratos e decisões de arquitetura
+docs/            API, cobrança, segurança, deploy e evidências de validação
+tests/           testes unitários, de integração e de navegador (somente dados sintéticos)
 ```
 
-Os requisitos e contratos estão em `specs/`; o estado verificável de cada fase
-está em [docs/implementation-checklist.md](docs/implementation-checklist.md), e
-as evidências em [docs/validation.md](docs/validation.md). Itens não verificados
-não representam recursos certificados em produção.
+## Estado do projeto
 
-Use somente dados sintéticos nos testes versionados. O PDF real fornecido pelo
-usuário, suas imagens, textos e códigos ficam fora de Git e telemetria.
+O sistema roda de ponta a ponta em ambiente local e passa na suíte automatizada,
+mas **ainda não foi publicado em produção**. Antes disso:
 
-## Lotes
+- nenhum template/tamanho está liberado: a liberação exige o relatório
+  automático e a **prova física de impressão** descritos em
+  [`docs/printing-validation.md`](docs/printing-validation.md);
+- as imagens do [`Dockerfile`](Dockerfile) e o roteiro de
+  [`docs/deploy.md`](docs/deploy.md) ainda não foram executados;
+- a faixa resumida da DANFE omite protocolo, remetente e destinatário; avaliar
+  se isso atende à sua operação fiscal é responsabilidade de quem opera;
+- o detalhe do que foi e do que não foi verificado está em
+  [`docs/validation.md`](docs/validation.md) e
+  [`docs/implementation-checklist.md`](docs/implementation-checklist.md).
 
-No painel, selecione PDFs, prepare os arquivos e confirme o lote. A preparação
-não reserva cota; a confirmação reserva todos os itens em uma transação. Falhas
-individuais liberam suas unidades, e o ZIP inclui somente resultados aprovados.
-Downloads individuais continuam disponíveis se o empacotamento falhar.
+Shopee, Shein, Amazon, Magalu, Correios, Jadlog e Loggi aparecem na página
+inicial como "em breve": são o roteiro, não templates existentes.
 
-Sessões de preparação duram 24h, com links PUT de até cinco minutos emitidos
-por arquivo. Arquivos maiores que 20 MB são finalizados pelo worker. Pausar o
-envio permite retomá-lo; arquivos já enviados podem terminar a validação.
-Os limites operacionais estão em `.env.example`: prazo da sessão, máximo de
-saída ZIP e timeout de empacotamento. O worker usa ZIP64 e multipart por
-streaming, sem carregar o lote inteiro em memória.
+## Privacidade e segurança
 
-## Engine e impressão
+Os arquivos ficam em armazenamento privado e saem apenas por links assinados com
+validade curta. Bytes de documentos e dados fiscais não entram em logs nem em
+telemetria. Chaves de API são guardadas somente como hash; segredos de webhook,
+cifrados. Os testes e as capturas deste repositório usam **apenas dados
+sintéticos** — nunca versione etiquetas, notas ou credenciais reais. Detalhes em
+[`docs/security.md`](docs/security.md).
 
-A engine usa seis etapas independentes e incorpora regiões do PDF digital,
-preservando o conteúdo original. O worker deve usar o processo isolado;
-Tesseract local com português e inglês auxilia arquivos escaneados.
+## Contribuindo
 
-Para testar o template inicial em desenvolvimento, configure
-`UNO_ALLOW_DRAFT_TEMPLATES=true`. Essa opção é recusada em produção: cada
-template/tamanho exige evidências automática e física antes da liberação.
-`pnpm dev` e `pnpm build` preparam os assets locais versionados do PDF.js;
-esses arquivos gerados ficam fora de Git e são copiados com suas licenças.
+Leia [`AGENTS.md`](AGENTS.md) e a especificação em [`specs/`](specs). Mudanças de
+comportamento começam pelo contrato correspondente; rode `pnpm check` antes de
+abrir um pull request. Para propor um novo template, inclua a definição, fixtures
+sintéticas e os testes da engine.
 
-O formato padrão de 100 × 150 mm pode ser insuficiente. A engine bloqueia
-composições que não cabem na escala original. O exemplo privado passou na
-validação automática em 100 × 250 mm; isso não certifica sua impressão.
+## Licença
 
-Gere candidatos exclusivamente sintéticos com dimensões explícitas:
-
-```bash
-pnpm proof:print --width 100 --height 250
-pnpm proof:print --width 100 --height 250 --additional
-pnpm proof:print --width 100 --height 250 --scanned
-```
-
-Cada pacote privado de desenvolvimento inclui entrada, saída, relatório e
-hashes. Siga [o protocolo físico](docs/printing-validation.md) antes de liberar
-uma combinação template/tamanho em produção.
-# Billing
-
-`/dashboard/billing` and `/dashboard/usage` use server-owned subscription and quota
-state. Configure Stripe prices, secrets and numeric plan overrides privately;
-see [billing operations](docs/billing.md). Payment-provider validation remains a
-separate gate when credentials are absent. Upgrades/downgrades preserve current
-period counters and accepted jobs.
-
-On development machines with limited disk space, `UNO_DISABLE_DEV_DISK_CACHE=true`
-disables Turbopack's persistent development cache. Only generated `.next` caches
-can be removed to reclaim space; database/storage state must be preserved.
+Ainda não há um arquivo de licença neste repositório. Enquanto ele não existir, o
+código é público para leitura, mas todos os direitos permanecem com o autor.
