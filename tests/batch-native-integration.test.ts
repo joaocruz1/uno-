@@ -45,7 +45,14 @@ describe.skipIf(!enabled)("native batch transaction", () => {
     createdTemplates.push(templateId);
     await database.insert(user).values({ id: userId, name: "Synthetic Batch", email: `${userId}@example.test`, emailVerified: true });
     await database.insert(organizations).values({ id: organizationId, name: "Synthetic Batch", slug: `batch-${organizationId}`, ownerUserId: userId });
-    await database.insert(subscriptions).values({ organizationId, planId: "STARTER", status: "ACTIVE" });
+    const now = new Date();
+    await database.insert(subscriptions).values({
+      organizationId,
+      planId: "STARTER",
+      status: "ACTIVE",
+      currentPeriodStart: new Date(now.getTime() - 60_000),
+      currentPeriodEnd: new Date(now.getTime() + 60 * 60_000),
+    });
     await database.insert(templates).values({
       id: templateId,
       key: "mercado-livre",

@@ -36,7 +36,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
 - [x] **CODE + AUTOMATED PASS — 08 Batches:** plan-count validation, atomic reservation,
   independent items, aggregate real progress, partial failure behavior, private
   ZIP generation, and signed ZIP download.
-- [ ] **NOT VERIFIED — 09 Stripe:** monthly plans and configurable limits,
+- [x] **CODE + AUTOMATED PASS — 09 Stripe:** monthly plans and configurable limits,
   Checkout, Customer Portal, idempotent events, reconciliation, entitlements,
   and no overage/watermark behavior.
 - [ ] **NOT VERIFIED — 10 Public API:** all `/api/v1` contract routes, hashed

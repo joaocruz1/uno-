@@ -4,7 +4,7 @@ import Link from "next/link";
 import { LogoutButton } from "@/components/auth";
 import { Sidebar } from "@/components/sidebar";
 import { AppError } from "@/lib/errors";
-import { PLANS } from "@/lib/plans";
+import { getPlanCatalog } from "@/lib/plans";
 import { requireActor } from "@/server/http";
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -18,7 +18,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-screen bg-black lg:flex">
-      <div className="hidden lg:block"><Sidebar accountName={actor.organizationName} planName={PLANS[actor.planId].name} /></div>
+      <div className="hidden lg:block"><Sidebar accountName={actor.organizationName} planName={getPlanCatalog()[actor.planId].name} /></div>
       <main className="min-w-0 flex-1">
         <header className="flex min-h-16 items-center justify-between gap-4 border-b border-white/[.06] px-4 sm:px-8">
           <div className="flex min-w-0 items-center gap-3">
@@ -30,6 +30,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <Link href="/dashboard/history" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Histórico</Link>
                 <Link href="/dashboard/batches" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Lotes</Link>
                 <Link href="/dashboard/usage" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Uso</Link>
+                <Link href="/dashboard/billing" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Assinatura</Link>
                 <Link href="/dashboard/settings" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Configurações</Link>
               </nav>
             </details>

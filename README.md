@@ -91,3 +91,14 @@ pnpm proof:print --width 100 --height 250 --scanned
 Cada pacote privado de desenvolvimento inclui entrada, saída, relatório e
 hashes. Siga [o protocolo físico](docs/printing-validation.md) antes de liberar
 uma combinação template/tamanho em produção.
+# Billing
+
+`/dashboard/billing` and `/dashboard/usage` use server-owned subscription and quota
+state. Configure Stripe prices, secrets and numeric plan overrides privately;
+see [billing operations](docs/billing.md). Payment-provider validation remains a
+separate gate when credentials are absent. Upgrades/downgrades preserve current
+period counters and accepted jobs.
+
+On development machines with limited disk space, `UNO_DISABLE_DEV_DISK_CACHE=true`
+disables Turbopack's persistent development cache. Only generated `.next` caches
+can be removed to reclaim space; database/storage state must be preserved.

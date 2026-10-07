@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { ConversionFlow } from "@/components/conversion/conversion-flow";
-import { PLANS } from "@/lib/plans";
+import { getPlanCatalog } from "@/lib/plans";
 import { requireActor } from "@/server/http";
 
 export const metadata: Metadata = {
@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 
 export default async function ProcessPage() {
   const actor = await requireActor();
-  const plan = PLANS[actor.planId];
+  const plan = getPlanCatalog()[actor.planId];
 
   return (
     <div className="mx-auto max-w-6xl">

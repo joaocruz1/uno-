@@ -2,19 +2,21 @@ import type { Metadata } from "next";
 import { Check, Minus } from "lucide-react";
 import { PublicPage } from "@/components";
 import { PricingGrid } from "@/components/marketing";
+import { getPlanCatalog } from "@/lib/plans";
 
 export const metadata: Metadata = { title: "Preços", description: "Compare os planos Free, Starter, Pro e Business da UNO." };
 
-const comparison = [
-  ["Etiquetas por mês", "10", "300", "2.000", "10.000"],
-  ["Arquivo máximo", "5 MB", "20 MB", "50 MB", "100 MB"],
-  ["Lote máximo", "1", "50", "100", "500"],
-  ["Retenção", "7 dias", "30 dias", "90 dias", "180 dias"],
-  ["API e webhooks", false, false, true, true],
-  ["Requisições por minuto", "—", "—", "60", "120"],
-] as const;
-
 export default function PricingPage() {
+  const catalog = getPlanCatalog();
+  const plans = [catalog.FREE, catalog.STARTER, catalog.PRO, catalog.BUSINESS];
+  const comparison = [
+    ["Etiquetas por mês", ...plans.map(plan => plan.monthlyLimit.toLocaleString("pt-BR"))],
+    ["Arquivo máximo", ...plans.map(plan => `${plan.maxFileMB} MB`)],
+    ["Lote máximo", ...plans.map(plan => String(plan.batchLimit))],
+    ["Retenção", ...plans.map(plan => `${plan.retentionDays} dias`)],
+    ["API e webhooks", ...plans.map(plan => plan.api)],
+    ["Requisições por minuto", ...plans.map(plan => plan.api ? String(plan.rateLimit) : "—")],
+  ];
   return (
     <PublicPage eyebrow="Preços" title="Um plano para cada ritmo de expedição." intro="Escolha pelo volume mensal, tamanho dos arquivos, lotes e integrações que a sua operação precisa. Não há cobrança automática por excedente nem marca d'água.">
       <section className="section-space"><div className="page-shell"><PricingGrid /></div></section>

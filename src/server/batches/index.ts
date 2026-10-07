@@ -11,7 +11,6 @@ import {
   getDb,
   outboxEvents,
   subscriptions,
-  usagePeriods,
   type UnoDatabase,
 } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
@@ -27,8 +26,9 @@ import {
 } from "@/lib/batch-model";
 import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions, type OutputSize } from "@/lib/label-size";
-import { PLANS, type PlanId } from "@/lib/plans";
+import { getPlanCatalog, type PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getStorage, type StorageGateway } from "@/server/storage";
@@ -56,24 +56,13 @@ function defaults(): BatchDependencies {
     rateLimit: async (actor) => enforceRateLimit({
       namespace: "dashboard-batch-submit",
       identifier: actor.organizationId,
-      limit: PLANS[actor.planId].rateLimit || 30,
+      limit: getPlanCatalog()[actor.planId].rateLimit || 30,
     }),
   };
 }
 
-function periodFor(now: Date, subscription?: { currentPeriodStart: Date | null; currentPeriodEnd: Date | null }) {
-  if (subscription?.currentPeriodStart && subscription.currentPeriodEnd &&
-    subscription.currentPeriodStart <= now && subscription.currentPeriodEnd > now) {
-    return { start: subscription.currentPeriodStart, end: subscription.currentPeriodEnd };
-  }
-  return {
-    start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-    end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
-  };
-}
-
 function retentionDate(now: Date, planId: PlanId) {
-  return new Date(now.getTime() + PLANS[planId].retentionDays * 86_400_000);
+  return new Date(now.getTime() + getPlanCatalog()[planId].retentionDays * 86_400_000);
 }
 
 function sessionSize(session: typeof batchUploadSessions.$inferSelect): OutputSize {
@@ -139,9 +128,7 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
       ));
       return { accepted: duplicate, outboxIds: events.map((event) => event.id) };
     }
-    const now = input.now();
     if (session.status !== "OPEN") throw new AppError("batch_session_consumed", "A sessão de lote já foi utilizada.", 409);
-    if (session.expiresAt <= now) throw new AppError("batch_session_expired", "A sessão de lote expirou.", 410);
     const items = await transaction.select().from(batchUploadItems).where(and(
       eq(batchUploadItems.organizationId, input.actor.organizationId),
       eq(batchUploadItems.sessionId, session.id),
@@ -158,30 +145,23 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
     assertTemplateEligible(template, size);
     const subscriptionRows = await transaction.select({
       planId: subscriptions.planId,
+      status: subscriptions.status,
       currentPeriodStart: subscriptions.currentPeriodStart,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
     }).from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const subscription = subscriptionRows[0];
-    const planId: PlanId = subscription?.planId ?? "FREE";
-    if (items.length > PLANS[planId].batchLimit) throw new AppError("batch_limit_exceeded", "O lote excede o limite do plano atual.", 413);
-    const maxFileBytes = PLANS[planId].maxFileMB * 1_024 * 1_024;
+    const decisionNow = input.now();
+    if (session.expiresAt <= decisionNow) throw new AppError("batch_session_expired", "A sessão de lote expirou.", 410);
+    const entitlement = effectivePlanFromSubscription(subscription, decisionNow);
+    const planId = entitlement.planId;
+    if (items.length > entitlement.plan.batchLimit) throw new AppError("batch_limit_exceeded", "O lote excede o limite do plano atual.", 413);
+    const maxFileBytes = entitlement.plan.maxFileMB * 1_024 * 1_024;
     if (items.some((item) => item.contentLength > maxFileBytes)) {
       throw new AppError("file_too_large", "Um arquivo excede o limite do plano atual.", 413);
     }
-    const period = periodFor(now, subscription);
-    await transaction.insert(usagePeriods).values({
-      organizationId: input.actor.organizationId,
-      periodStart: period.start,
-      periodEnd: period.end,
-      limit: PLANS[planId].monthlyLimit,
-    }).onConflictDoNothing({ target: [usagePeriods.organizationId, usagePeriods.periodStart, usagePeriods.periodEnd] });
-    const periods = await transaction.select({ id: usagePeriods.id }).from(usagePeriods).where(and(
-      eq(usagePeriods.organizationId, input.actor.organizationId),
-      eq(usagePeriods.periodStart, period.start),
-      eq(usagePeriods.periodEnd, period.end),
-    )).limit(1).for("update");
-    if (!periods[0]) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
-    const artifactsExpireAt = retentionDate(now, planId);
+    const usagePeriod = await lockCurrentUsagePeriod(input.actor.organizationId, entitlement, decisionNow, transaction);
+    assertUsageAvailable(usagePeriod, entitlement.plan.monthlyLimit, items.length);
+    const artifactsExpireAt = retentionDate(decisionNow, planId);
     await transaction.insert(batches).values({
       id: input.batchId,
       organizationId: input.actor.organizationId,
@@ -194,8 +174,8 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
       itemCount: items.length,
       progress: 0,
       artifactsExpireAt,
-      createdAt: now,
-      updatedAt: now,
+      createdAt: decisionNow,
+      updatedAt: decisionNow,
     });
     const dimensions = sizeDimensions(size);
     const outboxIds: string[] = [];
@@ -224,14 +204,14 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
           inputSha256: item.readySha256!,
           sourceByteLength: item.contentLength,
           artifactsExpireAt,
-          queuedAt: now,
-          createdAt: now,
-          updatedAt: now,
+          queuedAt: decisionNow,
+          createdAt: decisionNow,
+          updatedAt: decisionNow,
         });
         await reserveUsage({
           reservationId,
           organizationId: input.actor.organizationId,
-          usagePeriodId: periods[0].id,
+          usagePeriodId: usagePeriod.id,
           conversionId,
         }, transaction);
         await transaction.insert(outboxEvents).values({
@@ -252,11 +232,11 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
     await transaction.update(batchUploadSessions).set({
       status: "ACCEPTED",
       acceptedBatchId: input.batchId,
-      updatedAt: now,
+      updatedAt: decisionNow,
     }).where(and(eq(batchUploadSessions.id, session.id), eq(batchUploadSessions.status, "OPEN")));
     return {
       accepted: acceptedBatchSchema.parse({
-        id: input.batchId, status: "queued", progress: 0, itemCount: items.length, createdAt: now.toISOString(),
+        id: input.batchId, status: "queued", progress: 0, itemCount: items.length, createdAt: decisionNow.toISOString(),
       }),
       outboxIds,
     };

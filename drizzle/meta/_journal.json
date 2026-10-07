@@ -43,6 +43,13 @@
       "when": 1791382156306,
       "tag": "0005_lethal_mariko_yashida",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791383915393,
+      "tag": "0006_cuddly_synch",
+      "breakpoints": true
     }
   ]
 }

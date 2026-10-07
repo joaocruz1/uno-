@@ -5,14 +5,14 @@ import { z } from "zod";
 
 import { getDb, uploadIntents, type UnoDatabase } from "@/db";
 import { AppError } from "@/lib/errors";
-import { PLANS } from "@/lib/plans";
+import { getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getStorage, type StorageGateway } from "@/server/storage";
 
 const PDF_CONTENT_TYPE = "application/pdf";
 const PDF_MAGIC_SCAN_BYTES = 1_024;
-const MAX_UPLOAD_BYTES = PLANS.BUSINESS.maxFileMB * 1_024 * 1_024;
+const MAX_UPLOAD_BYTES = 100 * 1_024 * 1_024;
 
 export const uploadIntentInputSchema = z
   .object({
@@ -124,15 +124,15 @@ function sha256Base64(checksumHex: string): string {
 }
 
 export function maxUploadBytes(actor: Pick<Actor, "planId">): number {
-  return PLANS[actor.planId].maxFileMB * 1_024 * 1_024;
+  return getPlanCatalog()[actor.planId].maxFileMB * 1_024 * 1_024;
 }
 
 export function uploadIntentRateLimit(actor: Pick<Actor, "planId">): number {
-  return PLANS[actor.planId].rateLimit || 30;
+  return getPlanCatalog()[actor.planId].rateLimit || 30;
 }
 
 export function pendingUploadLimit(actor: Pick<Actor, "planId">): number {
-  return Math.max(10, PLANS[actor.planId].batchLimit);
+  return Math.max(10, getPlanCatalog()[actor.planId].batchLimit);
 }
 
 export async function createUploadIntent(

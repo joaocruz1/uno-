@@ -103,7 +103,7 @@ class MemoryStorage implements StorageGateway {
 
 async function applyMigrations() {
   const directory = fileURLToPath(new URL("../drizzle", import.meta.url));
-  const names = (await readdir(directory)).filter((name) => /^000[0-5]_.*\.sql$/.test(name)).sort();
+  const names = (await readdir(directory)).filter((name) => /^000[0-6]_.*\.sql$/.test(name)).sort();
   for (const name of names) {
     const migration = await readFile(`${directory}/${name}`, "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
@@ -180,7 +180,13 @@ beforeAll(async () => {
     releasedAt: NOW,
     definition: { releasedSizes: [{ widthMm: 100, heightMm: 250, automaticReportSha256: "a".repeat(64), physicalProofSha256: "b".repeat(64), approvedAt: NOW.toISOString() }] },
   });
-  await database.insert(subscriptions).values({ organizationId: ORG, planId: "STARTER", status: "ACTIVE" });
+  await database.insert(subscriptions).values({
+    organizationId: ORG,
+    planId: "STARTER",
+    status: "ACTIVE",
+    currentPeriodStart: new Date("2026-10-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z"),
+  });
 });
 
 beforeEach(async () => {
@@ -191,6 +197,12 @@ beforeEach(async () => {
   await database.delete(batchUploadItems);
   await database.delete(batchUploadSessions);
   await database.delete(usagePeriods);
+  await database.update(subscriptions).set({
+    planId: "STARTER",
+    status: "ACTIVE",
+    currentPeriodStart: new Date("2026-10-01T00:00:00.000Z"),
+    currentPeriodEnd: new Date("2026-11-01T00:00:00.000Z"),
+  }).where(eq(subscriptions.organizationId, ORG));
 });
 
 afterAll(async () => { await pglite.close(); });
@@ -268,7 +280,8 @@ describe("batch commit and archive", () => {
       organizationId: ORG,
       periodStart: new Date("2026-10-01T00:00:00.000Z"),
       periodEnd: new Date("2026-11-01T00:00:00.000Z"),
-      limit: 1,
+      limit: 300,
+      reserved: 299,
     });
     await expect(submitBatch(
       { organizationId: ORG, userId: USER, planId: "STARTER" },
@@ -280,6 +293,27 @@ describe("batch commit and archive", () => {
     expect((await database.select({ value: count() }).from(conversions))[0]?.value).toBe(0);
     expect((await database.select({ value: count() }).from(usageReservations))[0]?.value).toBe(0);
     expect((await database.select().from(batchUploadSessions).where(eq(batchUploadSessions.id, SESSION_TWO)))[0]?.status).toBe("OPEN");
+  });
+
+  it("rechecks the subscription clock after acquiring its database lock", async () => {
+    await seedSession(SESSION_TWO, 2);
+    await database.update(subscriptions).set({ currentPeriodEnd: NOW })
+      .where(eq(subscriptions.organizationId, ORG));
+    await expect(submitBatch(
+      { organizationId: ORG, userId: USER, planId: "STARTER" },
+      { uploadSessionId: SESSION_TWO },
+      "batch-idempotency-key-clock",
+      {
+        database,
+        storage: new MemoryStorage(),
+        randomId: randomUUID,
+        now: () => new Date(NOW.getTime() + 1),
+        publish: async () => undefined,
+        rateLimit: async () => undefined,
+      },
+    )).rejects.toMatchObject({ code: "batch_limit_exceeded" });
+    expect(await database.select().from(batches)).toHaveLength(0);
+    expect(await database.select().from(usageReservations)).toHaveLength(0);
   });
 
   it("recovers an acknowledged batch after the commit response is lost", async () => {

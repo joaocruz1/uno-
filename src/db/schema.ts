@@ -64,6 +64,7 @@ export const requestStatusEnum = pgEnum("request_status", ["PENDING", "COMPLETED
 export const outboxStatusEnum = pgEnum("outbox_status", ["PENDING", "PROCESSING", "PUBLISHED", "FAILED"]);
 export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESSING", "DELIVERED", "FAILED"]);
 export const stripeEventStatusEnum = pgEnum("stripe_event_status", ["PROCESSING", "PROCESSED", "FAILED"]);
+export const billingCheckoutStatusEnum = pgEnum("billing_checkout_status", ["CREATING", "OPEN", "COMPLETED", "EXPIRED", "FAILED"]);
 
 // Better Auth 1.7.7 core tables. Property names stay canonical for the adapter;
 // physical names are snake_case for PostgreSQL tooling and raw SQL.
@@ -187,6 +188,8 @@ export const subscriptions = pgTable(
     currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
     currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
     cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    reconciliationVersion: integer("reconciliation_version").notNull().default(0),
+    lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
   },
@@ -194,6 +197,37 @@ export const subscriptions = pgTable(
     uniqueIndex("subscriptions_organization_id_uq").on(table.organizationId),
     uniqueIndex("subscriptions_stripe_customer_id_uq").on(table.stripeCustomerId).where(sql`${table.stripeCustomerId} is not null`),
     uniqueIndex("subscriptions_stripe_subscription_id_uq").on(table.stripeSubscriptionId).where(sql`${table.stripeSubscriptionId} is not null`),
+    check("subscriptions_reconciliation_version_ck", sql`${table.reconciliationVersion} >= 0`),
+  ],
+);
+
+export const billingCheckoutIntents = pgTable(
+  "billing_checkout_intents",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    planId: planIdEnum("plan_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    providerAttempt: integer("provider_attempt").notNull().default(1),
+    stripeSessionId: text("stripe_session_id"),
+    checkoutUrl: text("checkout_url"),
+    status: billingCheckoutStatusEnum("status").notNull().default("CREATING"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("billing_checkout_intents_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("billing_checkout_intents_org_idempotency_uq").on(table.organizationId, table.idempotencyKey),
+    uniqueIndex("billing_checkout_intents_stripe_session_uq").on(table.stripeSessionId).where(sql`${table.stripeSessionId} is not null`),
+    uniqueIndex("billing_checkout_intents_org_active_uq").on(table.organizationId).where(sql`${table.status} in ('CREATING','OPEN')`),
+    index("billing_checkout_intents_status_expires_idx").on(table.status, table.expiresAt),
+    check("billing_checkout_intents_plan_ck", sql`${table.planId} <> 'FREE'`),
+    check("billing_checkout_intents_idempotency_ck", sql`char_length(${table.idempotencyKey}) between 16 and 128 and ${table.requestHash} ~ '^[0-9a-f]{64}$'`),
+    check("billing_checkout_intents_provider_attempt_ck", sql`${table.providerAttempt} > 0`),
+    check("billing_checkout_intents_open_ck", sql`${table.status} <> 'OPEN' or (${table.stripeSessionId} is not null and ${table.checkoutUrl} is not null and ${table.expiresAt} is not null)`),
   ],
 );
 
@@ -725,16 +759,22 @@ export const processedStripeEvents = pgTable(
   {
     id: text("id").primaryKey().default(uuidDefault),
     stripeEventId: text("stripe_event_id").notNull(),
+    organizationId: text("organization_id").references(() => organizations.id, { onDelete: "set null" }),
     eventType: text("event_type").notNull(),
     payloadHash: text("payload_hash").notNull(),
+    stripeCreatedAt: timestamp("stripe_created_at", { withTimezone: true }).notNull(),
     status: stripeEventStatusEnum("status").notNull().default("PROCESSING"),
+    attempts: integer("attempts").notNull().default(1),
     error: text("error"),
     receivedAt: timestamp("received_at", { withTimezone: true }).notNull().default(now),
     processedAt: timestamp("processed_at", { withTimezone: true }),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
   },
   (table) => [
     uniqueIndex("processed_stripe_events_event_id_uq").on(table.stripeEventId),
     index("processed_stripe_events_status_received_idx").on(table.status, table.receivedAt),
+    index("processed_stripe_events_org_received_idx").on(table.organizationId, table.receivedAt),
+    check("processed_stripe_events_attempts_ck", sql`${table.attempts} > 0`),
   ],
 );
 

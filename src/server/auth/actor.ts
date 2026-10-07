@@ -3,6 +3,7 @@ import { headers as nextHeaders } from "next/headers";
 
 import { getDb, memberships, organizations, subscriptions, user } from "@/db";
 import { AppError } from "@/lib/errors";
+import { effectivePlanId } from "@/server/billing/entitlements";
 
 import { getAuth } from "./index";
 import { ensureDefaultOrganization } from "./organization";
@@ -71,6 +72,9 @@ export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
       organizationName: organizations.name,
       membershipRole: memberships.role,
       planId: subscriptions.planId,
+      subscriptionStatus: subscriptions.status,
+      currentPeriodStart: subscriptions.currentPeriodStart,
+      currentPeriodEnd: subscriptions.currentPeriodEnd,
       platformRole: user.platformRole,
     })
     .from(memberships)
@@ -94,7 +98,12 @@ export async function requireActor(providedHeaders?: Headers): Promise<Actor> {
     organizationId: membership.organizationId,
     organizationName: membership.organizationName,
     membershipRole: membership.membershipRole,
-    planId: membership.planId ?? "FREE",
+    planId: effectivePlanId(membership.planId ? {
+      planId: membership.planId,
+      status: membership.subscriptionStatus ?? "ACTIVE",
+      currentPeriodStart: membership.currentPeriodStart,
+      currentPeriodEnd: membership.currentPeriodEnd,
+    } : undefined),
   };
 }
 

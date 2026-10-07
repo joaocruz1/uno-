@@ -9,14 +9,13 @@ import {
   outboxEvents,
   subscriptions,
   uploadIntents,
-  usagePeriods,
   type UnoDatabase,
 } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions } from "@/lib/label-size";
-import { PLANS, type PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { getStorage, type StorageGateway } from "@/server/storage";
 import {
@@ -46,7 +45,7 @@ type CommitInput = {
   conversionId: string;
   reservationId: string;
   outboxId: string;
-  now: Date;
+  now(): Date;
 };
 
 export type CreationDependencies = {
@@ -106,21 +105,6 @@ export async function recoverCommittedConversion(
   });
 }
 
-function periodFor(now: Date, subscription?: { currentPeriodStart: Date | null; currentPeriodEnd: Date | null }) {
-  if (subscription?.currentPeriodStart && subscription.currentPeriodEnd &&
-    subscription.currentPeriodStart <= now && subscription.currentPeriodEnd > now) {
-    return { start: subscription.currentPeriodStart, end: subscription.currentPeriodEnd };
-  }
-  return {
-    start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-    end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
-  };
-}
-
-function retentionDate(now: Date, planId: PlanId): Date {
-  return new Date(now.getTime() + PLANS[planId].retentionDays * 86_400_000);
-}
-
 async function consumedConflict(
   organizationId: string,
   uploadIntentId: string,
@@ -144,7 +128,6 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
     const intent = locked[0];
     if (!intent) throw new AppError("upload_not_found", "Upload não encontrado.", 404);
     if (intent.consumedAt) return consumedConflict(input.actor.organizationId, intent.id, transaction);
-    if (intent.expiresAt <= input.now) throw new AppError("upload_expired", "Este upload expirou.", 410);
 
     if (process.env.NODE_ENV !== "production" && process.env.UNO_ALLOW_DRAFT_TEMPLATES === "true") {
       await seedInitialDraftTemplate(transaction);
@@ -154,29 +137,19 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
 
     const subscriptionRows = await transaction.select({
       planId: subscriptions.planId,
+      status: subscriptions.status,
       currentPeriodStart: subscriptions.currentPeriodStart,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
     }).from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const subscription = subscriptionRows[0];
-    const planId: PlanId = subscription?.planId ?? "FREE";
-    if (input.upload.contentLength > PLANS[planId].maxFileMB * 1_024 * 1_024) {
+    const decisionNow = input.now();
+    if (intent.expiresAt <= decisionNow) throw new AppError("upload_expired", "Este upload expirou.", 410);
+    const entitlement = effectivePlanFromSubscription(subscription, decisionNow);
+    if (input.upload.contentLength > entitlement.plan.maxFileMB * 1_024 * 1_024) {
       throw new AppError("file_too_large", "O arquivo excede o limite permitido pelo plano atual.", 413);
     }
-    const period = periodFor(input.now, subscription);
-    await transaction.insert(usagePeriods).values({
-      organizationId: input.actor.organizationId,
-      periodStart: period.start,
-      periodEnd: period.end,
-      limit: PLANS[planId].monthlyLimit,
-    }).onConflictDoNothing({ target: [usagePeriods.organizationId, usagePeriods.periodStart, usagePeriods.periodEnd] });
-    const usageRows = await transaction.select({ id: usagePeriods.id }).from(usagePeriods)
-      .where(and(
-        eq(usagePeriods.organizationId, input.actor.organizationId),
-        eq(usagePeriods.periodStart, period.start),
-        eq(usagePeriods.periodEnd, period.end),
-      )).limit(1).for("update");
-    const usagePeriod = usageRows[0];
-    if (!usagePeriod) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    const usagePeriod = await lockCurrentUsagePeriod(input.actor.organizationId, entitlement, decisionNow, transaction);
+    assertUsageAvailable(usagePeriod, entitlement.plan.monthlyLimit);
 
     const dimensions = sizeDimensions(input.request.size);
     const created = await transaction.insert(conversions).values({
@@ -198,10 +171,10 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
       inputObjectKey: input.snapshotKey,
       inputSha256: input.upload.checksumSha256,
       sourceByteLength: input.upload.contentLength,
-      artifactsExpireAt: retentionDate(input.now, planId),
-      queuedAt: input.now,
-      createdAt: input.now,
-      updatedAt: input.now,
+      artifactsExpireAt: new Date(decisionNow.getTime() + entitlement.plan.retentionDays * 86_400_000),
+      queuedAt: decisionNow,
+      createdAt: decisionNow,
+      updatedAt: decisionNow,
     }).returning({ createdAt: conversions.createdAt });
 
     try {
@@ -217,7 +190,7 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
       }
       throw error;
     }
-    const consumed = await transaction.update(uploadIntents).set({ consumedAt: input.now })
+    const consumed = await transaction.update(uploadIntents).set({ consumedAt: decisionNow })
       .where(and(eq(uploadIntents.id, intent.id), eq(uploadIntents.organizationId, input.actor.organizationId), isNull(uploadIntents.consumedAt)))
       .returning({ id: uploadIntents.id });
     if (consumed.length !== 1) return consumedConflict(input.actor.organizationId, intent.id, transaction);
@@ -231,7 +204,7 @@ export async function commitConversion(input: CommitInput, database: UnoDatabase
       deduplicationKey: `conversion.queued.${input.conversionId}`,
       payload: { conversionId: input.conversionId },
     });
-    return { createdAt: created[0]?.createdAt ?? input.now, outboxId: input.outboxId };
+    return { createdAt: created[0]?.createdAt ?? decisionNow, outboxId: input.outboxId };
   });
 }
 
@@ -274,7 +247,7 @@ export async function createConversionFromUpload(
       conversionId,
       reservationId: dependencies.randomId(),
       outboxId: dependencies.randomId(),
-      now: dependencies.now(),
+      now: dependencies.now,
   };
   try {
     committed = await dependencies.commit(commitInput);

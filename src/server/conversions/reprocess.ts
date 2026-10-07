@@ -9,14 +9,14 @@ import {
   outboxEvents,
   subscriptions,
   templates,
-  usagePeriods,
   type UnoDatabase,
 } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions, type OutputSize } from "@/lib/label-size";
-import { PLANS, type PlanId } from "@/lib/plans";
+import { getPlanCatalog, type PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { getStorage, type StorageGateway } from "@/server/storage";
@@ -99,7 +99,7 @@ function defaults(): ReprocessDependencies {
       await enforceRateLimit({
         namespace: "dashboard-reprocess",
         identifier: actor.organizationId,
-        limit: PLANS[actor.planId].rateLimit || 30,
+        limit: getPlanCatalog()[actor.planId].rateLimit || 30,
       });
     },
     async publish(eventId) {
@@ -110,19 +110,8 @@ function defaults(): ReprocessDependencies {
   };
 }
 
-function periodFor(now: Date, subscription?: { currentPeriodStart: Date | null; currentPeriodEnd: Date | null }) {
-  if (subscription?.currentPeriodStart && subscription.currentPeriodEnd &&
-    subscription.currentPeriodStart <= now && subscription.currentPeriodEnd > now) {
-    return { start: subscription.currentPeriodStart, end: subscription.currentPeriodEnd };
-  }
-  return {
-    start: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)),
-    end: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)),
-  };
-}
-
 function retentionDate(now: Date, planId: PlanId): Date {
-  return new Date(now.getTime() + PLANS[planId].retentionDays * 86_400_000);
+  return new Date(now.getTime() + getPlanCatalog()[planId].retentionDays * 86_400_000);
 }
 
 function sourceSize(source: SourceConversion): OutputSize {
@@ -295,12 +284,12 @@ export async function commitReprocessedConversion(input: CommitInput, database: 
 
     const existing = await lockedIdempotentResult(input, transaction);
     if (existing) return existing;
-    const now = input.now();
+    const sourceNow = input.now();
     if (source.status === "queued" || source.status === "processing") {
       throw new AppError("conversion_active", "A conversão ainda está em processamento.", 409);
     }
     if (
-      !source.artifactsExpireAt || source.artifactsExpireAt <= now ||
+      !source.artifactsExpireAt || source.artifactsExpireAt <= sourceNow ||
       source.inputSha256 !== input.source.inputSha256 || source.inputObjectKey !== input.source.inputObjectKey ||
       source.sourceByteLength !== input.source.sourceByteLength
     ) {
@@ -311,27 +300,22 @@ export async function commitReprocessedConversion(input: CommitInput, database: 
     assertTemplateEligible(template, input.request.size);
     const subscriptionRows = await transaction.select({
       planId: subscriptions.planId,
+      status: subscriptions.status,
       currentPeriodStart: subscriptions.currentPeriodStart,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
     }).from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const subscription = subscriptionRows[0];
-    const planId: PlanId = subscription?.planId ?? "FREE";
-    if (source.sourceByteLength > PLANS[planId].maxFileMB * 1_024 * 1_024) {
+    const decisionNow = input.now();
+    if (!source.artifactsExpireAt || source.artifactsExpireAt <= decisionNow) {
+      throw new AppError("source_unavailable", "O arquivo de origem não está mais disponível.", 410);
+    }
+    const entitlement = effectivePlanFromSubscription(subscription, decisionNow);
+    const planId = entitlement.planId;
+    if (source.sourceByteLength > entitlement.plan.maxFileMB * 1_024 * 1_024) {
       throw new AppError("file_too_large", "O arquivo excede o limite permitido pelo plano atual.", 413);
     }
-    const period = periodFor(now, subscription);
-    await transaction.insert(usagePeriods).values({
-      organizationId: input.actor.organizationId,
-      periodStart: period.start,
-      periodEnd: period.end,
-      limit: PLANS[planId].monthlyLimit,
-    }).onConflictDoNothing({ target: [usagePeriods.organizationId, usagePeriods.periodStart, usagePeriods.periodEnd] });
-    const periods = await transaction.select({ id: usagePeriods.id }).from(usagePeriods).where(and(
-      eq(usagePeriods.organizationId, input.actor.organizationId),
-      eq(usagePeriods.periodStart, period.start),
-      eq(usagePeriods.periodEnd, period.end),
-    )).limit(1).for("update");
-    if (!periods[0]) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    const usagePeriod = await lockCurrentUsagePeriod(input.actor.organizationId, entitlement, decisionNow, transaction);
+    assertUsageAvailable(usagePeriod, entitlement.plan.monthlyLimit);
 
     const dimensions = sizeDimensions(input.request.size);
     const createdRows = await transaction.insert(conversions).values({
@@ -355,17 +339,17 @@ export async function commitReprocessedConversion(input: CommitInput, database: 
       inputObjectKey: input.snapshotKey,
       inputSha256: source.inputSha256,
       sourceByteLength: source.sourceByteLength,
-      artifactsExpireAt: retentionDate(now, planId),
-      queuedAt: now,
-      createdAt: now,
-      updatedAt: now,
+      artifactsExpireAt: retentionDate(decisionNow, planId),
+      queuedAt: decisionNow,
+      createdAt: decisionNow,
+      updatedAt: decisionNow,
     }).returning({ id: conversions.id, status: conversions.status, progress: conversions.progress, createdAt: conversions.createdAt });
 
     try {
       await reserveUsage({
         reservationId: input.reservationId,
         organizationId: input.actor.organizationId,
-        usagePeriodId: periods[0].id,
+        usagePeriodId: usagePeriod.id,
         conversionId: input.conversionId,
       }, transaction);
     } catch (error) {

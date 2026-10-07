@@ -68,7 +68,7 @@ function dependencies(overrides: Partial<CreationDependencies> = {}) {
       checksumSha256: "a".repeat(64),
       originalFileName: "synthetic.pdf",
     })),
-    commit: vi.fn(async (input) => ({ createdAt: input.now, outboxId: input.outboxId })),
+    commit: vi.fn(async (input: Parameters<CreationDependencies["commit"]>[0]) => ({ createdAt: input.now(), outboxId: input.outboxId })),
     recoverCommitted: vi.fn(async () => null),
     publish: vi.fn(async () => undefined),
     ...overrides,

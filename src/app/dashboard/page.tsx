@@ -2,7 +2,7 @@ import { and, count, eq, gt, lte } from "drizzle-orm";
 
 import { conversions, getDb, usagePeriods } from "@/db";
 import { ButtonLink } from "@/components/ui";
-import { PLANS } from "@/lib/plans";
+import { getPlanCatalog } from "@/lib/plans";
 import { requireActor } from "@/server/http";
 
 export default async function DashboardPage() {
@@ -17,8 +17,8 @@ export default async function DashboardPage() {
       .where(and(eq(usagePeriods.organizationId, actor.organizationId), lte(usagePeriods.periodStart, currentTime), gt(usagePeriods.periodEnd, currentTime)))
       .limit(1),
   ]);
-  const configuredPlan = PLANS[actor.planId];
-  const usage = usageRows[0] ?? { reserved: 0, confirmed: 0, limit: configuredPlan.monthlyLimit };
+  const configuredPlan = getPlanCatalog()[actor.planId];
+  const usage = { reserved: usageRows[0]?.reserved ?? 0, confirmed: usageRows[0]?.confirmed ?? 0, limit: configuredPlan.monthlyLimit };
   const remaining = Math.max(0, usage.limit - usage.reserved - usage.confirmed);
 
   const cards = [

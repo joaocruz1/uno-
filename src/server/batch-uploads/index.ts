@@ -13,7 +13,7 @@ import { AppError } from "@/lib/errors";
 import { positiveIntegerEnv } from "@/lib/env";
 import { batchUploadSessionSchema, type BatchUploadResponse, type BatchUploadSession } from "@/lib/batch-model";
 import { outputSizeSchema, sizeDimensions } from "@/lib/label-size";
-import { PLANS } from "@/lib/plans";
+import { getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getStorage, type StorageGateway } from "@/server/storage";
@@ -22,7 +22,7 @@ import { assertTemplateEligible, findTemplate, INITIAL_TEMPLATE, seedInitialDraf
 const DEFAULT_SESSION_TTL_SECONDS = 24 * 60 * 60;
 const SIGNED_UPLOAD_SECONDS = 300;
 const SYNC_FINALIZE_MAX_BYTES = 20 * 1_024 * 1_024;
-const MAX_MANIFEST_ITEMS = PLANS.BUSINESS.batchLimit;
+const MAX_MANIFEST_ITEMS = 10_000;
 
 const safeName = z.string().trim().min(1).max(160).refine((value) => !/[\x00-\x1f\x7f/\\]/u.test(value));
 const manifestItemSchema = z.object({
@@ -57,7 +57,7 @@ function defaults(): BatchUploadDependencies {
     rateLimit: async (actor) => enforceRateLimit({
       namespace: "dashboard-batch-upload",
       identifier: actor.organizationId,
-      limit: PLANS[actor.planId].rateLimit || 30,
+      limit: getPlanCatalog()[actor.planId].rateLimit || 30,
     }),
   };
 }
@@ -111,7 +111,7 @@ export async function createBatchUploadSession(
   dependencies: BatchUploadDependencies = defaults(),
 ): Promise<BatchUploadSession> {
   const input = createBatchUploadSchema.parse(rawInput);
-  const plan = PLANS[actor.planId];
+  const plan = getPlanCatalog()[actor.planId];
   if (input.items.length > plan.batchLimit) throw new AppError("batch_limit_exceeded", "O lote excede o limite do plano.", 413);
   const maxFileBytes = plan.maxFileMB * 1_024 * 1_024;
   if (input.items.some((item) => item.contentLength > maxFileBytes)) {

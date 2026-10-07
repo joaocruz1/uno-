@@ -88,7 +88,7 @@ const storage = new MemoryStorage();
 
 async function applyMigrations() {
   const directory = fileURLToPath(new URL("../drizzle", import.meta.url));
-  const names = (await readdir(directory)).filter((name) => /^000[0-4]_.*\.sql$/.test(name)).sort();
+  const names = (await readdir(directory)).filter((name) => /^000[0-6]_.*\.sql$/.test(name)).sort();
   for (const name of names) {
     const migration = await readFile(`${directory}/${name}`, "utf8");
     for (const statement of migration.split("--> statement-breakpoint")) {
@@ -382,7 +382,12 @@ describe("conversion reprocessing", () => {
   it("rechecks the current plan after reading the retained source", async () => {
     const large = Buffer.alloc(5 * 1_024 * 1_024 + 1, 1);
     const sha = createHash("sha256").update(large).digest("hex");
-    await database.update(subscriptions).set({ planId: "BUSINESS" }).where(eq(subscriptions.organizationId, ORG));
+    await database.update(subscriptions).set({
+      planId: "BUSINESS",
+      status: "ACTIVE",
+      currentPeriodStart: new Date(NOW.getTime() - 60_000),
+      currentPeriodEnd: new Date(NOW.getTime() + 60 * 60_000),
+    }).where(eq(subscriptions.organizationId, ORG));
     await insertConversion({
       id: SOURCE,
       sourceByteLength: large.length,
@@ -390,7 +395,7 @@ describe("conversion reprocessing", () => {
     });
     storage.objects.set(`organizations/${ORG}/conversion-inputs/${SOURCE}.pdf`, large);
     storage.onRead = async () => {
-      await database.update(subscriptions).set({ planId: "FREE" }).where(eq(subscriptions.organizationId, ORG));
+      await database.update(subscriptions).set({ planId: "FREE", currentPeriodStart: null, currentPeriodEnd: null }).where(eq(subscriptions.organizationId, ORG));
     };
     await expect(reprocessConversion(
       { organizationId: ORG, userId: USER, planId: "BUSINESS" }, SOURCE, "reprocess-plan-change", {}, reprocessDependencies(),
