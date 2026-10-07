@@ -1,0 +1,215 @@
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+
+import { AppError } from "@/lib/errors";
+
+export const MAX_SIGNED_URL_SECONDS = 300;
+
+export type StoredObjectHead = {
+  contentLength: number;
+  contentType?: string;
+  checksumSha256?: string;
+};
+
+export type SignedUploadRequest = {
+  key: string;
+  contentLength: number;
+  contentType: string;
+  checksumSha256?: string;
+  expiresInSeconds?: number;
+};
+
+export type SignedUpload = {
+  url: string;
+  headers: Record<string, string>;
+  expiresAt: Date;
+};
+
+export interface StorageGateway {
+  signUpload(input: SignedUploadRequest): Promise<SignedUpload>;
+  signDownload(key: string, expiresInSeconds?: number): Promise<{ url: string; expiresAt: Date }>;
+  head(key: string): Promise<StoredObjectHead>;
+  getRange(key: string, maxBytes: number): Promise<Buffer>;
+  read(key: string, maxBytes: number): Promise<Buffer>;
+  putBytes(key: string, bytes: Buffer, contentType: string, maxBytes: number): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+type StorageState = { client?: S3Client; gateway?: StorageGateway };
+const globalStorage = globalThis as typeof globalThis & { __unoStorage?: StorageState };
+const state = globalStorage.__unoStorage ?? {};
+if (process.env.NODE_ENV !== "production") globalStorage.__unoStorage = state;
+
+function required(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+  return value;
+}
+
+function bucket(): string {
+  return required("S3_BUCKET");
+}
+
+function client(): S3Client {
+  if (state.client) return state.client;
+  const endpoint = required("S3_ENDPOINT");
+  const localEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(endpoint);
+  state.client = new S3Client({
+    endpoint,
+    region: required("S3_REGION"),
+    credentials: {
+      accessKeyId: required("S3_ACCESS_KEY_ID"),
+      secretAccessKey: required("S3_SECRET_ACCESS_KEY"),
+    },
+    forcePathStyle: localEndpoint || process.env.S3_FORCE_PATH_STYLE === "true",
+    requestChecksumCalculation: "WHEN_REQUIRED",
+    responseChecksumValidation: "WHEN_REQUIRED",
+  });
+  return state.client;
+}
+
+function expiration(seconds = MAX_SIGNED_URL_SECONDS): { seconds: number; expiresAt: Date } {
+  const bounded = Math.min(MAX_SIGNED_URL_SECONDS, Math.max(1, Math.trunc(seconds)));
+  return { seconds: bounded, expiresAt: new Date(Date.now() + bounded * 1_000) };
+}
+
+function storageError(error: unknown): AppError {
+  const candidate = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  if (candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" || candidate?.$metadata?.httpStatusCode === 404) {
+    return new AppError("upload_not_found", "Upload não encontrado.", 404);
+  }
+  if (error instanceof AppError) return error;
+  return new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+}
+
+async function bodyToBuffer(body: unknown, maxBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) {
+    throw new AppError("invalid_upload", "Upload inválido.", 400);
+  }
+  const chunks: Buffer[] = [];
+  let length = 0;
+  if (!body || !(Symbol.asyncIterator in Object(body))) {
+    throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+  }
+  for await (const rawChunk of body as AsyncIterable<Uint8Array | string>) {
+    const chunk = Buffer.isBuffer(rawChunk) ? rawChunk : Buffer.from(rawChunk);
+    length += chunk.length;
+    if (length > maxBytes) throw new AppError("file_too_large", "O arquivo excede o limite permitido.", 413);
+    chunks.push(chunk);
+  }
+  return Buffer.concat(chunks, length);
+}
+
+class S3StorageGateway implements StorageGateway {
+  async signUpload(input: SignedUploadRequest): Promise<SignedUpload> {
+    const { seconds, expiresAt } = expiration(input.expiresInSeconds);
+    const headers: Record<string, string> = {
+      "content-type": input.contentType,
+      "content-length": String(input.contentLength),
+    };
+    if (input.checksumSha256) headers["x-amz-checksum-sha256"] = input.checksumSha256;
+    try {
+      const url = await getSignedUrl(
+        client(),
+        new PutObjectCommand({
+          Bucket: bucket(),
+          Key: input.key,
+          ContentType: input.contentType,
+          ContentLength: input.contentLength,
+          ChecksumSHA256: input.checksumSha256,
+        }),
+        { expiresIn: seconds },
+      );
+      return { url, headers, expiresAt };
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async signDownload(key: string, expiresInSeconds?: number): Promise<{ url: string; expiresAt: Date }> {
+    const { seconds, expiresAt } = expiration(expiresInSeconds);
+    try {
+      const url = await getSignedUrl(client(), new GetObjectCommand({ Bucket: bucket(), Key: key }), { expiresIn: seconds });
+      return { url, expiresAt };
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async head(key: string): Promise<StoredObjectHead> {
+    try {
+      const output = await client().send(new HeadObjectCommand({ Bucket: bucket(), Key: key }));
+      if (output.ContentLength === undefined) throw new AppError("invalid_upload", "Upload inválido.", 400);
+      return {
+        contentLength: output.ContentLength,
+        contentType: output.ContentType,
+        checksumSha256: output.ChecksumSHA256,
+      };
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async getRange(key: string, maxBytes: number): Promise<Buffer> {
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1) throw new AppError("invalid_upload", "Upload inválido.", 400);
+    try {
+      const output = await client().send(
+        new GetObjectCommand({ Bucket: bucket(), Key: key, Range: `bytes=0-${maxBytes - 1}` }),
+      );
+      return await bodyToBuffer(output.Body, maxBytes);
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async read(key: string, maxBytes: number): Promise<Buffer> {
+    try {
+      const output = await client().send(new GetObjectCommand({ Bucket: bucket(), Key: key }));
+      if (output.ContentLength !== undefined && output.ContentLength > maxBytes) {
+        throw new AppError("file_too_large", "O arquivo excede o limite permitido.", 413);
+      }
+      return await bodyToBuffer(output.Body, maxBytes);
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async putBytes(key: string, bytes: Buffer, contentType: string, maxBytes: number): Promise<void> {
+    if (bytes.length > maxBytes) throw new AppError("file_too_large", "O arquivo excede o limite permitido.", 413);
+    try {
+      await client().send(
+        new PutObjectCommand({ Bucket: bucket(), Key: key, Body: bytes, ContentLength: bytes.length, ContentType: contentType }),
+      );
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async delete(key: string): Promise<void> {
+    try {
+      await client().send(new DeleteObjectCommand({ Bucket: bucket(), Key: key }));
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+}
+
+export function getStorage(): StorageGateway {
+  state.gateway ??= new S3StorageGateway();
+  return state.gateway;
+}
+
+export const signPrivateUpload = (input: SignedUploadRequest) => getStorage().signUpload(input);
+export const signPrivateDownload = (key: string, expiresInSeconds?: number) => getStorage().signDownload(key, expiresInSeconds);
+export const headPrivateObject = (key: string) => getStorage().head(key);
+export const getPrivateObjectRange = (key: string, maxBytes: number) => getStorage().getRange(key, maxBytes);
+export const readPrivateObject = (key: string, maxBytes: number) => getStorage().read(key, maxBytes);
+export const putPrivateBytes = (key: string, bytes: Buffer, contentType: string, maxBytes: number) =>
+  getStorage().putBytes(key, bytes, contentType, maxBytes);
+export const deletePrivateObject = (key: string) => getStorage().delete(key);

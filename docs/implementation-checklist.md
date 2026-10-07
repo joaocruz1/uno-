@@ -22,7 +22,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
   supported loading/empty/error states.
 - [x] **CODE + AUTOMATED PASS — 03 Authentication:** Better Auth flows, organizations,
   membership/role enforcement, session security, onboarding, and tenant tests.
-- [ ] **NOT VERIFIED — 04 Upload:** private object upload, MIME/signature/size
+- [x] **CODE + AUTOMATED PASS — 04 Upload:** private object upload, MIME/signature/size
   validation, plan limits, safe metadata, and no document contents in telemetry.
 - [ ] **NOT VERIFIED — 05 Engine:** six contract stages, initial versioned
   template, synthetic fixtures, digital embedding, scan OCR guidance, typed

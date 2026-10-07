@@ -40,6 +40,7 @@ export const conversionStatusEnum = pgEnum("conversion_status", [
   "deleting",
   "deleted",
 ]);
+export const conversionSourceEnum = pgEnum("conversion_source", ["dashboard", "api"]);
 export const batchStatusEnum = pgEnum("batch_status", [
   "queued",
   "processing",
@@ -248,6 +249,7 @@ export const uploadIntents = pgTable(
     contentType: text("content_type").notNull().default("application/pdf"),
     contentLength: integer("content_length").notNull(),
     checksumSha256: text("checksum_sha256"),
+    originalFileName: text("original_file_name"),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
@@ -258,6 +260,10 @@ export const uploadIntents = pgTable(
     index("upload_intents_org_expires_idx").on(table.organizationId, table.expiresAt),
     index("upload_intents_created_by_user_id_idx").on(table.createdByUserId),
     check("upload_intents_content_length_ck", sql`${table.contentLength} > 0`),
+    check(
+      "upload_intents_original_file_name_ck",
+      sql`${table.originalFileName} is null or (char_length(${table.originalFileName}) between 1 and 160 and position('/' in ${table.originalFileName}) = 0 and position(chr(92) in ${table.originalFileName}) = 0 and ${table.originalFileName} !~ '[[:cntrl:]]')`,
+    ),
   ],
 );
 
@@ -306,13 +312,19 @@ export const conversions = pgTable(
     templateVersion: text("template_version").notNull(),
     engineVersion: text("engine_version").notNull(),
     status: conversionStatusEnum("status").notNull().default("queued"),
+    source: conversionSourceEnum("source").notNull().default("dashboard"),
+    originalFileName: text("original_file_name"),
     progress: integer("progress").notNull().default(0),
     outputPreset: text("output_preset").notNull(),
     outputWidthMm: numeric("output_width_mm", { precision: 6, scale: 2 }).notNull(),
     outputHeightMm: numeric("output_height_mm", { precision: 6, scale: 2 }).notNull(),
     inputObjectKey: text("input_object_key").notNull(),
+    inputSha256: text("input_sha256"),
     outputObjectKey: text("output_object_key"),
     sourceByteLength: integer("source_byte_length").notNull(),
+    inputPages: integer("input_pages"),
+    outputPages: integer("output_pages"),
+    processingTimeMs: integer("processing_time_ms"),
     attempts: integer("attempts").notNull().default(0),
     maxAttempts: integer("max_attempts").notNull().default(3),
     errorCode: text("error_code"),
@@ -337,6 +349,14 @@ export const conversions = pgTable(
     check("conversions_progress_ck", sql`${table.progress} between 0 and 100`),
     check("conversions_attempts_ck", sql`${table.attempts} >= 0 and ${table.maxAttempts} > 0 and ${table.attempts} <= ${table.maxAttempts}`),
     check("conversions_source_byte_length_ck", sql`${table.sourceByteLength} > 0`),
+    check("conversions_input_sha256_ck", sql`${table.inputSha256} is null or ${table.inputSha256} ~ '^[0-9a-f]{64}$'`),
+    check("conversions_input_pages_ck", sql`${table.inputPages} is null or ${table.inputPages} > 0`),
+    check("conversions_output_pages_ck", sql`${table.outputPages} is null or ${table.outputPages} > 0`),
+    check("conversions_processing_time_ck", sql`${table.processingTimeMs} is null or ${table.processingTimeMs} >= 0`),
+    check(
+      "conversions_original_file_name_ck",
+      sql`${table.originalFileName} is null or (char_length(${table.originalFileName}) between 1 and 160 and position('/' in ${table.originalFileName}) = 0 and position(chr(92) in ${table.originalFileName}) = 0 and ${table.originalFileName} !~ '[[:cntrl:]]')`,
+    ),
     check("conversions_output_size_ck", sql`${table.outputWidthMm} between 50 and 210 and ${table.outputHeightMm} between 50 and 300`),
   ],
 );

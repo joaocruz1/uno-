@@ -15,10 +15,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "tsx scripts/migrate.ts",
-    "worker": "tsx src/workers/index.ts",
+    "db:migrate": "node --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
+    "worker": "node --env-file-if-exists=.env.local --import tsx src/workers/index.ts",
     "test:e2e": "playwright test",
-    "check": "node scripts/verify-phase.mjs"
+    "check": "node scripts/verify-phase.mjs",
+    "dev:s3": "node --env-file-if-exists=.env.local scripts/local-s3.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",

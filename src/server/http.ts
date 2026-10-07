@@ -39,7 +39,12 @@ export function errorResponse(error: unknown, id = requestId()): Response {
       ...(appError.details ? { details: appError.details } : {}),
     },
   };
-  return Response.json(body, { status: appError.status, headers: { "cache-control": "no-store" } });
+  const headers: Record<string, string> = { "cache-control": "no-store" };
+  const retryAfterSeconds = appError.details?.retryAfterSeconds;
+  if (appError.status === 429 && typeof retryAfterSeconds === "number" && Number.isFinite(retryAfterSeconds)) {
+    headers["retry-after"] = String(Math.max(1, Math.ceil(retryAfterSeconds)));
+  }
+  return Response.json(body, { status: appError.status, headers });
 }
 
 function isMutation(method: string): boolean {

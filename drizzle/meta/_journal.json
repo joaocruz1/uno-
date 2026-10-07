@@ -15,6 +15,13 @@
       "when": 1791375946166,
       "tag": "0001_quota_functions",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791377499046,
+      "tag": "0002_stiff_mantis",
+      "breakpoints": true
     }
   ]
 }
