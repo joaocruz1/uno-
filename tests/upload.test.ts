@@ -9,6 +9,7 @@ import { enforceRateLimit, type FixedWindowStore } from "@/server/rate-limit";
 import type { StorageGateway, StoredObjectHead } from "@/server/storage";
 import {
   createUploadIntent,
+  inspectValidatedUpload,
   readValidatedUpload,
   validateUpload,
   type UploadDependencies,
@@ -26,6 +27,7 @@ class MemoryStorage implements StorageGateway {
   bytes = PDF;
   headValue: StoredObjectHead = { contentLength: PDF.length, contentType: "application/pdf" };
   signedInput?: Parameters<StorageGateway["signUpload"]>[0];
+  fullReads = 0;
 
   async signUpload(input: Parameters<StorageGateway["signUpload"]>[0]) {
     this.signedInput = input;
@@ -53,11 +55,13 @@ class MemoryStorage implements StorageGateway {
   }
 
   async read(_key: string, maxBytes: number) {
+    this.fullReads += 1;
     if (this.bytes.length > maxBytes) throw new AppError("file_too_large", "too large", 413);
     return this.bytes;
   }
 
   async putBytes() {}
+  async copy() {}
   async delete() {}
   async openReadStream() { return Readable.from([this.bytes]); }
   async beginMultipartUpload() { return "upload-id"; }
@@ -225,6 +229,50 @@ describe("private upload intents", () => {
       checksumSha256: checksum,
       originalFileName: "documento.pdf",
     });
+  });
+
+  it("inspects a checksummed upload from metadata and the leading range without downloading it", async () => {
+    const storage = new MemoryStorage();
+    const checksum = createHash("sha256").update(PDF).digest("hex");
+    const result = await inspectValidatedUpload(intent({ checksumSha256: checksum }), { storage, now: NOW });
+    expect(result).toEqual({
+      contentLength: PDF.length,
+      contentType: "application/pdf",
+      checksumSha256: checksum,
+      originalFileName: "documento.pdf",
+    });
+    expect(result).not.toHaveProperty("bytes");
+    expect(storage.fullReads).toBe(0);
+  });
+
+  it("rejects an inspected upload whose size, media type or PDF magic is wrong", async () => {
+    const checksum = "a".repeat(64);
+    const wrongSize = new MemoryStorage();
+    wrongSize.headValue.contentLength += 1;
+    await expect(inspectValidatedUpload(intent({ checksumSha256: checksum }), { storage: wrongSize, now: NOW }))
+      .rejects.toSatisfy((error: unknown) => errorCode(error) === "invalid_upload");
+
+    const wrongType = new MemoryStorage();
+    wrongType.headValue.contentType = "text/plain";
+    await expect(inspectValidatedUpload(intent({ checksumSha256: checksum }), { storage: wrongType, now: NOW }))
+      .rejects.toSatisfy((error: unknown) => errorCode(error) === "invalid_file_type");
+
+    const noMagic = new MemoryStorage();
+    noMagic.bytes = Buffer.from("plain text with no signature", "ascii");
+    noMagic.headValue.contentLength = noMagic.bytes.length;
+    await expect(inspectValidatedUpload(
+      intent({ checksumSha256: checksum, contentLength: noMagic.bytes.length }),
+      { storage: noMagic, now: NOW },
+    )).rejects.toSatisfy((error: unknown) => errorCode(error) === "invalid_pdf");
+
+    await expect(inspectValidatedUpload(intent({ checksumSha256: checksum, expiresAt: NOW }), { storage: new MemoryStorage(), now: NOW }))
+      .rejects.toSatisfy((error: unknown) => errorCode(error) === "upload_expired");
+    expect(wrongSize.fullReads + wrongType.fullReads + noMagic.fullReads).toBe(0);
+  });
+
+  it("refuses to inspect an intent without a declared checksum", async () => {
+    await expect(inspectValidatedUpload(intent(), { storage: new MemoryStorage(), now: NOW }))
+      .rejects.toThrow("upload_checksum_required");
   });
 
   it("rejects an object whose actual size differs from the signed intent", async () => {

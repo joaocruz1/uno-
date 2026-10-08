@@ -40,6 +40,7 @@ class MemoryStorage implements StorageGateway {
     return Buffer.from(bytes);
   }
   async putBytes(key: string, bytes: Buffer) { this.objects.set(key, Buffer.from(bytes)); }
+  async copy(sourceKey: string, targetKey: string) { this.objects.set(targetKey, Buffer.from(await this.read(sourceKey, Number.MAX_SAFE_INTEGER))); }
   async delete(key: string) { this.objects.delete(key); }
   async openReadStream(key: string) { return Readable.from([await this.read(key, Number.MAX_SAFE_INTEGER)]); }
   async beginMultipartUpload(key: string) {

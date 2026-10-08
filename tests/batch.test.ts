@@ -76,6 +76,11 @@ class MemoryStorage implements StorageGateway {
     return Buffer.from(bytes);
   }
   async putBytes(key: string, bytes: Buffer) { this.objects.set(key, Buffer.from(bytes)); }
+  async copy(sourceKey: string, targetKey: string) {
+    const bytes = this.objects.get(sourceKey);
+    if (!bytes) throw new AppError("upload_not_found", "missing", 404);
+    this.objects.set(targetKey, Buffer.from(bytes));
+  }
   async delete(key: string) { this.objects.delete(key); }
   async openReadStream(key: string) {
     const bytes = this.objects.get(key);

@@ -69,6 +69,12 @@ class MemoryStorage implements StorageGateway {
     if (bytes.length > maxBytes) throw new Error("too large");
     this.objects.set(key, Buffer.from(bytes));
   }
+  async copy(sourceKey: string, targetKey: string) {
+    this.operations.push(`copy:${sourceKey}:${targetKey}`);
+    const bytes = this.objects.get(sourceKey);
+    if (!bytes) throw new AppError("upload_not_found", "missing", 404);
+    this.objects.set(targetKey, Buffer.from(bytes));
+  }
   async delete(key: string) {
     this.operations.push(`delete:${key}`);
     this.objects.delete(key);
