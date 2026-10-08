@@ -165,7 +165,8 @@ async function scannedFixture(bytes: Uint8Array, rotations: SyntheticPdfOptions[
   const output = await PDFDocument.create();
   try {
     for (let pageNumber = 1; pageNumber <= 2; pageNumber += 1) {
-      const bitmap = await renderer.render(pageNumber, 300, 0);
+      const bitmap = await renderer.render(pageNumber, 300, 0, { png: true });
+      if (!bitmap.png) throw new Error("PNG was requested but not produced");
       const image = await output.embedPng(bitmap.png);
       const page = output.addPage([WIDTH, HEIGHT]);
       page.drawImage(image, { x: 0, y: 0, width: WIDTH, height: HEIGHT });
