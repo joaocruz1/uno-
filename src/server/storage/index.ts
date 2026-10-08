@@ -69,7 +69,6 @@ function bucket(): string {
 function client(): S3Client {
   if (state.client) return state.client;
   const endpoint = required("S3_ENDPOINT");
-  const localEndpoint = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(endpoint);
   state.client = new S3Client({
     endpoint,
     region: required("S3_REGION"),
@@ -77,7 +76,9 @@ function client(): S3Client {
       accessKeyId: required("S3_ACCESS_KEY_ID"),
       secretAccessKey: required("S3_SECRET_ACCESS_KEY"),
     },
-    forcePathStyle: localEndpoint || process.env.S3_FORCE_PATH_STYLE === "true",
+    // Path-style keeps signed URLs on the endpoint host itself, which is the origin the
+    // Content-Security-Policy allows. R2 and MinIO both accept it; opt out with "false".
+    forcePathStyle: process.env.S3_FORCE_PATH_STYLE !== "false",
     requestChecksumCalculation: "WHEN_REQUIRED",
     responseChecksumValidation: "WHEN_REQUIRED",
   });
