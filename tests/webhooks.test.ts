@@ -98,6 +98,14 @@ async function migrate() {
   }
 }
 
+// Both organizations hold the API add-on; setPlan() only moves the plan underneath it.
+const ADDON = { apiAddonStatus: "ACTIVE" as const, apiAddonCurrentPeriodEnd: new Date("2026-12-01") };
+
+async function setAddon(organizationId: string, status: "ACTIVE" | "CANCELED" | null) {
+  await database.update(subscriptions).set({ apiAddonStatus: status, apiAddonCurrentPeriodEnd: status ? ADDON.apiAddonCurrentPeriodEnd : null })
+    .where(eq(subscriptions.organizationId, organizationId));
+}
+
 async function setPlan(organizationId: string, planId: "FREE" | "PRO" | "BUSINESS") {
   await database.update(subscriptions).set(planId === "FREE"
     ? { planId, currentPeriodStart: null, currentPeriodEnd: null }
@@ -166,8 +174,8 @@ beforeEach(async () => {
   await database.delete(auditLogs);
   await database.delete(subscriptions);
   await database.insert(subscriptions).values([
-    { organizationId: ORG, planId: "PRO", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-12-01") },
-    { organizationId: OTHER_ORG, planId: "BUSINESS", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-12-01") },
+    { organizationId: ORG, planId: "PRO", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-12-01"), ...ADDON },
+    { organizationId: OTHER_ORG, planId: "BUSINESS", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-12-01"), ...ADDON },
   ]);
 });
 
@@ -473,6 +481,21 @@ describe("webhook delivery", () => {
     expect(await deliver()).toBe(0);
     expect(requests).toHaveLength(0);
     expect((await singleDelivery()).status).toBe("CANCELED");
+  });
+
+  it("treats losing the API add-on like losing the entitlement, even on a paid plan", async () => {
+    const { delivery } = await pendingDelivery();
+    await setAddon(ORG, "CANCELED");
+    await expect(createWebhookEndpoint(owner, { url: URL_A, events: ["conversion.completed"] }, endpointDeps()))
+      .rejects.toMatchObject({ code: "plan_required", message: expect.stringContaining("adicional de API") });
+    expect(await deliver()).toBe(0);
+    expect(await singleDelivery()).toMatchObject({ id: delivery.id, status: "CANCELED", lastError: "plan_required", attemptCount: 0 });
+    await setAddon(ORG, null);
+    advance(1_000);
+    await emit("conversion.completed", { conversionId: CONVERSION });
+    expect(await fanOutPendingWebhookEvents({}, fanoutDeps())).toBe(1);
+    expect(await deliveries()).toHaveLength(1);
+    expect(requests).toHaveLength(0);
   });
 
   it("cancels a scheduled retry when the plan is lost before it is due", async () => {

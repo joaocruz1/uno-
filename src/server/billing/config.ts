@@ -8,6 +8,16 @@ export function stripePriceId(planId: PaidPlanId): string {
   return requiredEnv(`STRIPE_PRICE_${planId}`);
 }
 
+/** The add-on is optional: billing works without it and the add-on is simply not offered. */
+export function apiAddonConfigured(): boolean {
+  return billingProviderConfigured() && Boolean(process.env.STRIPE_PRICE_API_ADDON?.trim());
+}
+
+/** The add-on price id, or null when the add-on is not configured in this installation. */
+export function apiAddonPriceId(): string | null {
+  return process.env.STRIPE_PRICE_API_ADDON?.trim() || null;
+}
+
 export function publicBillingPlans(): PublicBillingPlan[] {
   const plans = getPlanCatalog();
   return (Object.keys(plans) as PlanId[]).map((id) => {

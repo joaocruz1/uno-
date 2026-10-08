@@ -15,6 +15,15 @@ Limites e preços padrão seguem SPEC001 e podem ser configurados por ambiente;
 valores inválidos falham explicitamente. Configuração pública contém apenas
 preços e limites, nunca IDs privados ou credenciais.
 
+Adicional de API: nenhum plano inclui API. Chaves, API pública e webhooks exigem
+plano pago efetivo (regra acima) E adicional com estado ACTIVE/TRIALING e
+agora < fim do período do adicional. Adicional pago sem plano pago vigente não
+concede nada. O adicional é uma assinatura Stripe própria, de item único, no
+mesmo Customer da organização; a assinatura do plano permanece de item único
+para continuar gerenciável pelo portal. Preço padrão 5000 centavos/mês,
+configurável por UNO_API_ADDON_PRICE_BRL_CENTS (inteiro positivo). O limite de
+requisições continua sendo o do plano. A negação mantém o código plan_required.
+
 POST dashboard billing/checkout exige OWNER/ADMIN, mesma origem, plano pago
 permitido e chave idempotente. Server escolhe Price mensal BRL configurado,
 valida recorrência/valor/moeda no Stripe, cria Customer associado à organização
@@ -23,9 +32,22 @@ abertura; uma intenção aberta por organização reutiliza a sessão mesmo com
 chaves diferentes, recuperando respostas perdidas. Concorrência usa
 idempotência Stripe/lock por organização. Não criar segundo contrato pago
 quando já existe assinatura gerenciável: direcionar ao portal.
+O mesmo POST aceita exatamente um alvo: {planId} ou {addon:"API"}. O adicional
+exige OWNER/ADMIN, plano pago efetivo e cobrado pela Stripe (409
+paid_plan_required; plano concedido sem assinatura Stripe não contrata, pois a
+reconciliação o rebaixaria), nenhum adicional
+ainda vivo localmente ou no Stripe (409 addon_already_active; inadimplência se
+resolve no portal) e Price do adicional configurado (503 addon_unavailable),
+distinto dos Prices de plano e validado como os demais (ativo, BRL, mensal,
+valor do catálogo). Usa o mesmo Customer, a mesma intenção/idempotência e
+metadata organizationId + uno_addon=API na assinatura. Cancelamento do adicional
+é feito no portal. STRIPE_PRICE_API_ADDON é opcional: sem ele a cobrança dos
+planos funciona e o adicional apenas não é oferecido.
 POST billing/portal exige OWNER/ADMIN/mesma origem, usa exclusivamente Customer
 da organização, returnURL fixo.
-GET billing inclui estado/plano/período/cancelamento e disponibilidade real.
+GET billing inclui estado/plano/período/cancelamento e disponibilidade real,
+e apiAddon {name, priceBrlCents, active, status, currentPeriodEnd, available,
+inactiveWithoutPaidPlan}.
 
 POST api/stripe/webhook verifica assinatura sobre bytes originais limitados,
 sem aceitar JSON reparsed. Eventos Stripe deduplicados por ID+hash. Eventos
@@ -36,7 +58,13 @@ a consulta Stripe e aplicação por lock distribuído/DB com fencing; uma consul
 vencida não aplica após consulta mais nova. Customer é fronteira de
 propriedade; nunca confiar em metadata para mover assinatura entre organizações.
 Aceitar resultado apenas para Price reconhecido com Customer/Subscription
-corretos. Customer sem associação local é ignorado, não associado por metadata.
+corretos. Cada assinatura é classificada pelos seus Prices: Price de plano →
+assinatura do plano; Price do adicional → adicional (id, estado e fim do
+período próprios); assinatura só com o adicional nunca é plano; assinatura com
+Price de plano e do adicional vale para ambos. Sem assinatura do adicional os
+campos são limpos; cancelada fica CANCELED. Duplicidade de adicional não
+bloqueia a reconciliação: prevalece a que concede acesso. Sem Price do
+adicional configurado o estado gravado do adicional não é alterado. Customer sem associação local é ignorado, não associado por metadata.
 Falha retorna erro para retry Stripe; reconciliação periódica recupera
 eventos perdidos. Não logar payload, e-mail ou dados de pagamento.
 
@@ -59,6 +87,7 @@ uploads, criação, reprocessamento, lotes, API e webhooks.
 
 Tests: assinatura válida/inválida, ID duplicado/hash divergente, eventos fora de
 ordem, relação Customer/organização, Price desconhecido, estados/períodos,
-cancelamento, upgrade/downgrade e cota concorrente. Provider sandbox real e
+cancelamento, upgrade/downgrade, cota concorrente, matriz de direitos do
+adicional, regras do checkout do adicional e classificação na reconciliação. Provider sandbox real e
 produção ficam gates externos quando faltam credenciais. Impostos requerem
 configuração fiscal do operador; automatic_tax não é habilitado por hipótese.

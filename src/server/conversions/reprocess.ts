@@ -16,7 +16,7 @@ import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions, type OutputSize } from "@/lib/label-size";
 import { getPlanCatalog, type PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
-import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { getStorage, type StorageGateway } from "@/server/storage";
@@ -301,10 +301,7 @@ export async function commitReprocessedConversion(input: CommitInput, database: 
     const template = await findTemplate(input.request.template, transaction);
     assertTemplateEligible(template, input.request.size);
     const subscriptionRows = await transaction.select({
-      planId: subscriptions.planId,
-      status: subscriptions.status,
-      currentPeriodStart: subscriptions.currentPeriodStart,
-      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      ...subscriptionEntitlementColumns,
     }).from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const subscription = subscriptionRows[0];
     const decisionNow = input.now();

@@ -7,8 +7,10 @@ extends: CONTRACT-UNO-API-001
 
 # Chaves e ingestão pública
 
-GET/POST/DELETE dashboard/api-keys exige OWNER/ADMIN. Pro/Business cria/usa;
-downgrade permite listar/revogar existentes. Segredo32bytes aleatórios exibido
+GET/POST/DELETE dashboard/api-keys exige OWNER/ADMIN. Organização com
+o adicional de API ativo sobre plano pago vigente cria/usa; sem o adicional ou
+sem plano pago a resposta é 403 plan_required, e ainda é possível listar/revogar
+chaves existentes. Segredo32bytes aleatórios exibido
 uma vez; persistir SHA256/prefixo/metadados, sem scopes extras nesta versão.
 Ator interno distingue usuário de apiKey, usuário nulo nas conversões API,
 source=api e proveniência apiKeyId. Revalidar revogação/expiração/plano no início

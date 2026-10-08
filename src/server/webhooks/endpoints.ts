@@ -4,7 +4,6 @@ import { and, count, eq, inArray, sql } from "drizzle-orm";
 
 import { auditLogs, getDb, subscriptions, webhookDeliveries, webhookEndpoints, type UnoDatabase } from "@/db";
 import { AppError } from "@/lib/errors";
-import type { PlanId } from "@/lib/plans";
 import {
   webhookEndpointCreateSchema,
   webhookEndpointCreatedSchema,
@@ -16,7 +15,7 @@ import {
   type WebhookEndpointList,
 } from "@/lib/webhook-model";
 import type { Actor } from "@/server/auth/actor";
-import { effectivePlanFromSubscription } from "@/server/billing/entitlements";
+import { API_ADDON_REQUIRED_MESSAGE, effectivePlanFromSubscription, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 
 import { webhookMaxActiveEndpoints, webhookTimeoutMs } from "./config";
 import { encryptWebhookSecret, generateWebhookSecret, loadWebhookKeyring, type WebhookKeyring } from "./crypto";
@@ -51,24 +50,20 @@ export function assertWebhookManager(actor: Pick<Actor, "membershipRole">): void
   }
 }
 
-export function isWebhookPlan(planId: PlanId): boolean {
-  return planId === "PRO" || planId === "BUSINESS";
-}
-
-/** Locks the organization's webhook configuration and returns its effective plan. */
-export async function lockWebhookOrganization(organizationId: string, transaction: Transaction, now: Date): Promise<PlanId> {
+/**
+ * Locks the organization's webhook configuration and tells whether it is
+ * entitled to webhooks: the API add-on on a paid plan in force.
+ */
+export async function lockWebhookOrganization(organizationId: string, transaction: Transaction, now: Date): Promise<boolean> {
   await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${organizationId}, 37))`);
-  const rows = await transaction.select({
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
-  }).from(subscriptions).where(eq(subscriptions.organizationId, organizationId)).limit(1);
-  return effectivePlanFromSubscription(rows[0], now).planId;
+  const rows = await transaction.select(subscriptionEntitlementColumns)
+    .from(subscriptions).where(eq(subscriptions.organizationId, organizationId)).limit(1);
+  return effectivePlanFromSubscription(rows[0], now).plan.api;
 }
 
-function assertWebhookPlan(planId: PlanId): void {
-  if (!isWebhookPlan(planId)) throw new AppError("plan_required", "Este recurso exige um plano Pro ou Business.", 403);
+/** The code stays `plan_required` (public contract); the entitlement is the API add-on. */
+export function assertWebhookEntitlement(entitled: boolean): void {
+  if (!entitled) throw new AppError("plan_required", API_ADDON_REQUIRED_MESSAGE, 403);
 }
 
 async function assertBelowActiveLimit(organizationId: string, limit: number, transaction: Transaction): Promise<void> {
@@ -124,12 +119,9 @@ export async function createWebhookEndpoint(
   const input = webhookEndpointCreateSchema.parse(rawInput);
   // Deny by plan before any outbound DNS lookup; the transaction below re-checks under lock.
   const preliminary = await dependencies.database.select({
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
+    ...subscriptionEntitlementColumns,
   }).from(subscriptions).where(eq(subscriptions.organizationId, actor.organizationId)).limit(1);
-  assertWebhookPlan(effectivePlanFromSubscription(preliminary[0], dependencies.now()).planId);
+  assertWebhookEntitlement(effectivePlanFromSubscription(preliminary[0], dependencies.now()).plan.api);
   const keyring = dependencies.keyring();
   const url = await assertWebhookDestinationAllowed(input.url, dependencies.resolve, dependencies.dnsTimeoutMs);
   const now = dependencies.now();
@@ -137,7 +129,7 @@ export async function createWebhookEndpoint(
   const secret = generateWebhookSecret();
   const encrypted = encryptWebhookSecret(secret, { organizationId: actor.organizationId, endpointId: id }, keyring);
   const row = await dependencies.database.transaction(async (transaction) => {
-    assertWebhookPlan(await lockWebhookOrganization(actor.organizationId, transaction, now));
+    assertWebhookEntitlement(await lockWebhookOrganization(actor.organizationId, transaction, now));
     await assertBelowActiveLimit(actor.organizationId, dependencies.maxActiveEndpoints, transaction);
     const inserted = await transaction.insert(webhookEndpoints).values({
       id,
@@ -172,7 +164,7 @@ export async function setWebhookEndpointActive(
   const input = webhookEndpointUpdateSchema.parse(rawInput);
   const now = dependencies.now();
   return dependencies.database.transaction(async (transaction) => {
-    const planId = await lockWebhookOrganization(actor.organizationId, transaction, now);
+    const entitled = await lockWebhookOrganization(actor.organizationId, transaction, now);
     const rows = await transaction.select().from(webhookEndpoints)
       .where(and(eq(webhookEndpoints.organizationId, actor.organizationId), eq(webhookEndpoints.id, endpointId)))
       .limit(1).for("update");
@@ -180,7 +172,7 @@ export async function setWebhookEndpointActive(
     if (!current) throw new AppError("not_found", "Endpoint de webhook não encontrado.", 404);
     if (current.active === input.active) return publicEndpoint(current);
     if (input.active) {
-      assertWebhookPlan(planId);
+      assertWebhookEntitlement(entitled);
       await assertBelowActiveLimit(actor.organizationId, dependencies.maxActiveEndpoints, transaction);
     }
     const updated = await transaction.update(webhookEndpoints).set({

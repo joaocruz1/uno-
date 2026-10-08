@@ -14,6 +14,7 @@ const USER = "00000000-0000-4000-8000-000000000001";
 const ORG = "00000000-0000-4000-8000-000000000101";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000102";
 const NOW = new Date("2026-10-07T12:00:00.000Z");
+const ADDON = { apiAddonSubscriptionId: null, apiAddonStatus: "ACTIVE" as const, apiAddonCurrentPeriodEnd: new Date("2026-11-01") };
 const pglite = new PGlite();
 const database = drizzle(pglite, { schema }) as unknown as UnoDatabase;
 
@@ -39,8 +40,8 @@ beforeEach(async () => {
   await database.delete(apiKeys);
   await database.delete(subscriptions);
   await database.insert(subscriptions).values([
-    { organizationId: ORG, planId: "PRO", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01") },
-    { organizationId: OTHER_ORG, planId: "BUSINESS", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01") },
+    { organizationId: ORG, planId: "PRO", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01"), ...ADDON },
+    { organizationId: OTHER_ORG, planId: "BUSINESS", status: "ACTIVE", currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01"), ...ADDON },
   ]);
 });
 
@@ -81,5 +82,35 @@ describe("API key lifecycle", () => {
       .rejects.toMatchObject({ code: "plan_required" });
     await expect(listApiKeys(owner, database)).resolves.toMatchObject({ items: expect.any(Array) });
     await expect(revokeApiKey(owner, downgraded.id, database, NOW)).resolves.toBeUndefined();
+  });
+
+  it("requires the API add-on on a paid plan in force, whatever the plan", async () => {
+    const paid = { planId: "BUSINESS" as const, status: "ACTIVE" as const, currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01") };
+    const created = await createApiKey(owner, { name: "Entitlement" }, database, NOW);
+    const headers = new Headers({ authorization: `Bearer ${created.key}` });
+    const set = (values: Partial<typeof subscriptions.$inferInsert>) => database.update(subscriptions).set(values).where(eq(subscriptions.organizationId, ORG));
+
+    // Paid plan without the add-on: no API, even on Business.
+    await set({ ...paid, apiAddonSubscriptionId: null, apiAddonStatus: null, apiAddonCurrentPeriodEnd: null });
+    await expect(requireApiActor(headers, database, NOW)).rejects.toMatchObject({ code: "plan_required", status: 403, message: expect.stringContaining("adicional de API") });
+    await expect(createApiKey(owner, { name: "Blocked" }, database, NOW)).rejects.toMatchObject({ code: "plan_required" });
+
+    // Starter with the add-on: API is available.
+    await set({ ...paid, planId: "STARTER", ...ADDON });
+    await expect(requireApiActor(headers, database, NOW)).resolves.toMatchObject({ planId: "STARTER" });
+
+    // Add-on past due, canceled or expired: no API.
+    for (const addon of [
+      { apiAddonStatus: "PAST_DUE" as const },
+      { apiAddonStatus: "CANCELED" as const },
+      { apiAddonCurrentPeriodEnd: NOW },
+    ]) {
+      await set({ ...paid, ...ADDON, ...addon });
+      await expect(requireApiActor(headers, database, NOW)).rejects.toMatchObject({ code: "plan_required" });
+    }
+
+    // Add-on paid up but the plan is past due: no API.
+    await set({ ...paid, status: "PAST_DUE", ...ADDON });
+    await expect(requireApiActor(headers, database, NOW)).rejects.toMatchObject({ code: "plan_required" });
   });
 });

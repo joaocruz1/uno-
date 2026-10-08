@@ -12,10 +12,10 @@ import {
 } from "@/db";
 import { positiveIntegerEnv, requiredEnv } from "@/lib/env";
 import { AppError } from "@/lib/errors";
-import { getPlanCatalog, type PlanId } from "@/lib/plans";
+import type { PlanId } from "@/lib/plans";
 
-import { PAID_PLAN_IDS, stripePriceId } from "./config";
-import { effectivePlanId, lockCurrentUsagePeriod, lockOrganizationBilling } from "./entitlements";
+import { apiAddonPriceId, PAID_PLAN_IDS, stripePriceId } from "./config";
+import { effectivePlanFromSubscription, lockCurrentUsagePeriod, lockOrganizationBilling } from "./entitlements";
 import { getBillingProvider, type BillingProvider, type StripeSubscriptionSnapshot } from "./stripe";
 
 const SUPPORTED_EVENT_TYPES = new Set([
@@ -93,33 +93,77 @@ async function claimReconciliation(customerId: string, deps: ReconcileDependenci
   });
 }
 
+const isLive = (snapshot: StripeSubscriptionSnapshot) => snapshot.status !== "canceled" && snapshot.status !== "incomplete_expired";
+
+/** The prices of a subscription that are not the API add-on, i.e. its plan side. */
+function planPriceIds(snapshot: StripeSubscriptionSnapshot, addonPriceId: string | null): string[] {
+  return snapshot.priceIds.filter((priceId) => priceId !== addonPriceId);
+}
+
+function carriesAddon(snapshot: StripeSubscriptionSnapshot, addonPriceId: string | null): boolean {
+  return addonPriceId !== null && snapshot.priceIds.includes(addonPriceId);
+}
+
 function chooseSubscription(
   localSubscriptionId: string | null,
   snapshots: StripeSubscriptionSnapshot[],
   prices: Map<string, Exclude<PlanId, "FREE">>,
+  addonPriceId: string | null,
 ): StripeSubscriptionSnapshot | null {
   const local = localSubscriptionId ? snapshots.find((snapshot) => snapshot.id === localSubscriptionId) : undefined;
-  if (local && local.status !== "canceled" && local.status !== "incomplete_expired") return local;
-  const recognized = snapshots.filter((snapshot) => snapshot.priceIds.length === 1 && prices.has(snapshot.priceIds[0]!));
-  const manageable = recognized.filter((snapshot) => snapshot.status !== "canceled" && snapshot.status !== "incomplete_expired");
+  if (local && isLive(local)) return local;
+  const recognized = snapshots.filter((snapshot) => {
+    const planPrices = planPriceIds(snapshot, addonPriceId);
+    return planPrices.length === 1 && prices.has(planPrices[0]!);
+  });
+  const manageable = recognized.filter(isLive);
   if (manageable.length > 1) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   return manageable[0] ?? local ?? recognized[0] ?? null;
+}
+
+/**
+ * Picks the subscription that carries the API add-on price. Unlike plans, a
+ * duplicate never blocks reconciliation: the one that grants access wins.
+ */
+function chooseAddonSubscription(
+  localAddonSubscriptionId: string | null,
+  snapshots: StripeSubscriptionSnapshot[],
+  addonPriceId: string,
+): StripeSubscriptionSnapshot | null {
+  const carrying = snapshots.filter((snapshot) => carriesAddon(snapshot, addonPriceId));
+  const rank = (snapshot: StripeSubscriptionSnapshot) =>
+    (snapshot.status === "active" || snapshot.status === "trialing" ? 4 : isLive(snapshot) ? 2 : 0) +
+    (snapshot.id === localAddonSubscriptionId ? 1 : 0);
+  return [...carrying].sort((left, right) =>
+    rank(right) - rank(left) ||
+    (right.currentPeriodEnd?.getTime() ?? 0) - (left.currentPeriodEnd?.getTime() ?? 0) ||
+    left.id.localeCompare(right.id),
+  )[0] ?? null;
 }
 
 export async function reconcileStripeCustomer(customerId: string, dependencies: ReconcileDependencies = defaults()): Promise<string | null> {
   const claim = await claimReconciliation(customerId, dependencies);
   if (!claim) return null;
-  const local = await dependencies.database.select({ stripeSubscriptionId: subscriptions.stripeSubscriptionId })
-    .from(subscriptions).where(eq(subscriptions.id, claim.subscriptionId)).limit(1);
+  const local = await dependencies.database.select({
+    stripeSubscriptionId: subscriptions.stripeSubscriptionId,
+    apiAddonSubscriptionId: subscriptions.apiAddonSubscriptionId,
+  }).from(subscriptions).where(eq(subscriptions.id, claim.subscriptionId)).limit(1);
   const snapshots = await dependencies.provider.listSubscriptions(customerId);
   if (snapshots.some((snapshot) => snapshot.customerId !== customerId)) {
     throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   }
   const prices = pricePlanMap();
-  const selected = chooseSubscription(local[0]?.stripeSubscriptionId ?? null, snapshots, prices);
-  const priceId = selected?.priceIds.length === 1 ? selected.priceIds[0]! : null;
+  const addonPriceId = apiAddonPriceId();
+  if (addonPriceId && prices.has(addonPriceId)) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+  // Classify by price: a subscription that only carries the add-on is never a
+  // plan subscription; one that carries a plan price and the add-on counts for both.
+  const planSnapshots = snapshots.filter((snapshot) => !carriesAddon(snapshot, addonPriceId) || planPriceIds(snapshot, addonPriceId).length > 0);
+  const selected = chooseSubscription(local[0]?.stripeSubscriptionId ?? null, planSnapshots, prices, addonPriceId);
+  const selectedPlanPrices = selected ? planPriceIds(selected, addonPriceId) : [];
+  const priceId = selectedPlanPrices.length === 1 ? selectedPlanPrices[0]! : null;
   const recognizedPlan = priceId ? prices.get(priceId) : undefined;
   if (selected && !recognizedPlan) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+  const addon = addonPriceId ? chooseAddonSubscription(local[0]?.apiAddonSubscriptionId ?? null, snapshots, addonPriceId) : null;
   const now = dependencies.now();
   await dependencies.database.transaction(async (transaction) => {
     await lockOrganizationBilling(claim.organizationId, transaction);
@@ -134,9 +178,22 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
     const planId: PlanId = recognizedPlan ?? "FREE";
     const currentPeriodStart = selected?.currentPeriodStart ?? null;
     const currentPeriodEnd = selected?.currentPeriodEnd ?? null;
-    const subscription = { planId, status, currentPeriodStart, currentPeriodEnd };
-    const effective = effectivePlanId(subscription, now);
-    const plan = getPlanCatalog()[effective];
+    // Without a configured add-on price nothing can be classified as the
+    // add-on, so its stored state is left as it is instead of being revoked.
+    const addonState = addonPriceId ? {
+      apiAddonSubscriptionId: addon?.id ?? null,
+      apiAddonStatus: addon ? mappedStatus(addon.status) : null,
+      apiAddonCurrentPeriodEnd: addon?.currentPeriodEnd ?? null,
+    } : {
+      apiAddonSubscriptionId: current.apiAddonSubscriptionId,
+      apiAddonStatus: current.apiAddonStatus,
+      apiAddonCurrentPeriodEnd: current.apiAddonCurrentPeriodEnd,
+    };
+    const entitlement = effectivePlanFromSubscription({
+      planId, status, currentPeriodStart, currentPeriodEnd,
+      apiAddonStatus: addonState.apiAddonStatus,
+      apiAddonCurrentPeriodEnd: addonState.apiAddonCurrentPeriodEnd,
+    }, now);
     await transaction.update(subscriptions).set({
       planId,
       status,
@@ -145,10 +202,11 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
       currentPeriodStart,
       currentPeriodEnd,
       cancelAtPeriodEnd: selected?.cancelAtPeriodEnd ?? false,
+      ...addonState,
       lastReconciledAt: now,
       updatedAt: now,
     }).where(and(eq(subscriptions.id, current.id), eq(subscriptions.reconciliationVersion, claim.version)));
-    await lockCurrentUsagePeriod(claim.organizationId, { planId: effective, plan, subscription }, now, transaction, {
+    await lockCurrentUsagePeriod(claim.organizationId, entitlement, now, transaction, {
       alignPeriodEnd: !current.stripeSubscriptionId && Boolean(selected),
     });
   });

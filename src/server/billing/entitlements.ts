@@ -5,20 +5,50 @@ import { AppError } from "@/lib/errors";
 import { getPlanCatalog, type PlanDefinition, type PlanId } from "@/lib/plans";
 import type { SubscriptionStatus } from "@/lib/billing-model";
 
-export type SubscriptionEntitlement = {
+/** User-facing text of every `plan_required` denial: the feature needs the API add-on. */
+export const API_ADDON_REQUIRED_MESSAGE = "Este recurso exige o adicional de API em um plano pago.";
+
+/** The plan half of a subscription row: which paid plan is in force. */
+export type PlanSubscription = {
   planId: PlanId;
   status: SubscriptionStatus;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
 };
 
+export type SubscriptionEntitlement = PlanSubscription & {
+  /** API add-on state, reconciled from its own Stripe subscription. */
+  apiAddonStatus: SubscriptionStatus | null;
+  apiAddonCurrentPeriodEnd: Date | null;
+};
+
 export type EffectivePlan = {
   planId: PlanId;
+  /** `plan.api` is the effective API entitlement: a paid plan in force plus an active add-on. */
   plan: PlanDefinition;
   subscription: SubscriptionEntitlement;
 };
 
-export function effectivePlanId(subscription: SubscriptionEntitlement | undefined, now = new Date()): PlanId {
+/** Every query that decides entitlements selects exactly these columns. */
+export const subscriptionEntitlementColumns = {
+  planId: subscriptions.planId,
+  status: subscriptions.status,
+  currentPeriodStart: subscriptions.currentPeriodStart,
+  currentPeriodEnd: subscriptions.currentPeriodEnd,
+  apiAddonStatus: subscriptions.apiAddonStatus,
+  apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
+};
+
+export const FREE_ENTITLEMENT: SubscriptionEntitlement = Object.freeze({
+  planId: "FREE",
+  status: "ACTIVE",
+  currentPeriodStart: null,
+  currentPeriodEnd: null,
+  apiAddonStatus: null,
+  apiAddonCurrentPeriodEnd: null,
+});
+
+export function effectivePlanId(subscription: PlanSubscription | undefined, now = new Date()): PlanId {
   if (!subscription) return "FREE";
   if (subscription.planId === "FREE") return "FREE";
   if (subscription.status !== "ACTIVE" && subscription.status !== "TRIALING") return "FREE";
@@ -27,39 +57,39 @@ export function effectivePlanId(subscription: SubscriptionEntitlement | undefine
   return subscription.planId;
 }
 
-export async function loadEffectivePlan(
-  organizationId: string,
-  database: UnoDatabase,
+/** The add-on subscription itself is paid up, regardless of the plan. */
+export function apiAddonActive(
+  subscription: Pick<SubscriptionEntitlement, "apiAddonStatus" | "apiAddonCurrentPeriodEnd"> | undefined,
   now = new Date(),
-): Promise<EffectivePlan> {
-  const rows = await database.select({
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
-  }).from(subscriptions).where(eq(subscriptions.organizationId, organizationId)).limit(1);
-  const subscription: SubscriptionEntitlement = rows[0] ?? {
-    planId: "FREE",
-    status: "ACTIVE",
-    currentPeriodStart: null,
-    currentPeriodEnd: null,
-  };
-  const planId = effectivePlanId(subscription, now);
-  return { planId, plan: getPlanCatalog()[planId], subscription };
+): boolean {
+  if (!subscription) return false;
+  if (subscription.apiAddonStatus !== "ACTIVE" && subscription.apiAddonStatus !== "TRIALING") return false;
+  return Boolean(subscription.apiAddonCurrentPeriodEnd && subscription.apiAddonCurrentPeriodEnd > now);
+}
+
+/** API keys, the public API and webhooks: a paid plan in force AND an active add-on. */
+export function hasApiEntitlement(subscription: SubscriptionEntitlement | undefined, now = new Date()): boolean {
+  return effectivePlanId(subscription, now) !== "FREE" && apiAddonActive(subscription, now);
 }
 
 export function effectivePlanFromSubscription(
   subscription: SubscriptionEntitlement | undefined,
   now = new Date(),
 ): EffectivePlan {
-  const resolved = subscription ?? {
-    planId: "FREE" as const,
-    status: "ACTIVE" as const,
-    currentPeriodStart: null,
-    currentPeriodEnd: null,
-  };
+  const resolved = subscription ?? FREE_ENTITLEMENT;
   const planId = effectivePlanId(resolved, now);
-  return { planId, plan: getPlanCatalog()[planId], subscription: resolved };
+  const plan = { ...getPlanCatalog()[planId], api: planId !== "FREE" && apiAddonActive(resolved, now) };
+  return { planId, plan, subscription: resolved };
+}
+
+export async function loadEffectivePlan(
+  organizationId: string,
+  database: UnoDatabase,
+  now = new Date(),
+): Promise<EffectivePlan> {
+  const rows = await database.select(subscriptionEntitlementColumns)
+    .from(subscriptions).where(eq(subscriptions.organizationId, organizationId)).limit(1);
+  return effectivePlanFromSubscription(rows[0], now);
 }
 
 export function desiredUsagePeriod(now: Date, entitlement: EffectivePlan) {

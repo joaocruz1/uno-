@@ -25,7 +25,7 @@ const deliveryErrorLabels: Record<string, string> = {
   lease_expired: "Tentativa interrompida",
   secret_unavailable: "Segredo indisponível",
   endpoint_disabled: "Endpoint desativado",
-  plan_required: "Plano sem acesso a webhooks",
+  plan_required: "Sem o adicional de API",
 };
 
 export function deliveryErrorLabel(code: string | null): string {

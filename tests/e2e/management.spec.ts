@@ -72,7 +72,7 @@ test("webhooks are plan-gated and platform administration is hidden from regular
   const { page } = await verifiedPage(browser, "livre");
   await page.goto("/dashboard/webhooks");
   await expect(page.getByRole("heading", { name: "Webhooks", exact: true })).toBeVisible();
-  await expect(page.getByText("Os webhooks estão disponíveis nos planos Pro e Business.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Os webhooks exigem o adicional + API", { exact: false })).toBeVisible();
   await expect(page.getByText("Nenhum endpoint criado", { exact: true })).toBeVisible();
   const denied = await page.request.post(`${origin}/api/dashboard/webhooks`, {
     headers: { origin }, data: { url: "https://hooks.example.com/uno", events: ["conversion.completed"] },

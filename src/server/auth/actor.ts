@@ -3,7 +3,7 @@ import { headers as nextHeaders } from "next/headers";
 
 import { getDb, memberships, organizations, subscriptions, user, type UnoDatabase } from "@/db";
 import { AppError } from "@/lib/errors";
-import { effectivePlanId } from "@/server/billing/entitlements";
+import { effectivePlanFromSubscription } from "@/server/billing/entitlements";
 
 import { getAuth } from "./index";
 import { ensureDefaultOrganization } from "./organization";
@@ -23,6 +23,8 @@ export type Actor = Identity & {
   organizationName: string;
   membershipRole: "OWNER" | "ADMIN" | "MEMBER";
   planId: "FREE" | "STARTER" | "PRO" | "BUSINESS";
+  /** API keys, public API and webhooks: the API add-on on a paid plan in force. Presentation only; servers re-check. */
+  apiAccess: boolean;
 };
 
 function cookieValue(header: string | null, name: string): string | undefined {
@@ -96,6 +98,8 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
       subscriptionStatus: subscriptions.status,
       currentPeriodStart: subscriptions.currentPeriodStart,
       currentPeriodEnd: subscriptions.currentPeriodEnd,
+      apiAddonStatus: subscriptions.apiAddonStatus,
+      apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
     })
     .from(memberships)
     .innerJoin(organizations, eq(organizations.id, memberships.organizationId))
@@ -120,17 +124,21 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
     throw new AppError("organization_required", "Você não participa de nenhuma organização.", 403);
   }
 
+  const entitlement = effectivePlanFromSubscription(membership.planId ? {
+    planId: membership.planId,
+    status: membership.subscriptionStatus ?? "ACTIVE",
+    currentPeriodStart: membership.currentPeriodStart,
+    currentPeriodEnd: membership.currentPeriodEnd,
+    apiAddonStatus: membership.apiAddonStatus,
+    apiAddonCurrentPeriodEnd: membership.apiAddonCurrentPeriodEnd,
+  } : undefined);
   return {
     ...identity,
     organizationId: membership.organizationId,
     organizationName: membership.organizationName,
     membershipRole: membership.membershipRole,
-    planId: effectivePlanId(membership.planId ? {
-      planId: membership.planId,
-      status: membership.subscriptionStatus ?? "ACTIVE",
-      currentPeriodStart: membership.currentPeriodStart,
-      currentPeriodEnd: membership.currentPeriodEnd,
-    } : undefined),
+    planId: entitlement.planId,
+    apiAccess: entitlement.plan.api,
   };
 }
 

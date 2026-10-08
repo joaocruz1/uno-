@@ -3,6 +3,7 @@ import { ArrowRight, Boxes, Braces, FileCheck2, Files, Fingerprint, History, Lay
 import { Footer, Navbar } from "@/components";
 import { ApiTerminal, BeforeAfter, MergeDemo, PricingGrid, Reveal, TemplateMarquee, TrialDrop } from "@/components/marketing";
 import { Badge, ButtonLink, Card } from "@/components/ui";
+import { formatBrlCents, getApiAddon } from "@/lib/plans";
 
 const steps = [
   { number: "01", title: "Envie", description: "Faça upload do PDF original com a etiqueta e a DANFE." },
@@ -23,7 +24,7 @@ const faqs = [
   ["Quais arquivos são aceitos?", "A primeira versão recebe um PDF com duas páginas: uma etiqueta logística e uma DANFE simplificada. PDFs corrompidos, protegidos por senha, ambíguos ou de template ainda não liberado são recusados com uma mensagem específica."],
   ["Quais formatos de saída existem?", "O formato padrão é 100 × 150 mm. Também estão previstos 100 × 100 mm, A6 e tamanhos personalizados entre 50–210 mm de largura e 50–300 mm de altura."],
   ["Como a DANFE aparece na etiqueta?", "Em PDFs digitais, a DANFE vira uma faixa com tipo, NF, série, emissão e o código de barras original da chave de acesso. Os dados são lidos do próprio PDF e conferidos com a chave. Em documentos escaneados, nada é reescrito: as regiões originais são mantidas."],
-  ["A API está disponível em todos os planos?", "A API e os webhooks estão disponíveis nos planos Pro e Business. As chaves são exibidas uma única vez e usadas como credenciais Bearer."],
+  ["A API está disponível em todos os planos?", `A API e os webhooks são um adicional opcional (+ API, ${formatBrlCents(getApiAddon().priceBrlCents)}/mês) que pode ser contratado em qualquer plano pago: Starter, Pro ou Business. As chaves são exibidas uma única vez e usadas como credenciais Bearer.`],
   ["Posso testar sem criar conta?", "Sim, uma vez: solte o PDF no topo desta página e baixe a etiqueta unificada. O arquivo é processado em memória e não fica armazenado. Para continuar, o plano Free inclui 10 etiquetas por mês."],
   ["O que acontece se a etiqueta não couber?", "A conversão é bloqueada para evitar perda de legibilidade e indica um formato maior quando houver uma alternativa compatível."],
 ];

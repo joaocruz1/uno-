@@ -5,11 +5,11 @@ import { and, eq, inArray, isNotNull, lte } from "drizzle-orm";
 import { billingCheckoutIntents, getDb, subscriptions, type UnoDatabase } from "@/db";
 import type { PaidPlanId } from "@/lib/billing-model";
 import { AppError } from "@/lib/errors";
-import { getPlanCatalog } from "@/lib/plans";
+import { getApiAddon, getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
 
-import { billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripePriceId } from "./config";
-import { lockOrganizationBilling } from "./entitlements";
+import { apiAddonConfigured, apiAddonPriceId, billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripePriceId } from "./config";
+import { effectivePlanId, lockOrganizationBilling } from "./entitlements";
 import { checkoutIntegrationIdentifier, getBillingProvider, type BillingProvider } from "./stripe";
 
 const IDEMPOTENCY_KEY = /^[\x21-\x7e]{16,128}$/;
@@ -46,13 +46,19 @@ function assertBillingUrl(url: string): string {
   }
 }
 
-function requestHash(planId: PaidPlanId): string {
-  return createHash("sha256").update(JSON.stringify({ planId })).digest("hex");
+/** What a checkout buys: a paid plan, or the API add-on on top of one. */
+type CheckoutTarget = { planId: PaidPlanId; addon: null } | { planId: null; addon: "API" };
+
+function requestHash(target: CheckoutTarget): string {
+  return createHash("sha256").update(JSON.stringify(target.addon ? { addon: target.addon } : { planId: target.planId })).digest("hex");
+}
+
+function sameTarget(intent: Pick<typeof billingCheckoutIntents.$inferSelect, "planId" | "addon">, target: CheckoutTarget): boolean {
+  return intent.planId === target.planId && intent.addon === target.addon;
 }
 
 type PreparedCheckout = {
   intentId: string;
-  planId: PaidPlanId;
   customerId: string | null;
   organizationName: string;
   completedUrl?: string;
@@ -62,11 +68,11 @@ type PreparedCheckout = {
 
 async function prepareCheckout(
   actor: Pick<Actor, "organizationId" | "organizationName" | "userId">,
-  planId: PaidPlanId,
+  target: CheckoutTarget,
   idempotencyKey: string,
   deps: CheckoutDependencies,
 ): Promise<PreparedCheckout> {
-  const hash = requestHash(planId);
+  const hash = requestHash(target);
   return deps.database.transaction(async (transaction) => {
     await lockOrganizationBilling(actor.organizationId, transaction);
     const now = deps.now();
@@ -93,44 +99,59 @@ async function prepareCheckout(
         .returning();
       subscription = inserted[0]!;
     }
-    const portalInstead = Boolean(subscription.stripeSubscriptionId) && subscription.status !== "CANCELED";
+    if (target.addon) {
+      // The add-on only exists on top of a paid plan in force, and only once.
+      if (effectivePlanId(subscription, now) === "FREE") {
+        throw new AppError("paid_plan_required", "O adicional de API exige um plano pago ativo.", 409);
+      }
+      // A paid plan granted without a Stripe subscription would be reset to Free by
+      // the reconciliation that the add-on purchase triggers on this customer.
+      if (!subscription.stripeSubscriptionId) {
+        throw new AppError("paid_plan_required", "O adicional de API só pode ser contratado em um plano pago com cobrança ativa.", 409);
+      }
+      if (subscription.apiAddonSubscriptionId && subscription.apiAddonStatus !== "CANCELED") {
+        throw new AppError("addon_already_active", "O adicional de API já está contratado. Gerencie a assinatura no portal.", 409);
+      }
+    }
+    const portalInstead = !target.addon && Boolean(subscription.stripeSubscriptionId) && subscription.status !== "CANCELED";
     if (portalInstead) {
-      return { intentId: existingByKey?.id ?? deps.randomId(), planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead, providerAttempt: existingByKey?.providerAttempt ?? 1 };
+      return { intentId: existingByKey?.id ?? deps.randomId(), customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead, providerAttempt: existingByKey?.providerAttempt ?? 1 };
     }
     if (existingByKey?.status === "OPEN" && existingByKey.expiresAt && existingByKey.expiresAt > now && existingByKey.checkoutUrl) {
-      return { intentId: existingByKey.id, planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, completedUrl: existingByKey.checkoutUrl, portalInstead: false, providerAttempt: existingByKey.providerAttempt };
+      return { intentId: existingByKey.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, completedUrl: existingByKey.checkoutUrl, portalInstead: false, providerAttempt: existingByKey.providerAttempt };
     }
     const active = await transaction.select().from(billingCheckoutIntents).where(and(
       eq(billingCheckoutIntents.organizationId, actor.organizationId),
       inArray(billingCheckoutIntents.status, ["CREATING", "OPEN"]),
     )).limit(1).for("update");
     const reusable = existingByKey?.status === "CREATING" ? existingByKey : active[0];
-    if (reusable && reusable.planId !== planId) {
+    if (reusable && !sameTarget(reusable, target)) {
       throw new AppError("checkout_in_progress", "Já existe uma contratação em andamento.", 409);
     }
     if (reusable?.status === "OPEN" && reusable.expiresAt && reusable.expiresAt > now && reusable.checkoutUrl) {
-      return { intentId: reusable.id, planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, completedUrl: reusable.checkoutUrl, portalInstead: false, providerAttempt: reusable.providerAttempt };
+      return { intentId: reusable.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, completedUrl: reusable.checkoutUrl, portalInstead: false, providerAttempt: reusable.providerAttempt };
     }
-    if (reusable) return { intentId: reusable.id, planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: reusable.providerAttempt };
+    if (reusable) return { intentId: reusable.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: reusable.providerAttempt };
     if (existingByKey) {
       await transaction.update(billingCheckoutIntents).set({
-        planId, requestHash: hash, stripeSessionId: null, checkoutUrl: null,
+        planId: target.planId, addon: target.addon, requestHash: hash, stripeSessionId: null, checkoutUrl: null,
         status: "CREATING", expiresAt: null, providerAttempt: existingByKey.providerAttempt + 1, updatedAt: now,
       }).where(eq(billingCheckoutIntents.id, existingByKey.id));
-      return { intentId: existingByKey.id, planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: existingByKey.providerAttempt + 1 };
+      return { intentId: existingByKey.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: existingByKey.providerAttempt + 1 };
     }
     const intentId = deps.randomId();
     await transaction.insert(billingCheckoutIntents).values({
       id: intentId,
       organizationId: actor.organizationId,
       createdByUserId: actor.userId,
-      planId,
+      planId: target.planId,
+      addon: target.addon,
       idempotencyKey,
       requestHash: hash,
       createdAt: now,
       updatedAt: now,
     });
-    return { intentId, planId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: 1 };
+    return { intentId, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: 1 };
   });
 }
 
@@ -158,7 +179,7 @@ export async function createBillingCheckout(
   if (!idempotencyKey || !IDEMPOTENCY_KEY.test(idempotencyKey)) throw new AppError("invalid_idempotency_key", "Idempotency-Key inválida.", 400);
   if (!billingProviderConfigured()) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   try {
-    const prepared = await prepareCheckout(actor, planId, idempotencyKey, dependencies);
+    const prepared = await prepareCheckout(actor, { planId, addon: null }, idempotencyKey, dependencies);
     if (prepared.completedUrl) return { url: assertBillingUrl(prepared.completedUrl) };
     const customerId = await ensureCustomer(actor, prepared, dependencies);
     if (prepared.portalInstead) {
@@ -169,11 +190,14 @@ export async function createBillingCheckout(
     }
     const knownPrices = new Set(PAID_PLAN_IDS.map(stripePriceId));
     if (knownPrices.size !== PAID_PLAN_IDS.length) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    const addonPriceId = apiAddonPriceId();
+    if (addonPriceId && knownPrices.has(addonPriceId)) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
     const providerSubscriptions = await dependencies.provider.listSubscriptions(customerId);
+    // A subscription that only carries the API add-on is not a plan subscription.
     const manageable = providerSubscriptions.filter((subscription) =>
       subscription.customerId === customerId &&
       subscription.status !== "canceled" && subscription.status !== "incomplete_expired" &&
-      subscription.priceIds.length > 0,
+      subscription.priceIds.some((id) => id !== addonPriceId),
     );
     if (manageable.length > 0) {
       const portal = await dependencies.provider.createPortal(customerId, billingUrls().portalReturn, `uno-portal-checkout-${prepared.intentId}`);
@@ -190,6 +214,64 @@ export async function createBillingCheckout(
     const urls = billingUrls();
     const checkout = await dependencies.provider.createCheckout({
       customerId, priceId, organizationId: actor.organizationId,
+      successUrl: urls.success, cancelUrl: urls.cancel,
+      integrationIdentifier: checkoutIntegrationIdentifier(`${prepared.intentId}:${prepared.providerAttempt}`),
+    }, `uno-checkout-${prepared.intentId}-${prepared.providerAttempt}`);
+    const url = assertBillingUrl(checkout.url);
+    await dependencies.database.transaction(async (transaction) => {
+      await lockOrganizationBilling(actor.organizationId, transaction);
+      await transaction.update(billingCheckoutIntents).set({
+        stripeSessionId: checkout.id, checkoutUrl: url, expiresAt: checkout.expiresAt,
+        status: "OPEN", updatedAt: dependencies.now(),
+      }).where(and(eq(billingCheckoutIntents.organizationId, actor.organizationId), eq(billingCheckoutIntents.id, prepared.intentId), eq(billingCheckoutIntents.status, "CREATING")));
+    });
+    return { url };
+  } catch (error) {
+    return safeProviderError(error);
+  }
+}
+
+/**
+ * Starts the Checkout of the API add-on: its own single-item subscription on
+ * the organization's existing Stripe customer, so the plan subscription stays
+ * manageable by the Customer Portal.
+ */
+export async function createApiAddonCheckout(
+  actor: Pick<Actor, "organizationId" | "organizationName" | "userId" | "membershipRole">,
+  idempotencyKey: string | null,
+  dependencies: CheckoutDependencies = defaults(),
+): Promise<{ url: string }> {
+  assertManager(actor);
+  if (!idempotencyKey || !IDEMPOTENCY_KEY.test(idempotencyKey)) throw new AppError("invalid_idempotency_key", "Idempotency-Key inválida.", 400);
+  if (!billingProviderConfigured()) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+  if (!apiAddonConfigured()) throw new AppError("addon_unavailable", "O adicional de API não está disponível nesta instalação.", 503);
+  try {
+    const priceId = apiAddonPriceId()!;
+    if (PAID_PLAN_IDS.some((planId) => stripePriceId(planId) === priceId)) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    const prepared = await prepareCheckout(actor, { planId: null, addon: "API" }, idempotencyKey, dependencies);
+    if (prepared.completedUrl) return { url: assertBillingUrl(prepared.completedUrl) };
+    const customerId = await ensureCustomer(actor, prepared, dependencies);
+    const closeIntent = () => dependencies.database.update(billingCheckoutIntents).set({ status: "FAILED", updatedAt: dependencies.now() })
+      .where(and(eq(billingCheckoutIntents.organizationId, actor.organizationId), eq(billingCheckoutIntents.id, prepared.intentId), eq(billingCheckoutIntents.status, "CREATING")));
+    // The provider is the source of truth: never sell a second add-on while one is still alive there.
+    const providerSubscriptions = await dependencies.provider.listSubscriptions(customerId);
+    const alive = providerSubscriptions.some((subscription) =>
+      subscription.customerId === customerId &&
+      subscription.status !== "canceled" && subscription.status !== "incomplete_expired" &&
+      subscription.priceIds.includes(priceId),
+    );
+    if (alive) {
+      await closeIntent();
+      throw new AppError("addon_already_active", "O adicional de API já está contratado. Gerencie a assinatura no portal.", 409);
+    }
+    const price = await dependencies.provider.retrievePrice(priceId);
+    if (price.id !== priceId || !price.active || price.currency !== "brl" || price.unitAmount !== getApiAddon().priceBrlCents || price.recurringInterval !== "month" || price.recurringIntervalCount !== 1) {
+      await closeIntent();
+      throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
+    }
+    const urls = billingUrls();
+    const checkout = await dependencies.provider.createCheckout({
+      customerId, priceId, organizationId: actor.organizationId, addon: "API",
       successUrl: urls.success, cancelUrl: urls.cancel,
       integrationIdentifier: checkoutIntegrationIdentifier(`${prepared.intentId}:${prepared.providerAttempt}`),
     }, `uno-checkout-${prepared.intentId}-${prepared.providerAttempt}`);

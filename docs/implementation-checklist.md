@@ -40,7 +40,7 @@ or uploaded to telemetry. Repository fixtures must be synthetic.
   Checkout, Customer Portal, idempotent events, reconciliation, entitlements,
   and no overage/watermark behavior.
 - [x] **CODE + AUTOMATED PASS — 10 Public API:** all `/api/v1` contract routes, hashed
-  show-once Bearer keys, idempotency, organization scope, Pro/Business access,
+  show-once Bearer keys, idempotency, organization scope, API add-on access,
   per-plan rate limits, and cURL/JavaScript/Node/Python documentation.
 - [x] **CODE + AUTOMATED PASS — 11 Webhooks:** dashboard endpoint management, show-once
   secret, exact-body HMAC-SHA-256 signatures, three event types, deduplication,

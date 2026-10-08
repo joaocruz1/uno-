@@ -26,7 +26,7 @@ async function seedTenant(planId: "FREE" | "PRO"): Promise<{ organizationId: str
   await database.insert(organizations).values({ id: organizationId, name: "Synthetic API", slug: `synthetic-api-${organizationId}`, ownerUserId: userId });
   await database.insert(subscriptions).values({
     organizationId, planId, status: "ACTIVE",
-    ...(planId === "PRO" ? { currentPeriodStart: new Date(now.getTime() - 60_000), currentPeriodEnd: new Date(now.getTime() + 86_400_000) } : {}),
+    ...(planId === "PRO" ? { currentPeriodStart: new Date(now.getTime() - 60_000), currentPeriodEnd: new Date(now.getTime() + 86_400_000), apiAddonStatus: "ACTIVE" as const, apiAddonCurrentPeriodEnd: new Date(now.getTime() + 86_400_000) } : {}),
   });
   await database.insert(apiKeys).values({
     organizationId, createdByUserId: userId, name: "synthetic-http", prefix: secret.slice(0, 12),

@@ -32,6 +32,8 @@ export interface BillingProvider {
     customerId: string;
     priceId: string;
     organizationId: string;
+    /** Marks the resulting subscription as the API add-on instead of a plan. */
+    addon?: "API";
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
@@ -81,17 +83,19 @@ class StripeGateway implements BillingProvider {
     customerId: string;
     priceId: string;
     organizationId: string;
+    addon?: "API";
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
   }, idempotencyKey: string): Promise<CheckoutSnapshot> {
+    const metadata = { organizationId: input.organizationId, ...(input.addon ? { uno_addon: input.addon } : {}) };
     const session = await stripe().checkout.sessions.create({
       mode: "subscription",
       customer: input.customerId,
       line_items: [{ price: input.priceId, quantity: 1 }],
       client_reference_id: input.organizationId,
-      metadata: { organizationId: input.organizationId },
-      subscription_data: { metadata: { organizationId: input.organizationId } },
+      metadata,
+      subscription_data: { metadata },
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       integration_identifier: input.integrationIdentifier,

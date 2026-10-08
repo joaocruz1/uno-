@@ -44,6 +44,16 @@ Every variable is listed in `.env.example`. Required in production:
 `ADMIN_EMAILS` (platform admins also need `platform_role = 'ADMIN'` in the
 database). `UNO_ALLOW_DRAFT_TEMPLATES` is ignored in production.
 
+`STRIPE_PRICE_API_ADDON` is optional. It is the price of the "+ API" add-on
+(API keys, public API and webhooks, sold on top of any paid plan as a separate
+subscription); without it plans are sold normally and the add-on is not
+offered. `pnpm stripe:setup <env file>` creates the three plan prices and the
+add-on price, writes the four ids and archives the older active prices of
+those products. Migration `0010_rich_zodiak` adds the add-on columns: apply it
+before the web and API services run this version. No plan includes the API any
+more, so organizations that used it through Pro or Business need the add-on
+(or a manual grant in `subscriptions.api_addon_*`) to keep access.
+
 Security headers and the Content-Security-Policy are computed at **build
 time**: `S3_ENDPOINT` (and `NEXT_PUBLIC_POSTHOG_*`, if used) must be present in
 the build environment or `connect-src` falls back to `https:`.

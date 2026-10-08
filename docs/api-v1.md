@@ -1,7 +1,10 @@
 # API UNO v1
 
 Base URL: o host configurado em `API_URL`, atendido pelo serviço Docker da API.
-Use Pro ou Business e crie uma chave no painel. Ela é exibida uma vez; armazene
+A API exige o adicional "+ API" (R$ 50,00/mês), que pode ser contratado em
+qualquer plano pago (Starter, Pro ou Business) em Assinatura no painel. Com o
+adicional ativo, crie uma chave no painel. Sem ele, ou sem um plano pago
+vigente, as chamadas respondem `403 plan_required`. Ela é exibida uma vez; armazene
 no cofre de segredos do ERP. Nunca inclua a chave em código de navegador.
 Os exemplos usam exclusivamente nomes sintéticos.
 
@@ -235,7 +238,7 @@ corpo identifica o evento e é igual para todos os endpoints inscritos.
 - Qualquer outro código, inclusive 3xx (redirecionamentos não são seguidos),
   timeout ou falha de conexão gera nova tentativa após 1 min, 5 min, 30 min, 2 h
   e 12 h. Depois de seis envios sem sucesso a entrega fica como falha.
-- Desativar ou excluir o endpoint, ou perder o plano Pro/Business, cancela as
+- Desativar ou excluir o endpoint, ou perder o adicional de API ou o plano pago, cancela as
   entregas pendentes. Elas não são reenviadas automaticamente na reativação, e
   um endpoint novo não recebe eventos anteriores à sua criação.
 - O destino precisa ser HTTPS na porta 443, com certificado válido e nome de

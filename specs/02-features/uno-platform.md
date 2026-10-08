@@ -68,15 +68,18 @@ template is rejected; there is no generic or best-effort fallback.
 | Plan | Monthly price | Labels/month | Max file | Max batch | Retention |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Free | R$ 0 | 10 | 5 MB | 1 | 7 days |
-| Starter | R$ 19 | 300 | 20 MB | 50 | 30 days |
-| Pro | R$ 49 | 2,000 | 50 MB | 100 | 90 days |
-| Business | R$ 139 | 10,000 | 100 MB | 500 | 180 days |
+| Starter | R$ 9,99 | 300 | 20 MB | 50 | 30 days |
+| Pro | R$ 15,99 | 2,000 | 50 MB | 100 | 90 days |
+| Business | R$ 29,90 | 10,000 | 100 MB | 500 | 180 days |
 
 - Values and limits are configuration, with the table above as the initial
   production defaults.
-- Public API and webhooks are enabled only for Pro and Business. Initial rate
-  limits are 60 requests/minute for Pro and 120 requests/minute for Business,
-  scoped per organization.
+- No plan includes the public API. API keys, the public API and webhooks are
+  the paid add-on "+ API" (R$ 50,00/month), a separate monthly subscription
+  that any paid plan (Starter, Pro or Business) may buy; Free cannot. The
+  add-on grants access only while a paid plan is in force. Rate limits stay
+  per plan and per organization: 30 requests/minute for Starter, 60 for Pro
+  and 120 for Business.
 - Reserve quota atomically when work is enqueued, confirm it only on success,
   and release it on terminal failure. Internal retries never consume quota
   again. A user-requested reprocess creates a new conversion and quota event.

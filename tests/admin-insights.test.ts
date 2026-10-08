@@ -31,9 +31,11 @@ beforeAll(async () => {
     { id: id(103), name: "Loja Free", slug: "free", ownerUserId: id(2) },
   ]);
   await database.insert(schema.subscriptions).values([
-    { organizationId: id(101), planId: "PRO", status: "ACTIVE", stripeSubscriptionId: "sub_synthetic_1", cancelAtPeriodEnd: true },
-    { organizationId: id(102), planId: "BUSINESS", status: "ACTIVE" },
-    { organizationId: id(103), planId: "FREE", status: "ACTIVE" },
+    { organizationId: id(101), planId: "PRO", status: "ACTIVE", stripeSubscriptionId: "sub_synthetic_1", cancelAtPeriodEnd: true, apiAddonSubscriptionId: "sub_synthetic_addon_1", apiAddonStatus: "ACTIVE", apiAddonCurrentPeriodEnd: new Date(NOW.getTime() + 86_400_000) },
+    // Courtesy plan with a courtesy add-on (no provider link): excluded from revenue.
+    { organizationId: id(102), planId: "BUSINESS", status: "ACTIVE", apiAddonStatus: "ACTIVE", apiAddonCurrentPeriodEnd: new Date(NOW.getTime() + 86_400_000) },
+    // Canceled add-on on a Free organization: not revenue either.
+    { organizationId: id(103), planId: "FREE", status: "ACTIVE", apiAddonSubscriptionId: "sub_synthetic_addon_3", apiAddonStatus: "CANCELED" },
   ]);
   await database.insert(schema.templates).values({ id: id(10), key: "mercado-livre", version: "1.0.0", displayName: "Mercado Livre", engineVersion: "0.1.0", definition: {} });
   await database.insert(schema.apiKeys).values([
@@ -66,7 +68,11 @@ describe("admin business insights", () => {
 
   it("counts revenue only for billed subscriptions", async () => {
     const finance = await adminFinance({ userId: id(1) }, database, NOW);
-    expect(finance).toMatchObject({ estimatedMrrBrlCents: 4_900, payingOrganizations: 1, unbilledPaidOrganizations: 1, freeOrganizations: 1, cancelingAtPeriodEnd: 1 });
+    // Pro (R$ 15,99) plus its Stripe-linked API add-on (R$ 50,00).
+    expect(finance).toMatchObject({ estimatedMrrBrlCents: 1_599 + 5_000, payingOrganizations: 1, unbilledPaidOrganizations: 1, freeOrganizations: 1, cancelingAtPeriodEnd: 1 });
+    expect(finance.byPlan.find((plan) => plan.planId === "PRO")).toMatchObject({ priceBrlCents: 1_599, subscriptions: 1, mrrBrlCents: 1_599 });
+    expect(finance.apiAddon).toEqual({ name: "API", priceBrlCents: 5_000, subscriptions: 1, mrrBrlCents: 5_000 });
+    expect(Object.fromEntries(finance.recentPaid.map((row) => [row.organizationName, row.apiAddon]))).toEqual({ "Loja Paga": true, "Loja Cortesia": false });
     expect(finance.recentPaid.map((row) => row.organizationName).sort()).toEqual(["Loja Cortesia", "Loja Paga"]);
   });
 

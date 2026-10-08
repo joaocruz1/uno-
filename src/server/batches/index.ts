@@ -28,7 +28,7 @@ import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions, type OutputSize } from "@/lib/label-size";
 import { getPlanCatalog, type PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
-import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getStorage, type StorageGateway } from "@/server/storage";
@@ -144,10 +144,7 @@ export async function commitBatch(input: BatchCommitInput, database: UnoDatabase
     const size = sessionSize(session);
     assertTemplateEligible(template, size);
     const subscriptionRows = await transaction.select({
-      planId: subscriptions.planId,
-      status: subscriptions.status,
-      currentPeriodStart: subscriptions.currentPeriodStart,
-      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      ...subscriptionEntitlementColumns,
     }).from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const subscription = subscriptionRows[0];
     const decisionNow = input.now();

@@ -11,11 +11,11 @@ import {
 } from "@/db";
 import { AppError } from "@/lib/errors";
 import type { Actor } from "@/server/auth/actor";
-import { effectivePlanFromSubscription } from "@/server/billing/entitlements";
+import { effectivePlanFromSubscription, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 
 import { WEBHOOK_MAX_ATTEMPTS, WEBHOOK_RETRY_DELAYS_MS, webhookTimeoutMs } from "./config";
 import { decryptWebhookSecret, loadWebhookKeyring, signWebhookBody, type WebhookKeyring } from "./crypto";
-import { assertWebhookManager, isWebhookPlan, lockWebhookOrganization } from "./endpoints";
+import { assertWebhookEntitlement, assertWebhookManager, lockWebhookOrganization } from "./endpoints";
 import { defaultWebhookTransport, sendWebhookRequest, WebhookSendError, type WebhookTransport } from "./network";
 
 type Transaction = Parameters<Parameters<UnoDatabase["transaction"]>[0]>[0];
@@ -65,12 +65,9 @@ function leaseMs(timeoutMs: number): number {
 
 async function hasWebhookEntitlement(organizationId: string, transaction: Transaction, now: Date): Promise<boolean> {
   const rows = await transaction.select({
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
+    ...subscriptionEntitlementColumns,
   }).from(subscriptions).where(eq(subscriptions.organizationId, organizationId)).limit(1);
-  return isWebhookPlan(effectivePlanFromSubscription(rows[0], now).planId);
+  return effectivePlanFromSubscription(rows[0], now).plan.api;
 }
 
 /**
@@ -136,7 +133,7 @@ export async function cancelUnentitledWebhookDeliveries(
   let canceled = 0;
   for (const { organizationId } of organizations) {
     canceled += await dependencies.database.transaction(async (transaction) => {
-      if (isWebhookPlan(await lockWebhookOrganization(organizationId, transaction, now))) return 0;
+      if (await lockWebhookOrganization(organizationId, transaction, now)) return 0;
       const rows = await transaction.update(webhookDeliveries).set({
         status: "CANCELED", claimToken: null, leaseExpiresAt: null, lastError: "plan_required", updatedAt: now,
       }).where(and(eq(webhookDeliveries.organizationId, organizationId), eq(webhookDeliveries.status, "PENDING")))
@@ -328,7 +325,7 @@ export async function retryWebhookDelivery(
   assertWebhookManager(actor);
   const now = dependencies.now();
   await dependencies.database.transaction(async (transaction) => {
-    const planId = await lockWebhookOrganization(actor.organizationId, transaction, now);
+    const entitled = await lockWebhookOrganization(actor.organizationId, transaction, now);
     const rows = await transaction.select({
       id: webhookDeliveries.id,
       status: webhookDeliveries.status,
@@ -341,7 +338,7 @@ export async function retryWebhookDelivery(
       .limit(1).for("update", { of: webhookDeliveries });
     const delivery = rows[0];
     if (!delivery) throw new AppError("not_found", "Entrega de webhook não encontrada.", 404);
-    if (!isWebhookPlan(planId)) throw new AppError("plan_required", "Este recurso exige um plano Pro ou Business.", 403);
+    assertWebhookEntitlement(entitled);
     if (!delivery.endpointActive) throw new AppError("webhook_endpoint_disabled", "Ative o endpoint antes de reenviar.", 409);
     if (!canRetryWebhookDelivery(delivery.status, delivery.attemptCount)) {
       throw new AppError("webhook_retry_unavailable", "Esta entrega não pode ser reenviada.", 409);

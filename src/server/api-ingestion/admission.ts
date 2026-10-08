@@ -18,7 +18,7 @@ import { acceptedConversionSchema } from "@/lib/conversion-model";
 import { AppError } from "@/lib/errors";
 import { parseOutputSize, sizeDimensions, type OutputSize } from "@/lib/label-size";
 import { parseProductFields, type ProductHeader } from "@/lib/product-header";
-import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod } from "@/server/billing/entitlements";
+import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { assertTemplateEligible, findTemplate, INITIAL_TEMPLATE, seedInitialDraftTemplate } from "@/server/conversions/templates";
 
@@ -286,8 +286,7 @@ export async function admitPublicConversion(
       const template = await findTemplate(options.template, transaction);
       assertTemplateEligible(template, options.size);
       const subscriptionRows = await transaction.select({
-        planId: subscriptions.planId, status: subscriptions.status,
-        currentPeriodStart: subscriptions.currentPeriodStart, currentPeriodEnd: subscriptions.currentPeriodEnd,
+        ...subscriptionEntitlementColumns,
       }).from(subscriptions).where(eq(subscriptions.organizationId, actor.organizationId)).limit(1).for("update");
       const entitlement = effectivePlanFromSubscription(subscriptionRows[0], decisionNow);
       const file = parsed.files[0]!;
@@ -357,8 +356,7 @@ export async function admitPublicBatch(
       const template = await findTemplate(options.template, transaction);
       assertTemplateEligible(template, options.size);
       const subscriptionRows = await transaction.select({
-        planId: subscriptions.planId, status: subscriptions.status,
-        currentPeriodStart: subscriptions.currentPeriodStart, currentPeriodEnd: subscriptions.currentPeriodEnd,
+        ...subscriptionEntitlementColumns,
       }).from(subscriptions).where(eq(subscriptions.organizationId, actor.organizationId)).limit(1).for("update");
       const entitlement = effectivePlanFromSubscription(subscriptionRows[0], decisionNow);
       if (prepared.length > entitlement.plan.batchLimit) throw new AppError("batch_limit_exceeded", "O lote excede o limite do plano atual.", 413);

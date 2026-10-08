@@ -26,6 +26,27 @@ export const publicPlanSchema = z.object({
   rateLimit: z.number().int().nonnegative(),
 });
 
+export const apiAddonIdSchema = z.enum(["API"]);
+
+export const apiAddonStateSchema = z.object({
+  name: z.string().min(1),
+  priceBrlCents: z.number().int().positive(),
+  /** API, keys and webhooks are usable right now: paid plan in force and add-on paid up. */
+  active: z.boolean(),
+  status: subscriptionStatusSchema.nullable(),
+  currentPeriodEnd: z.iso.datetime({ offset: true }).nullable(),
+  /** The actor can start the add-on checkout now. */
+  available: z.boolean(),
+  /** The add-on is paid up but grants nothing because no paid plan is in force. */
+  inactiveWithoutPaidPlan: z.boolean(),
+});
+
+/** Checkout request: exactly one of a paid plan or the API add-on. */
+export const billingCheckoutRequestSchema = z.union([
+  z.object({ planId: paidPlanIdSchema }).strict(),
+  z.object({ addon: apiAddonIdSchema }).strict(),
+]);
+
 export const billingStateSchema = z.object({
   planId: planIdSchema,
   effectivePlanId: planIdSchema,
@@ -36,6 +57,7 @@ export const billingStateSchema = z.object({
   checkoutAvailable: z.boolean(),
   portalAvailable: z.boolean(),
   plans: z.array(publicPlanSchema).length(4),
+  apiAddon: apiAddonStateSchema,
 });
 
 export const usageStateSchema = z.object({
@@ -56,6 +78,8 @@ export const usageViewSchema = usageStateSchema;
 
 export type SubscriptionStatus = z.infer<typeof subscriptionStatusSchema>;
 export type PaidPlanId = z.infer<typeof paidPlanIdSchema>;
+export type ApiAddonState = z.infer<typeof apiAddonStateSchema>;
+export type BillingCheckoutRequest = z.infer<typeof billingCheckoutRequestSchema>;
 export type PublicBillingPlan = z.infer<typeof publicPlanSchema>;
 export type PublicPlan = PublicBillingPlan;
 export type BillingView = z.infer<typeof billingStateSchema>;

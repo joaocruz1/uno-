@@ -36,7 +36,7 @@ test("free API page is plan-gated and never exposes a key creation form", async 
   await verifiedPage(page);
   await page.goto("/dashboard/api");
   await expect(page.getByRole("heading", { name: "API", exact: true })).toBeVisible();
-  await expect(page.getByText("A API está disponível nos planos Pro e Business.", { exact: false })).toBeVisible();
+  await expect(page.getByText("A API exige o adicional + API", { exact: false })).toBeVisible();
   await expect(page.getByRole("link", { name: "Consultar planos", exact: true })).toHaveAttribute("href", "/dashboard/billing");
   await expect(page.getByText("Nenhuma chave criada", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Nome da integração", { exact: true })).toHaveCount(0);

@@ -103,8 +103,8 @@ export function WebhookPanel({ canManage, webhooksAvailable }: { canManage: bool
   return <div className="mt-8 space-y-8">
     <section className="rounded-2xl border border-white/10 bg-[#080808] p-6">
       <div className="flex flex-wrap justify-between gap-4">
-        <div><h2 className="font-heading text-xl font-semibold">Novo endpoint</h2><p className="mt-2 text-sm text-zinc-400">{webhooksAvailable ? `Use uma URL HTTPS pública. ${endpoints ? `${activeCount} de ${endpoints.maxActiveEndpoints} endpoints ativos.` : ""}` : "Os webhooks estão disponíveis nos planos Pro e Business. Você pode desativar ou excluir endpoints existentes."}</p></div>
-        <Link href={webhooksAvailable ? "/docs" : "/dashboard/billing"} className="text-sm text-uno-red underline">{webhooksAvailable ? "Como verificar a assinatura" : "Consultar planos"}</Link>
+        <div><h2 className="font-heading text-xl font-semibold">Novo endpoint</h2><p className="mt-2 text-sm text-zinc-400">{webhooksAvailable ? `Use uma URL HTTPS pública. ${endpoints ? `${activeCount} de ${endpoints.maxActiveEndpoints} endpoints ativos.` : ""}` : "Os webhooks exigem o adicional + API, contratado em qualquer plano pago. Você pode desativar ou excluir endpoints existentes."}</p></div>
+        <Link href={webhooksAvailable ? "/docs" : "/dashboard/billing"} className="text-sm text-uno-red underline">{webhooksAvailable ? "Como verificar a assinatura" : "Contratar o adicional de API"}</Link>
       </div>
       {webhooksAvailable ? <form className="mt-6 space-y-5" onSubmit={event => { event.preventDefault(); void create(); }}>
         <label className="block text-sm text-zinc-400">URL de destino<Input ref={urlInput} className="mt-2" type="url" inputMode="url" value={url} maxLength={2048} required placeholder="https://erp.suaempresa.com.br/webhooks/uno" autoComplete="off" disabled={busy} onChange={event => setUrl(event.target.value)}/></label>

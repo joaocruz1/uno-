@@ -38,10 +38,10 @@ conversão falha com um motivo claro em vez de gerar uma etiqueta "por tentativa
 - **Teste sem cadastro** na página inicial: uma etiqueta, processada em memória, sem armazenamento.
 - **Lotes** com envio retomável e saída em ZIP.
 - **Histórico** pesquisável e reprocessamento.
-- **API pública** assíncrona e idempotente (`/api/v1`) para ERPs, com chaves Bearer exibidas uma única vez.
+- **API pública** assíncrona e idempotente (`/api/v1`) para ERPs, com chaves Bearer exibidas uma única vez. É o adicional "+ API" (R$ 50,00/mês), contratado em qualquer plano pago.
 - **Webhooks** assinados (HMAC-SHA-256), com novas tentativas e proteção contra SSRF.
 - **Organizações**, membros, convites por e-mail e transferência de propriedade.
-- **Assinaturas** via Stripe Checkout e Customer Portal, com cota mensal atômica.
+- **Assinaturas** via Stripe Checkout e Customer Portal, com cota mensal atômica: Starter R$ 9,99, Pro R$ 15,99 e Business R$ 29,90 por mês.
 - **Administração**: financeiro, clientes, atividade, chaves de API, conexões e liberação de templates.
 - **Retenção**: remoção automática dos arquivos conforme o plano.
 
@@ -99,7 +99,7 @@ Comandos úteis:
 | `pnpm check` | lint, typecheck, testes e build de produção |
 | `pnpm test:e2e` | testes de navegador (Chromium, Firefox, WebKit e mobile) |
 | `pnpm admin:local [email]` | cria ou promove um administrador local |
-| `pnpm stripe:setup <arquivo .env>` | cria planos, preços e portal na conta Stripe daquele arquivo |
+| `pnpm stripe:setup <arquivo .env>` | cria planos, o adicional de API, preços e portal na conta Stripe daquele arquivo e arquiva os preços antigos |
 | `pnpm proof:print --width 100 --height 150` | gera um candidato sintético para a prova de impressão |
 
 ## API em 30 segundos

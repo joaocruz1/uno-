@@ -8,7 +8,7 @@ import { apiKeyCreatedSchema, apiKeyListSchema, apiKeyNameSchema, type ApiKeyCre
 import { AppError } from "@/lib/errors";
 import type { PlanId } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
-import { effectivePlanFromSubscription } from "@/server/billing/entitlements";
+import { API_ADDON_REQUIRED_MESSAGE, effectivePlanFromSubscription, subscriptionEntitlementColumns, type EffectivePlan } from "@/server/billing/entitlements";
 
 const MAX_ACTIVE_KEYS = 20;
 const createInputSchema = z.object({
@@ -28,9 +28,10 @@ function assertManager(actor: Pick<Actor, "membershipRole">): void {
   }
 }
 
-function assertApiPlan(planId: PlanId): void {
-  if (planId !== "PRO" && planId !== "BUSINESS") {
-    throw new AppError("plan_required", "Este recurso exige um plano Pro ou Business.", 403);
+/** The code stays `plan_required` (public contract); the entitlement is the API add-on on a paid plan. */
+function assertApiEntitlement(entitlement: EffectivePlan): void {
+  if (!entitlement.plan.api) {
+    throw new AppError("plan_required", API_ADDON_REQUIRED_MESSAGE, 403);
   }
 }
 
@@ -76,13 +77,10 @@ export async function createApiKey(
   const row = await database.transaction(async (transaction) => {
     await transaction.execute(sql`select pg_advisory_xact_lock(hashtextextended(${actor.organizationId}, 31))`);
     const subscriptionRows = await transaction.select({
-      planId: subscriptions.planId,
-      status: subscriptions.status,
-      currentPeriodStart: subscriptions.currentPeriodStart,
-      currentPeriodEnd: subscriptions.currentPeriodEnd,
+      ...subscriptionEntitlementColumns,
     }).from(subscriptions).where(eq(subscriptions.organizationId, actor.organizationId)).limit(1).for("update");
     const entitlement = effectivePlanFromSubscription(subscriptionRows[0], now);
-    assertApiPlan(entitlement.planId);
+    assertApiEntitlement(entitlement);
     const active = await transaction.select({ value: count() }).from(apiKeys).where(and(
       eq(apiKeys.organizationId, actor.organizationId),
       isNull(apiKeys.revokedAt),
@@ -136,10 +134,7 @@ export async function requireApiActor(
     organizationId: apiKeys.organizationId,
     revokedAt: apiKeys.revokedAt,
     expiresAt: apiKeys.expiresAt,
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
+    ...subscriptionEntitlementColumns,
   }).from(apiKeys).innerJoin(subscriptions, eq(subscriptions.organizationId, apiKeys.organizationId))
     .where(eq(apiKeys.keyHash, hash)).limit(1);
   const row = rows[0];
@@ -147,7 +142,7 @@ export async function requireApiActor(
     throw new AppError("unauthorized", "Chave de API inválida.", 401);
   }
   const entitlement = effectivePlanFromSubscription(row, now);
-  assertApiPlan(entitlement.planId);
+  assertApiEntitlement(entitlement);
   await database.update(apiKeys).set({ lastUsedAt: now }).where(and(eq(apiKeys.organizationId, row.organizationId), eq(apiKeys.id, row.id)));
   return { organizationId: row.organizationId, apiKeyId: row.id, planId: entitlement.planId };
 }
@@ -162,10 +157,7 @@ export async function requireFreshApiActor(
     organizationId: apiKeys.organizationId,
     revokedAt: apiKeys.revokedAt,
     expiresAt: apiKeys.expiresAt,
-    planId: subscriptions.planId,
-    status: subscriptions.status,
-    currentPeriodStart: subscriptions.currentPeriodStart,
-    currentPeriodEnd: subscriptions.currentPeriodEnd,
+    ...subscriptionEntitlementColumns,
   }).from(apiKeys).innerJoin(subscriptions, eq(subscriptions.organizationId, apiKeys.organizationId)).where(and(
     eq(apiKeys.organizationId, actor.organizationId),
     eq(apiKeys.id, actor.apiKeyId),
@@ -173,7 +165,7 @@ export async function requireFreshApiActor(
   const row = rows[0];
   if (!row || row.revokedAt || (row.expiresAt && row.expiresAt <= now)) throw new AppError("unauthorized", "Chave de API inválida.", 401);
   const entitlement = effectivePlanFromSubscription(row, now);
-  assertApiPlan(entitlement.planId);
+  assertApiEntitlement(entitlement);
   return { organizationId: row.organizationId, apiKeyId: row.id, planId: entitlement.planId };
 }
 

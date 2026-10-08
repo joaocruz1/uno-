@@ -4,7 +4,7 @@ import { z } from "zod";
 import { conversions, getDb, outboxEvents, webhookDeliveries, webhookEndpoints, type UnoDatabase } from "@/db";
 import { WEBHOOK_EVENT_TYPES, webhookEventDataSchema, type WebhookEventData, type WebhookEventType } from "@/lib/webhook-model";
 
-import { isWebhookPlan, lockWebhookOrganization } from "./endpoints";
+import { lockWebhookOrganization } from "./endpoints";
 
 type Transaction = Parameters<Parameters<UnoDatabase["transaction"]>[0]>[0];
 type OutboxEvent = typeof outboxEvents.$inferSelect;
@@ -87,8 +87,7 @@ async function fanOutNextEvent(dependencies: WebhookFanoutDependencies): Promise
     if (!event) return "none";
     const now = dependencies.now();
     let note: string | null = null;
-    const planId = await lockWebhookOrganization(event.organizationId, transaction, now);
-    if (isWebhookPlan(planId)) {
+    if (await lockWebhookOrganization(event.organizationId, transaction, now)) {
       const payload = await buildEventData(event, transaction);
       if (!payload) {
         note = "invalid_payload";

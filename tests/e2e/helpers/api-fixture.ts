@@ -24,6 +24,9 @@ export async function promoteSyntheticPro(email: string): Promise<{ organization
     stripeCustomerId: null,
     stripeSubscriptionId: null,
     stripePriceId: null,
+    apiAddonSubscriptionId: null,
+    apiAddonStatus: "ACTIVE",
+    apiAddonCurrentPeriodEnd: new Date(now.getTime() + 86_400_000),
   }).where(eq(subscriptions.organizationId, organization[0].organizationId));
   return organization[0];
 }
@@ -31,5 +34,5 @@ export async function promoteSyntheticPro(email: string): Promise<{ organization
 export async function restoreSyntheticFree(organizationId: string): Promise<void> {
   const database = getDb();
   await database.delete(apiKeys).where(and(eq(apiKeys.organizationId, organizationId), eq(apiKeys.name, "syntheticERP")));
-  await database.update(subscriptions).set({ planId: "FREE", status: "ACTIVE", currentPeriodStart: null, currentPeriodEnd: null }).where(eq(subscriptions.organizationId, organizationId));
+  await database.update(subscriptions).set({ planId: "FREE", status: "ACTIVE", currentPeriodStart: null, currentPeriodEnd: null, apiAddonSubscriptionId: null, apiAddonStatus: null, apiAddonCurrentPeriodEnd: null }).where(eq(subscriptions.organizationId, organizationId));
 }

@@ -15,8 +15,10 @@ dashboard routes are outside it.
 
 ## Common rules
 
-- Authenticate with `Authorization: Bearer <api-key>`. Only Pro and Business
-  organizations may create and use keys.
+- Authenticate with `Authorization: Bearer <api-key>`. Only organizations
+  with the active API add-on on a paid plan in force (Starter, Pro or
+  Business) may create and use keys; otherwise the response is
+  `403 plan_required`. The rate limit is the one of the organization's plan.
 - Accept `Idempotency-Key` on creation endpoints. The same organization, route,
   and key with the same request returns the original resource; reuse with a
   different request returns `409 idempotency_conflict`.

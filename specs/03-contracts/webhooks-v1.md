@@ -6,12 +6,13 @@ spec: SPEC-UNO-001
 
 # Webhooks de saída
 
-OWNER/ADMIN do plano Pro/Business configura endpoints em dashboard/webhooks.
+OWNER/ADMIN de organização com o adicional de API ativo sobre um plano pago
+vigente (Starter, Pro ou Business) configura endpoints em dashboard/webhooks.
 POST recebe URL HTTPS pública e eventos permitidos. Segredo aleatório exibido
 uma vez; persistência AES-256-GCM com chave de ambiente versionada, IV único e
 AAD vinculada à organização/endpoint. GET nunca retorna ciphertext ou segredo.
-DELETE/desativação interrompe novas tentativas. Perda de plano API também
-impede envio; não enviar retrospectivamente todos os eventos ao novo endpoint.
+DELETE/desativação interrompe novas tentativas. Perda do adicional de API ou do plano pago também
+impede envio (código plan_required); não enviar retrospectivamente todos os eventos ao novo endpoint.
 Limite operacional inicial configurável: dez endpoints ativos por organização.
 
 Eventos transactional outbox: conversion.completed, conversion.failed,

@@ -79,6 +79,7 @@ beforeAll(async () => {
   await database.insert(subscriptions).values({
     organizationId: ORG, planId: "PRO", status: "ACTIVE",
     currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01"),
+    apiAddonStatus: "ACTIVE", apiAddonCurrentPeriodEnd: new Date("2026-11-01"),
   });
   await database.insert(apiKeys).values({ id: API_KEY, organizationId: ORG, createdByUserId: USER, name: "Tests", prefix: "uno_test_key", keyHash: "a".repeat(64) });
   await database.insert(templates).values({

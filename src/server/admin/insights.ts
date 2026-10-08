@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 
 import { getDb, type UnoDatabase } from "@/db";
-import { getPlanCatalog, planIdSchema, type PlanId } from "@/lib/plans";
+import { getApiAddon, getPlanCatalog, planIdSchema, type PlanId } from "@/lib/plans";
 
 import { assertPlatformAdmin, type AdminIdentity } from "./access";
 
@@ -17,7 +17,7 @@ const number = (value: unknown) => Number(value ?? 0);
 const iso = (value: unknown) => (value ? new Date(value as string).toISOString() : null);
 
 export type AdminFinance = {
-  /** Catalog price × paying subscriptions. An estimate, not the provider's revenue report. */
+  /** Catalog price × paying subscriptions, plans plus API add-ons. An estimate, not the provider's revenue report. */
   estimatedMrrBrlCents: number;
   payingOrganizations: number;
   freeOrganizations: number;
@@ -27,7 +27,9 @@ export type AdminFinance = {
   pastDue: number;
   newPaidLast30Days: number;
   byPlan: Array<{ planId: PlanId; name: string; priceBrlCents: number; subscriptions: number; mrrBrlCents: number }>;
-  recentPaid: Array<{ organizationId: string; organizationName: string; planId: PlanId; status: string; billingLinked: boolean; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; updatedAt: string }>;
+  /** Paying API add-on subscriptions linked to the provider; its own revenue line. */
+  apiAddon: { name: string; priceBrlCents: number; subscriptions: number; mrrBrlCents: number };
+  recentPaid: Array<{ organizationId: string; organizationName: string; planId: PlanId; status: string; billingLinked: boolean; apiAddon: boolean; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; updatedAt: string }>;
 };
 
 export async function adminFinance(identity: AdminIdentity, database: Database = getDb(), now = new Date()): Promise<AdminFinance> {
@@ -54,13 +56,21 @@ export async function adminFinance(identity: AdminIdentity, database: Database =
     const subscriptions = byPlan.get(planId) ?? 0;
     return { planId, name: catalog[planId].name, priceBrlCents: catalog[planId].priceBrlCents, subscriptions, mrrBrlCents: subscriptions * catalog[planId].priceBrlCents };
   });
+  // Same rule as plans: only add-ons linked to a provider subscription and in a paying status count.
+  const addonCount = await database.execute<{ total: string }>(sql`
+    select count(*) as total from subscriptions
+    where api_addon_subscription_id is not null and api_addon_status::text in ('ACTIVE', 'TRIALING', 'PAST_DUE')`);
+  const addon = getApiAddon();
+  const addonSubscriptions = number(addonCount.rows[0]?.total);
+  const apiAddon = { name: addon.name, priceBrlCents: addon.priceBrlCents, subscriptions: addonSubscriptions, mrrBrlCents: addonSubscriptions * addon.priceBrlCents };
   const recent = await database.execute<Record<string, unknown>>(sql`
     select s.organization_id, o.name, s.plan_id::text, s.status::text, (s.stripe_subscription_id is not null) as linked,
+           (s.api_addon_subscription_id is not null and s.api_addon_status::text in ('ACTIVE', 'TRIALING', 'PAST_DUE')) as api_addon,
            s.current_period_end, s.cancel_at_period_end, s.updated_at
     from subscriptions s join organizations o on o.id = s.organization_id
     where s.plan_id <> 'FREE' order by s.updated_at desc limit 50`);
   return {
-    estimatedMrrBrlCents: plans.reduce((total, plan) => total + plan.mrrBrlCents, 0),
+    estimatedMrrBrlCents: plans.reduce((total, plan) => total + plan.mrrBrlCents, 0) + apiAddon.mrrBrlCents,
     payingOrganizations: plans.reduce((total, plan) => total + plan.subscriptions, 0),
     freeOrganizations: free,
     unbilledPaidOrganizations: unbilled,
@@ -68,9 +78,10 @@ export async function adminFinance(identity: AdminIdentity, database: Database =
     pastDue,
     newPaidLast30Days: recentPaid,
     byPlan: plans,
+    apiAddon,
     recentPaid: recent.rows.map((row) => ({
       organizationId: String(row.organization_id), organizationName: String(row.name), planId: planIdSchema.parse(row.plan_id),
-      status: String(row.status), billingLinked: Boolean(row.linked), currentPeriodEnd: iso(row.current_period_end),
+      status: String(row.status), billingLinked: Boolean(row.linked), apiAddon: Boolean(row.api_addon), currentPeriodEnd: iso(row.current_period_end),
       cancelAtPeriodEnd: Boolean(row.cancel_at_period_end), updatedAt: iso(row.updated_at)!,
     })),
   };
@@ -210,6 +221,7 @@ export async function adminConnections(identity: AdminIdentity, database: Databa
     { name: "Redis", purpose: "Fila, limites de taxa e sessões", ...state(has("REDIS_URL"), "Configurado", "REDIS_URL ausente") },
     { name: "Armazenamento S3/R2", purpose: "PDFs de entrada e saída (privado)", ...state(has("S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"), "Configurado", "Variáveis S3_* incompletas") },
     { name: "Stripe", purpose: "Assinaturas e cobrança", ...state(has("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO", "STRIPE_PRICE_BUSINESS"), "Chaves e preços configurados", "Defina STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e os três STRIPE_PRICE_*") },
+    { name: "Stripe — adicional de API", purpose: "Venda do adicional + API (opcional)", ...state(has("STRIPE_PRICE_API_ADDON"), "Preço configurado", "Opcional — STRIPE_PRICE_API_ADDON ausente; o adicional não é oferecido") },
     { name: "E-mail", purpose: "Confirmação de conta e convites", ...state(has("SMTP_HOST", "SMTP_USER", "SMTP_PASS") || has("RESEND_API_KEY") || has("SMTP_URL"), has("SMTP_HOST", "SMTP_USER", "SMTP_PASS") ? "SMTP autenticado configurado" : has("RESEND_API_KEY") ? "Resend configurado" : "SMTP local (Mailpit)", "Defina SMTP_HOST/SMTP_USER/SMTP_PASS ou RESEND_API_KEY") },
     { name: "Webhooks de saída", purpose: "Criptografia dos segredos dos clientes", ...state(has("WEBHOOK_ENCRYPTION_KEY"), "Chave configurada", "WEBHOOK_ENCRYPTION_KEY ausente") },
     { name: "Sentry", purpose: "Erros (opcional)", ...state(has("SENTRY_DSN"), "Configurado", "Opcional — SENTRY_DSN ausente") },
