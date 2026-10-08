@@ -7,6 +7,7 @@ import { Button, ButtonLink, Progress } from "@/components/ui";
 import { acceptedConversionSchema, conversionViewSchema, type ConversionView } from "@/lib/conversion-model";
 import { UploadPanel, type UploadedFile } from "./upload-panel";
 import { PdfCanvasPreview } from "./pdf-preview";
+import { startPollingClock } from "./use-polling-delay";
 
 const STAGES: Record<string, string> = {
   queued: "Na fila", analyze: "Conferindo o PDF", detect: "Identificando o modelo",
@@ -116,6 +117,7 @@ export function ConversionFlow({ planName, maxFileMB }: { planName: string; maxF
     if (!conversionId) return;
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const nextDelay = startPollingClock();
     const read = async () => {
       try {
         const response = await fetch(`/api/dashboard/conversions/${conversionId}`, { cache: "no-store", signal: controller.signal });
@@ -125,7 +127,7 @@ export function ConversionFlow({ planName, maxFileMB }: { planName: string; maxF
         const next = conversionViewSchema.parse(body);
         setConversion(next);
         setPollError(undefined);
-        if (next.status === "queued" || next.status === "processing") timer = setTimeout(() => void read(), 2_000);
+        if (next.status === "queued" || next.status === "processing") timer = setTimeout(() => void read(), nextDelay());
       } catch (error) {
         if (controller.signal.aborted) return;
         setPollError(error instanceof Error && !(error instanceof z.ZodError) ? error.message : "Não foi possível consultar a conversão.");
