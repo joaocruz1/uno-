@@ -27,7 +27,7 @@ import {
 import { closeConversionQueue } from "@/server/queue/conversion-queue";
 import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { getStorage } from "@/server/storage";
-import { findUploadIntentForOrganization, readValidatedUpload } from "@/server/uploads";
+import { findUploadIntentForOrganization, inspectValidatedUpload, readValidatedUpload } from "@/server/uploads";
 import { startConversionWorker } from "@/workers/conversion-worker";
 import { syntheticPdf } from "./fixtures/synthetic-pdf";
 
@@ -92,6 +92,7 @@ describe.skipIf(!enabled)("native conversion pipeline", () => {
         {
           storage,
           loadIntent: findUploadIntentForOrganization,
+          inspectUpload: (intent, gateway) => inspectValidatedUpload(intent, { storage: gateway }),
           readUpload: (intent, gateway) => readValidatedUpload(intent, { storage: gateway }),
           commit: async (input) => {
             await commitConversion(input, database);
@@ -148,6 +149,7 @@ describe.skipIf(!enabled)("native conversion pipeline", () => {
         {
           storage,
           loadIntent: findUploadIntentForOrganization,
+          inspectUpload: (intent, gateway) => inspectValidatedUpload(intent, { storage: gateway }),
           readUpload: (intent, gateway) => readValidatedUpload(intent, { storage: gateway }),
           commit: (input) => commitConversion(input, database),
           recoverCommitted: (input) => recoverCommittedConversion(input, database),

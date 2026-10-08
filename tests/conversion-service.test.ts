@@ -16,6 +16,8 @@ const ORGANIZATION_ID = "00000000-0000-4000-8000-000000000101";
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const INTENT_ID = "00000000-0000-4000-8000-000000000201";
 const PDF_BYTES = Buffer.from("%PDF-synthetic-only");
+const UPLOAD_KEY = "organizations/test/uploads/synthetic.pdf";
+const CHECKSUM = "b".repeat(64);
 
 function storage() {
   const objects = new Map<string, Buffer>();
@@ -26,6 +28,11 @@ function storage() {
     getRange: vi.fn(),
     read: vi.fn(async (key) => objects.get(key) ?? Buffer.alloc(0)),
     putBytes: vi.fn(async (key, bytes) => { objects.set(key, Buffer.from(bytes)); }),
+    copy: vi.fn(async (sourceKey, targetKey) => {
+      const bytes = objects.get(sourceKey);
+      if (!bytes) throw new Error("missing source");
+      objects.set(targetKey, Buffer.from(bytes));
+    }),
     delete: vi.fn(async (key) => { objects.delete(key); }),
     openReadStream: vi.fn(async (key) => Readable.from([objects.get(key) ?? Buffer.alloc(0)])),
     beginMultipartUpload: vi.fn(async () => "upload-id"),
@@ -36,8 +43,25 @@ function storage() {
   return { gateway, objects };
 }
 
+function intentRecord(checksumSha256: string | null = null) {
+  return {
+    id: INTENT_ID,
+    organizationId: ORGANIZATION_ID,
+    createdByUserId: USER_ID,
+    objectKey: UPLOAD_KEY,
+    contentType: "application/pdf" as const,
+    contentLength: PDF_BYTES.length,
+    checksumSha256,
+    originalFileName: "synthetic.pdf",
+    expiresAt: new Date("2026-10-07T12:05:00.000Z"),
+    consumedAt: null,
+    createdAt: new Date("2026-10-07T11:59:00.000Z"),
+  };
+}
+
 function dependencies(overrides: Partial<CreationDependencies> = {}) {
   const stored = storage();
+  stored.objects.set(UPLOAD_KEY, PDF_BYTES);
   const ids = [
     "00000000-0000-4000-8000-000000000301",
     "00000000-0000-4000-8000-000000000302",
@@ -48,18 +72,12 @@ function dependencies(overrides: Partial<CreationDependencies> = {}) {
     storage: stored.gateway,
     randomId: () => ids.shift()!,
     now: () => new Date("2026-10-07T12:00:00.000Z"),
-    loadIntent: vi.fn(async () => ({
-      id: INTENT_ID,
-      organizationId: ORGANIZATION_ID,
-      createdByUserId: USER_ID,
-      objectKey: "organizations/test/uploads/synthetic.pdf",
-      contentType: "application/pdf" as const,
+    loadIntent: vi.fn(async () => intentRecord()),
+    inspectUpload: vi.fn(async () => ({
       contentLength: PDF_BYTES.length,
-      checksumSha256: null,
+      contentType: "application/pdf" as const,
+      checksumSha256: CHECKSUM,
       originalFileName: "synthetic.pdf",
-      expiresAt: new Date("2026-10-07T12:05:00.000Z"),
-      consumedAt: null,
-      createdAt: new Date("2026-10-07T11:59:00.000Z"),
     })),
     readUpload: vi.fn(async () => ({
       bytes: PDF_BYTES,
@@ -74,6 +92,10 @@ function dependencies(overrides: Partial<CreationDependencies> = {}) {
     ...overrides,
   };
   return { dependency, stored };
+}
+
+function snapshotKeys(objects: Map<string, Buffer>): string[] {
+  return [...objects.keys()].filter((key) => key.includes("/conversion-inputs/"));
 }
 
 const request = {
@@ -95,7 +117,7 @@ describe("conversion creation service", () => {
     });
     expect(stored.gateway.putBytes).toHaveBeenCalledOnce();
     expect(stored.gateway.delete).not.toHaveBeenCalled();
-    expect(stored.objects.size).toBe(1);
+    expect(snapshotKeys(stored.objects)).toHaveLength(1);
   });
 
   it("deletes only the orphan snapshot when the business transaction does not commit", async () => {
@@ -106,7 +128,7 @@ describe("conversion creation service", () => {
       dependency,
     )).rejects.toThrow("transaction failed");
     expect(stored.gateway.delete).toHaveBeenCalledOnce();
-    expect(stored.objects.size).toBe(0);
+    expect(snapshotKeys(stored.objects)).toHaveLength(0);
   });
 
   it("keeps and publishes the snapshot when a lost commit acknowledgement is reconciled", async () => {
@@ -127,7 +149,7 @@ describe("conversion creation service", () => {
     expect(accepted.createdAt).toBe("2026-10-07T12:00:01.000Z");
     expect(dependency.publish).toHaveBeenCalledWith("00000000-0000-4000-8000-000000000399");
     expect(stored.gateway.delete).not.toHaveBeenCalled();
-    expect(stored.objects.size).toBe(1);
+    expect(snapshotKeys(stored.objects)).toHaveLength(1);
   });
 
   it("preserves the snapshot when commit reconciliation is indeterminate", async () => {
@@ -142,7 +164,76 @@ describe("conversion creation service", () => {
       dependency,
     )).rejects.toThrow("connection lost");
     expect(stored.gateway.delete).not.toHaveBeenCalled();
-    expect(stored.objects.size).toBe(1);
+    expect(snapshotKeys(stored.objects)).toHaveLength(1);
+  });
+
+  it("snapshots a checksummed upload with a server-side copy instead of downloading it", async () => {
+    const { dependency, stored } = dependencies({ loadIntent: vi.fn(async () => intentRecord(CHECKSUM)) });
+    await createConversionFromUpload({ organizationId: ORGANIZATION_ID, userId: USER_ID }, request, dependency);
+
+    const snapshotKey = `organizations/${ORGANIZATION_ID}/conversion-inputs/00000000-0000-4000-8000-000000000302.pdf`;
+    expect(dependency.inspectUpload).toHaveBeenCalledOnce();
+    expect(dependency.readUpload).not.toHaveBeenCalled();
+    expect(stored.gateway.read).not.toHaveBeenCalled();
+    expect(stored.gateway.putBytes).not.toHaveBeenCalled();
+    expect(stored.gateway.copy).toHaveBeenCalledWith(UPLOAD_KEY, snapshotKey, "application/pdf");
+    expect(stored.objects.get(snapshotKey)).toEqual(PDF_BYTES);
+    const commitInput = vi.mocked(dependency.commit).mock.calls[0]?.[0];
+    expect(commitInput?.snapshotKey).toBe(snapshotKey);
+    expect(commitInput?.upload).toEqual({
+      contentLength: PDF_BYTES.length,
+      checksumSha256: CHECKSUM,
+      originalFileName: "synthetic.pdf",
+    });
+  });
+
+  it("falls back to reading and re-uploading the bytes when the intent has no checksum", async () => {
+    const { dependency, stored } = dependencies();
+    await createConversionFromUpload({ organizationId: ORGANIZATION_ID, userId: USER_ID }, request, dependency);
+
+    const snapshotKey = `organizations/${ORGANIZATION_ID}/conversion-inputs/00000000-0000-4000-8000-000000000302.pdf`;
+    expect(dependency.readUpload).toHaveBeenCalledOnce();
+    expect(dependency.inspectUpload).not.toHaveBeenCalled();
+    expect(stored.gateway.copy).not.toHaveBeenCalled();
+    expect(stored.gateway.putBytes).toHaveBeenCalledWith(snapshotKey, PDF_BYTES, "application/pdf", PDF_BYTES.length);
+    const commitInput = vi.mocked(dependency.commit).mock.calls[0]?.[0];
+    expect(commitInput?.upload).toEqual({
+      contentLength: PDF_BYTES.length,
+      checksumSha256: "a".repeat(64),
+      originalFileName: "synthetic.pdf",
+    });
+  });
+
+  it("deletes the copied snapshot but never the original upload when the commit does not happen", async () => {
+    const { dependency, stored } = dependencies({
+      loadIntent: vi.fn(async () => intentRecord(CHECKSUM)),
+      commit: vi.fn(async () => { throw new Error("transaction failed"); }),
+    });
+    await expect(createConversionFromUpload(
+      { organizationId: ORGANIZATION_ID, userId: USER_ID },
+      request,
+      dependency,
+    )).rejects.toThrow("transaction failed");
+    expect(stored.gateway.copy).toHaveBeenCalledOnce();
+    expect(stored.gateway.delete).toHaveBeenCalledExactlyOnceWith(
+      `organizations/${ORGANIZATION_ID}/conversion-inputs/00000000-0000-4000-8000-000000000302.pdf`,
+    );
+    expect(snapshotKeys(stored.objects)).toHaveLength(0);
+    expect(stored.objects.get(UPLOAD_KEY)).toEqual(PDF_BYTES);
+  });
+
+  it("does not snapshot or commit when the metadata inspection rejects the upload", async () => {
+    const { dependency, stored } = dependencies({
+      loadIntent: vi.fn(async () => intentRecord(CHECKSUM)),
+      inspectUpload: vi.fn(async () => { throw new Error("invalid_pdf"); }),
+    });
+    await expect(createConversionFromUpload(
+      { organizationId: ORGANIZATION_ID, userId: USER_ID },
+      request,
+      dependency,
+    )).rejects.toThrow("invalid_pdf");
+    expect(stored.gateway.copy).not.toHaveBeenCalled();
+    expect(dependency.commit).not.toHaveBeenCalled();
   });
 
   it("uses a deterministic colon-free queue job id", () => {

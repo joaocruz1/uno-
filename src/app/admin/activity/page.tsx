@@ -4,6 +4,8 @@ import { requireAdminPage } from "@/server/admin/page";
 
 export const dynamic = "force-dynamic";
 
+const seconds = (milliseconds: number | null) => milliseconds === null ? "—" : `${(milliseconds / 1_000).toFixed(1).replace(".", ",")} s`;
+
 const SOURCE: Record<string, string> = { dashboard: "Painel (upload manual)", api: "API (ERP/integração)" };
 
 export default async function AdminActivityPage() {
@@ -16,7 +18,7 @@ export default async function AdminActivityPage() {
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat accent label="Etiquetas em 30 dias" value={integer(activity.total30d)} hint={`${integer(activity.completed30d)} concluídas (${rate}%)`} />
         <Stat label="Com cabeçalho de produto" value={integer(activity.withProductHeader)} />
-        <Stat label="Tempo médio de processamento" value={activity.averageProcessingMs === null ? "—" : `${(activity.averageProcessingMs / 1_000).toFixed(1).replace(".", ",")} s`} />
+        <Stat label="Tempo médio até a etiqueta" value={seconds(activity.averageTotalMs)} hint={`engine ${seconds(activity.averageProcessingMs)} · fila ${seconds(activity.averageQueueWaitMs)}`} />
         <Stat label="Novas organizações em 14 dias" value={integer(activity.signupsByDay.reduce((total, day) => total + day.total, 0))} />
       </div>
       <div className="mt-8 grid gap-4 lg:grid-cols-2">

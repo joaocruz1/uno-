@@ -16,6 +16,9 @@ const createInputSchema = z.object({
   expiresAt: z.iso.datetime({ offset: true }).optional(),
 }).strict();
 
+/** Minimum spacing between two `last_used_at` writes for the same key. */
+const LAST_USED_WRITE_INTERVAL_MS = 60_000;
+
 export type ApiActor = {
   organizationId: string;
   apiKeyId: string;
@@ -134,6 +137,7 @@ export async function requireApiActor(
     organizationId: apiKeys.organizationId,
     revokedAt: apiKeys.revokedAt,
     expiresAt: apiKeys.expiresAt,
+    lastUsedAt: apiKeys.lastUsedAt,
     ...subscriptionEntitlementColumns,
   }).from(apiKeys).innerJoin(subscriptions, eq(subscriptions.organizationId, apiKeys.organizationId))
     .where(eq(apiKeys.keyHash, hash)).limit(1);
@@ -143,7 +147,11 @@ export async function requireApiActor(
   }
   const entitlement = effectivePlanFromSubscription(row, now);
   assertApiEntitlement(entitlement);
-  await database.update(apiKeys).set({ lastUsedAt: now }).where(and(eq(apiKeys.organizationId, row.organizationId), eq(apiKeys.id, row.id)));
+  // "Last used" is informational. Clients poll results several times per
+  // second, so the write is skipped while the stored value is recent.
+  if (!row.lastUsedAt || now.getTime() - row.lastUsedAt.getTime() >= LAST_USED_WRITE_INTERVAL_MS) {
+    await database.update(apiKeys).set({ lastUsedAt: now }).where(and(eq(apiKeys.organizationId, row.organizationId), eq(apiKeys.id, row.id)));
+  }
   return { organizationId: row.organizationId, apiKeyId: row.id, planId: entitlement.planId };
 }
 

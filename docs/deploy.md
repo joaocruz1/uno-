@@ -95,6 +95,22 @@ Everything can also run on one server next to PostgreSQL and Redis. Still
    domain or port. It applies pending migrations on every start.
 4. **Environment** (both apps): the contents of `.env.production`, using the
    internal hosts of PostgreSQL and Redis. Deploy the worker first.
+   Sizing for `uno-worker`: the engine runs in a resident supervised child
+   that stays warm between conversions. On macOS a warm idle child measured
+   about 570 MB of RSS (mostly native memory of PDF.js and the canvas); Linux
+   numbers were not measured yet. The child is replaced when idle RSS exceeds
+   `UNO_ENGINE_CHILD_IDLE_RSS_MB` (default 640) and a job is killed above the
+   768 MB cap. Give the container at least parent (≈250 MB) + 1 GB per child
+   and at least one dedicated vCPU; a throttled CPU is the first thing to check
+   when conversions feel slow.
+   `UNO_CONVERSION_CONCURRENCY` (default 1, max 4) sets both the number of
+   BullMQ slots and of resident children; raise it only with 2+ vCPUs and
+   memory for every child. Every completed attempt logs one JSON line
+   `{"event":"conversion.completed", ...}` with `queueWaitMs`, `claimMs`,
+   `downloadMs`, `spawnMs`, `engineMs`, `uploadMs`, `commitMs` and `wallMs`;
+   read it in the service logs to see where time goes in production. The same
+   breakdown is stored in `processing_events.metadata` of the `completed` event,
+   and Admin → Atividade shows the mean total, engine and queue-wait times.
 5. **Administrator**: register on the site, confirm the e-mail, add the address
    to `ADMIN_EMAILS` in both apps, then in the worker console run
    `node --import tsx scripts/create-local-admin.ts you@example.com` and redeploy.

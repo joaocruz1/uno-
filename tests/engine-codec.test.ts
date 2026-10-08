@@ -83,11 +83,11 @@ describe("PDF renderer and protected-code decoder", () => {
     const fixture = await syntheticCodecPdf();
     const renderer = await openPdfRenderer(fixture.bytes);
     try {
-      const bitmap = await renderer.render(1, dpi);
+      const bitmap = await renderer.render(1, dpi, 0, { png: true });
       expect(bitmap.width).toBe(Math.ceil((100 / MILLIMETERS_PER_INCH) * dpi));
       expect(bitmap.height).toBe(Math.ceil((150 / MILLIMETERS_PER_INCH) * dpi));
       expect(bitmap.rgba).toHaveLength(bitmap.width * bitmap.height * 4);
-      expect(bitmap.png.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+      expect(bitmap.png?.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
       expect(decodeCode(bitmap, pixelRegion(bitmap, fixture.page, fixture.code128), "CODE_128")).toBe(CODE_128_VALUE);
       expect(decodeCode(bitmap, pixelRegion(bitmap, fixture.page, fixture.qrCode), "QR_CODE")).toBe(QR_CODE_VALUE);
     } finally {

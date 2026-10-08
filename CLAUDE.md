@@ -50,8 +50,13 @@ PDF → Analyzer → Template Detector → Content Extractor → Layout Engine �
   organizações, admin, retenção, teste anônimo. Toda operação protegida
   autoriza no servidor e é restrita à organização.
 - **Worker** (`src/workers/`): BullMQ. Processa conversões, lotes, entregas de
-  webhook e retenção. A engine roda em processo isolado com vigia de memória
-  (usa `ps`, por isso a imagem precisa de `procps`).
+  webhook e retenção. A engine roda em filho residente supervisionado (um por
+  slot de `UNO_CONVERSION_CONCURRENCY`, aquecido no start): heap limitado,
+  workspace `job-<uuid>` por job dentro de uma raiz privada por processo,
+  prazo e vigia de RSS do grupo por job. O filho é aposentado em qualquer falha
+  de isolamento, após 50 jobs, ocioso ou com RSS ocioso alto; erro tipado não o
+  aposenta. A vigia lê `/proc` no Linux e cai para `ps` (por isso a imagem
+  mantém `procps`).
 - **Dados**: PostgreSQL + Drizzle (migrações em `drizzle/`), Redis (filas e
   limites), armazenamento S3 privado com links assinados.
 - **Padrões que não podem quebrar**: outbox transacional, idempotência, cota
@@ -134,6 +139,10 @@ Pendências:
 - Use `corepack pnpm` (o `pnpm` não está no PATH).
 - `corepack pnpm check` roda lint, typecheck, testes e build; rode nas
   fronteiras de fase. Testes usam PGlite e somente dados sintéticos.
+- `corepack pnpm bench:engine` mede a engine no PDF sintético (em processo e
+  pelo filho residente). Em produção, cada conversão concluída gera no log do
+  worker uma linha JSON `conversion.completed` com `queueWaitMs`, `spawnMs`,
+  `engineMs`, `uploadMs` e `wallMs`; é por ela que se investiga lentidão.
 - Ambiente local: `.env.local` (Postgres, Redis, emulador S3 `pnpm dev:s3`,
   Mailpit, Stripe em modo de teste). `UNO_ALLOW_DRAFT_TEMPLATES=true` libera o
   template em desenvolvimento.

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button, ButtonLink, Input, Progress } from "@/components/ui";
 import { ConversionResult } from "@/components/conversion/conversion-flow";
+import { startPollingClock } from "@/components/conversion/use-polling-delay";
 import { acceptedConversionSchema, conversionViewSchema, type ConversionView } from "@/lib/conversion-model";
 import { outputSizeSchema } from "@/lib/label-size";
 
@@ -19,6 +20,7 @@ export function ConversionDetail({ id }: { id: string }) {
   const configuredId = useRef<string | undefined>(undefined);
   useEffect(() => {
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
+    const nextDelay = startPollingClock();
     const read = async () => {
       try {
         const response = await fetch(`/api/dashboard/conversions/${id}`, { cache: "no-store", signal: controller.signal });
@@ -32,7 +34,7 @@ export function ConversionDetail({ id }: { id: string }) {
           setWidth(String(next.size.widthMm)); setHeight(String(next.size.heightMm));
           retryKey.current = undefined;
         }
-        if (next.status === "queued" || next.status === "processing") timer = setTimeout(() => void read(), 2000);
+        if (next.status === "queued" || next.status === "processing") timer = setTimeout(() => void read(), nextDelay());
       } catch { if (!controller.signal.aborted) setError("Não foi possível consultar esta conversão."); }
     };
     void read(); return () => { controller.abort(); if (timer) clearTimeout(timer); };

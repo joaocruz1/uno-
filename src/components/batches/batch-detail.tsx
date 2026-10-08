@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
+import { startPollingClock } from "@/components/conversion/use-polling-delay";
 import { Button, ButtonLink, Progress } from "@/components/ui";
 import { batchDetailSchema, batchItemsPageSchema } from "@/lib/batch-model";
 
@@ -17,6 +18,7 @@ export function BatchDetail({ id }: { id: string }) {
   const loadedId = useRef<string | undefined>(undefined);
   useEffect(() => {
     const controller = new AbortController(); let timer: ReturnType<typeof setTimeout> | undefined;
+    const nextDelay = startPollingClock();
     const read = async () => {
       try {
         const responses = await Promise.all([fetch(`/api/dashboard/batches/${id}`, { cache: "no-store", signal: controller.signal }), fetch(`/api/dashboard/batches/${id}/items${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ""}`, { cache: "no-store", signal: controller.signal })]);
@@ -24,7 +26,7 @@ export function BatchDetail({ id }: { id: string }) {
         const [detail, page] = await Promise.all(responses.map(response => response.json()));
         if (controller.signal.aborted) return;
         const next = batchDetailSchema.parse(detail); setBatch(next); setItems(batchItemsPageSchema.parse(page)); loadedId.current = id; setError(undefined);
-        if (["queued", "processing"].includes(next.status)) timer = setTimeout(() => void read(), 2000);
+        if (["queued", "processing"].includes(next.status)) timer = setTimeout(() => void read(), nextDelay());
       } catch { if (!controller.signal.aborted) setError("Não foi possível consultar o lote. O processamento continua."); }
     };
     void read(); return () => { controller.abort(); if (timer) clearTimeout(timer); };

@@ -55,6 +55,10 @@ export type ReadValidatedUpload = ValidatedUpload & {
   checksumSha256: string;
 };
 
+export type InspectedUpload = ValidatedUpload & {
+  checksumSha256: string;
+};
+
 type UploadIntentInsert = Pick<
   typeof uploadIntents.$inferInsert,
   | "id"
@@ -233,6 +237,34 @@ export async function validateUpload(
     contentLength: intent.contentLength,
     contentType: PDF_CONTENT_TYPE,
     checksumSha256: intent.checksumSha256 ?? undefined,
+    originalFileName: intent.originalFileName ?? undefined,
+  };
+}
+
+/**
+ * Validates an upload whose intent carries a client-declared SHA-256 without downloading
+ * the body. The signed PUT already bound that checksum (the provider rejects mismatched
+ * bytes) and the worker re-verifies hash and size when it reads the immutable snapshot,
+ * so creation only needs the stored size, media type and leading PDF signature.
+ * Does not mark the intent as consumed.
+ */
+export async function inspectValidatedUpload(
+  intent: UploadIntentRecord,
+  options: { storage?: StorageGateway; now?: Date } = {},
+): Promise<InspectedUpload> {
+  const checksumSha256 = intent.checksumSha256;
+  if (!checksumSha256) throw new Error("upload_checksum_required");
+  const storage = options.storage ?? getStorage();
+  assertUsable(intent, options.now ?? new Date());
+  const [, leadingBytes] = await Promise.all([
+    inspectHead(intent, storage),
+    storage.getRange(intent.objectKey, Math.min(PDF_MAGIC_SCAN_BYTES, intent.contentLength)),
+  ]);
+  if (!hasPdfMagic(leadingBytes)) throw new AppError("invalid_pdf", "O arquivo enviado não possui assinatura PDF válida.", 400);
+  return {
+    contentLength: intent.contentLength,
+    contentType: PDF_CONTENT_TYPE,
+    checksumSha256,
     originalFileName: intent.originalFileName ?? undefined,
   };
 }

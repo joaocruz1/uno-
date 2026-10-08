@@ -95,11 +95,31 @@ at build time, `connect-src` falls back to `https:`; set it (or
 
 ## Temporary files
 
-Each conversion runs in a private `0700` directory that the parent removes on
-success, failure and timeout. `recoverAbandonedEngineWorkspaces` removes
-leftovers only when they are real directories matching the engine name pattern,
-owned by the process user, private, and older than the configured age. Symbolic
-links are never followed and no path comes from a request.
+The engine runs in resident, supervised child processes (one per conversion
+slot, `UNO_CONVERSION_CONCURRENCY`). Each parent process creates one private
+`0700` root (`uno-engine-XXXXXX`) that is the `TMPDIR` of its children for the
+parent's whole life. Every job gets its own `job-<uuid>` directory (`0700`)
+inside that root: the child validates the path, creates it, points `TMPDIR` and
+`UNO_ENGINE_TMP_DIR` at it for the job and removes it before reporting the
+outcome; the parent removes it again on success, failure and timeout. The root
+is removed when the pool closes and, synchronously, when the parent exits.
+
+A child serves one job at a time and is retired (SIGKILL of its process group)
+on the deadline, which starts at the call and also covers the wait for a free
+child; on group RSS above the limit while a job runs; on exit, IPC error,
+protocol violation (unexpected message or job id) or a throwing progress
+handler; after `UNO_ENGINE_CHILD_MAX_JOBS` jobs (50); when idle for
+`UNO_ENGINE_CHILD_IDLE_MS` (10 min, never more than `UNO_ENGINE_TMP_MAX_AGE_MS`);
+and when an idle RSS sample exceeds `UNO_ENGINE_CHILD_IDLE_RSS_MB` (640). A
+typed engine error (invalid PDF and similar) does not retire the child. Only the
+allowlisted error codes cross the boundary. The RSS watchdog reads `/proc` on
+Linux (after a self-test at first use) and falls back to `ps` elsewhere.
+
+`recoverAbandonedEngineWorkspaces` removes leftovers only when they are real
+directories matching the engine name pattern, owned by the process user,
+private, older than the configured age and not the root of a live pool of the
+same process. Symbolic links are never followed and no path comes from a
+request.
 
 ## Operational gates (not enforced by code)
 

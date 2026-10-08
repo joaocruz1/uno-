@@ -79,6 +79,18 @@ if (response.status !== 202) throw new Error(`${accepted.error.code}: ${accepted
 // Consulte GET /api/v1/conversions/{id} ou receba o webhook.
 ```
 
+### Acompanhar o resultado
+
+Uma etiqueta digital comum fica pronta em cerca de um segundo depois do `202`.
+Duas formas de saber:
+
+- **Webhook** (recomendado): `conversion.completed` ou `conversion.failed` é
+  entregue assim que o worker conclui, sem esperar ciclo periódico.
+- **Polling** de `GET /api/v1/conversions/{id}`: comece 500 ms após o `202` e
+  repita a cada 500 ms–1 s até `status` ser `completed` ou `failed`. Cada
+  consulta conta no limite de requisições por minuto do plano, então não
+  consulte mais rápido do que isso nem em paralelo para o mesmo `id`.
+
 ## Python
 
 ```python

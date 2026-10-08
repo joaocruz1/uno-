@@ -24,3 +24,22 @@ it.skipIf(process.env.UNO_STORAGE_INTEGRATION !== "1")("real S3 signed uploads, 
     await storage.delete(key);
   }
 });
+
+it.skipIf(process.env.UNO_STORAGE_INTEGRATION !== "1")("real S3 server-side copy keeps the bytes and the PDF media type", async () => {
+  const storage = getStorage();
+  const sourceKey = `synthetic-test/${crypto.randomUUID()}/source file.pdf`;
+  const targetKey = `synthetic-test/${crypto.randomUUID()}/conversion-inputs/${crypto.randomUUID()}.pdf`;
+  const bytes = Buffer.from("%PDF-1.7\nsynthetic-copy-test\n%%EOF");
+  try {
+    await storage.putBytes(sourceKey, bytes, "application/pdf", bytes.length);
+    await storage.copy(sourceKey, targetKey, "application/pdf");
+    expect(await storage.head(targetKey)).toMatchObject({ contentLength: bytes.length, contentType: "application/pdf" });
+    expect(await storage.read(targetKey, bytes.length)).toEqual(bytes);
+    expect(await storage.read(sourceKey, bytes.length)).toEqual(bytes);
+    await expect(storage.copy(`synthetic-test/${crypto.randomUUID()}.pdf`, `${targetKey}.missing`, "application/pdf"))
+      .rejects.toMatchObject({ code: "upload_not_found" });
+  } finally {
+    await storage.delete(sourceKey);
+    await storage.delete(targetKey);
+  }
+});

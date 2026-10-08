@@ -1,6 +1,7 @@
 import {
   AbortMultipartUploadCommand,
   CompleteMultipartUploadCommand,
+  CopyObjectCommand,
   CreateMultipartUploadCommand,
   DeleteObjectCommand,
   GetObjectCommand,
@@ -43,6 +44,8 @@ export interface StorageGateway {
   getRange(key: string, maxBytes: number): Promise<Buffer>;
   read(key: string, maxBytes: number): Promise<Buffer>;
   putBytes(key: string, bytes: Buffer, contentType: string, maxBytes: number): Promise<void>;
+  /** Server-side copy inside the private bucket; the body never leaves the storage provider. */
+  copy(sourceKey: string, targetKey: string, contentType: string): Promise<void>;
   delete(key: string, abortSignal?: AbortSignal): Promise<void>;
   openReadStream(key: string, abortSignal?: AbortSignal): Promise<Readable>;
   beginMultipartUpload(key: string, contentType: string, abortSignal?: AbortSignal): Promise<string>;
@@ -197,6 +200,23 @@ class S3StorageGateway implements StorageGateway {
     try {
       await client().send(
         new PutObjectCommand({ Bucket: bucket(), Key: key, Body: bytes, ContentLength: bytes.length, ContentType: contentType }),
+      );
+    } catch (error) {
+      throw storageError(error);
+    }
+  }
+
+  async copy(sourceKey: string, targetKey: string, contentType: string): Promise<void> {
+    try {
+      const sourceBucket = bucket();
+      await client().send(
+        new CopyObjectCommand({
+          Bucket: sourceBucket,
+          Key: targetKey,
+          CopySource: `${sourceBucket}/${sourceKey.split("/").map(encodeURIComponent).join("/")}`,
+          MetadataDirective: "REPLACE",
+          ContentType: contentType,
+        }),
       );
     } catch (error) {
       throw storageError(error);

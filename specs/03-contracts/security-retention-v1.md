@@ -26,7 +26,16 @@ organização, proprietário/tentativa e prazo; sem dono comprovável apenas inv
 operacional, sem exclusão ampla. Nenhuma varredura indiscriminada do bucket.
 
 Temporários privados por execução são limpos em sucesso/falha/timeout e recuperados
-após abandono; não seguir symlinks nem aceitar paths do cliente. Entrada/saída,
+após abandono; não seguir symlinks nem aceitar paths do cliente. A engine roda em
+filho residente supervisionado: cada processo pai cria uma raiz privada (0700,
+`uno-engine-*`) que é o TMPDIR dos seus filhos; cada job usa workspace próprio
+`job-<uuid>` (0700) dentro dela, criado e removido pelo filho e removido de novo
+pelo pai; a recuperação de abandonados ignora raízes vivas do próprio processo.
+Um filho atende um job por vez e é aposentado (SIGKILL do grupo) em prazo, RSS do
+grupo acima do limite durante o job, saída/erro, falha de IPC, violação de
+protocolo ou falha do handler de progresso; também após N jobs, ocioso por tempo
+limitado (nunca acima da idade de abandono) ou com amostra de RSS ociosa acima do
+limite. Erro tipado da engine não aposenta o filho. Entrada/saída,
 páginas, prazo, memória e concorrência são limitados; medir orçamento agregado
 parent/preparação/ZIP/filho. Valores inválidos de segurança falham explicitamente.
 Aplicar webhooks-v1 (AAD/segredos, SSRF/DNS pin/TLS, sem redirects/proxies,
@@ -41,7 +50,9 @@ somente após opt-in, whitelist, sem email/identify/autocapture/session replay/
 pageview automático. Revogação interrompe envio. Logs nunca contêm segredos.
 
 Deploy sem root, aplicação read-only, temporários privados, limites memória/CPU/
-processos e término de grupo filho. Subprocesso supervisionado é contenção de
+processos e término de grupo filho. Subprocesso supervisionado residente (heap
+limitado, vigia de RSS do grupo por `/proc` com fallback `ps`, prazo por job
+contado desde a chamada, inclusive a espera por filho livre) é contenção de
 recursos, sem promessa de isolamento completo do OS. Testes: exclusão repetida/
 parcial, leases, retenção concorrente, commit desconhecido, snapshot transferido,
 multipart abandonado/symlink e sentinelas pessoais na telemetria; nenhum PostHog

@@ -2,11 +2,17 @@ export type RenderedBitmap = {
   width: number;
   height: number;
   rgba: Uint8ClampedArray;
-  png: Buffer;
+  /** Present only when the render was requested with `{ png: true }`; encoding is costly and only OCR needs it. */
+  png?: Buffer;
+};
+
+export type RenderOptions = {
+  /** Also encode the bitmap as PNG. Off by default: barcode and pixel checks read `rgba` directly. */
+  png?: boolean;
 };
 
 export type PdfRenderer = {
-  render(pageNumber: number, dpi: number, rotation?: number): Promise<RenderedBitmap>;
+  render(pageNumber: number, dpi: number, rotation?: number, options?: RenderOptions): Promise<RenderedBitmap>;
   close(): Promise<void>;
 };
 
@@ -111,7 +117,7 @@ export async function openPdfRenderer(bytes: Uint8Array): Promise<PdfRenderer> {
 
   let closed = false;
   return {
-    async render(pageNumber, dpi, rotation = 0) {
+    async render(pageNumber, dpi, rotation = 0, options = {}) {
       if (closed) throw new PdfRenderError("render_failed", "O renderizador já foi encerrado.");
       if (!Number.isInteger(pageNumber) || pageNumber < 1 || pageNumber > document.numPages) {
         throw new PdfRenderError("invalid_page", "A página solicitada não existe.");
@@ -151,7 +157,7 @@ export async function openPdfRenderer(bytes: Uint8Array): Promise<PdfRenderer> {
           width,
           height,
           rgba: new Uint8ClampedArray(imageData.data),
-          png: canvas.toBuffer("image/png"),
+          ...(options.png ? { png: canvas.toBuffer("image/png") } : {}),
         };
       } catch (error) {
         if (error instanceof PdfRenderError) throw error;

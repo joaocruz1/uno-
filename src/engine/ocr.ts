@@ -44,7 +44,8 @@ export async function recognizeScannedPage(bytes: Uint8Array, page: AnalyzedPage
   await chmod(directory, 0o700);
   const inputPath = join(directory, "page.png");
   try {
-    const rendered = await renderer.render(page.pageNumber, 203, 0);
+    const rendered = await renderer.render(page.pageNumber, 203, 0, { png: true });
+    if (!rendered.png) throw new EngineError("ocr_unavailable", { terminal: false });
     await writeFile(inputPath, rendered.png, { mode: 0o600 });
     const resolvedInputPath = await realpath(inputPath);
     let stdout: string;

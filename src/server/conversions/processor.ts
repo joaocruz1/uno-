@@ -51,6 +51,27 @@ export type ClaimRow = {
   attempts: number;
   maxAttempts: number;
   token: string;
+  /** When the conversion entered the queue; used only for the wait-time metric. */
+  queuedAt?: Date | null;
+};
+
+/**
+ * Wall-clock breakdown of one worker attempt, in milliseconds. `engineMs` is
+ * the sum of the engine stages (the contractual `processingTimeMs`); the other
+ * fields are what the engine does not see: queue wait, claim, download of the
+ * input, start of the engine process until its first progress event, upload of
+ * the output and the completion transaction.
+ */
+export type WorkerTimings = {
+  queueWaitMs: number | null;
+  claimMs: number;
+  downloadMs: number;
+  spawnMs: number | null;
+  engineMs: number;
+  convertMs: number;
+  uploadMs: number;
+  commitMs: number;
+  wallMs: number;
 };
 
 class ProcessingContractError extends Error {
@@ -118,6 +139,7 @@ export async function claimConversion(conversionId: string, token: string, depen
       templateReleasedAt: templates.releasedAt,
       attempts: conversions.attempts,
       maxAttempts: conversions.maxAttempts,
+      queuedAt: conversions.queuedAt,
     }).from(conversions).innerJoin(templates, eq(templates.id, conversions.templateId))
       .where(and(
         eq(conversions.id, conversionId),
@@ -150,28 +172,24 @@ export async function claimConversion(conversionId: string, token: string, depen
 }
 
 async function persistProgress(claim: ClaimRow, event: ProgressEvent, dependencies: ProcessorDependencies): Promise<void> {
-  await dependencies.database.transaction(async (transaction) => {
-    const updated = await transaction.update(conversions).set({
-      progress: event.progress,
-      currentStage: event.stage,
-      processingLeaseExpiresAt: new Date(dependencies.now().getTime() + LEASE_MS),
-      updatedAt: dependencies.now(),
-    }).where(and(
-      eq(conversions.id, claim.id),
-      eq(conversions.organizationId, claim.organizationId),
-      eq(conversions.status, "processing"),
-      eq(conversions.processingToken, claim.token),
-    )).returning({ id: conversions.id });
-    if (updated.length !== 1) throw new Error("conversion_claim_lost");
-    await transaction.insert(processingEvents).values({
-      organizationId: claim.organizationId,
-      conversionId: claim.id,
-      stage: event.stage,
-      progress: event.progress,
-      attempt: claim.attempts,
-      metadata: {},
-    });
-  });
+  // One round trip per stage: the conversion row and its event are written in
+  // a single data-modifying CTE, so the engine never waits on two statements.
+  const now = dependencies.now();
+  const result = await dependencies.database.execute<{ id: string }>(sql`
+    with owned as (
+      update conversions
+      set progress = ${event.progress}, current_stage = ${event.stage},
+          processing_lease_expires_at = ${new Date(now.getTime() + LEASE_MS)}, updated_at = ${now}
+      where id = ${claim.id} and organization_id = ${claim.organizationId}
+        and status = 'processing' and processing_token = ${claim.token}
+      returning id
+    )
+    insert into processing_events (organization_id, conversion_id, stage, progress, attempt, metadata)
+    select ${claim.organizationId}, ${claim.id}, ${event.stage}, ${event.progress}, ${claim.attempts}, '{}'::jsonb
+    from owned
+    returning id
+  `);
+  if (result.rows.length !== 1) throw new Error("conversion_claim_lost");
 }
 
 async function renewLease(claim: ClaimRow, dependencies: ProcessorDependencies): Promise<boolean> {
@@ -206,6 +224,7 @@ async function completeConversion(
   result: ConversionResult,
   outputKey: string,
   dependencies: ProcessorDependencies,
+  timings: Omit<WorkerTimings, "commitMs" | "wallMs"> & { startedAtMs: number; commitStartedMs: number },
 ): Promise<boolean> {
   return dependencies.database.transaction(async (transaction) => {
     const processingTimeMs = Math.round(Object.values(result.timingsMs).reduce((total, value) => total + value, 0));
@@ -241,14 +260,22 @@ async function completeConversion(
       widthPoints: "283.465",
       heightPoints: "425.197",
     }))).onConflictDoNothing({ target: [conversionPages.conversionId, conversionPages.pageNumber] });
-    for (const [stage, duration] of Object.entries(result.timingsMs)) {
-      await transaction.update(processingEvents).set({ durationMs: Math.round(duration) }).where(and(
-        eq(processingEvents.organizationId, claim.organizationId),
-        eq(processingEvents.conversionId, claim.id),
-        eq(processingEvents.attempt, claim.attempts),
-        eq(processingEvents.stage, stage),
-      ));
+    const stageDurations = Object.entries(result.timingsMs)
+      .map(([stage, duration]) => sql`(${stage}, ${Math.round(duration)}::integer)`);
+    if (stageDurations.length > 0) {
+      await transaction.execute(sql`
+        update processing_events as event set duration_ms = stage.duration_ms
+        from (values ${sql.join(stageDurations, sql`, `)}) as stage(name, duration_ms)
+        where event.organization_id = ${claim.organizationId} and event.conversion_id = ${claim.id}
+          and event.attempt = ${claim.attempts} and event.stage = stage.name
+      `);
     }
+    const { startedAtMs, commitStartedMs, ...measured } = timings;
+    const workerTimings: WorkerTimings = {
+      ...measured,
+      commitMs: Math.round(performance.now() - commitStartedMs),
+      wallMs: Math.round(performance.now() - startedAtMs),
+    };
     await transaction.insert(processingEvents).values({
       organizationId: claim.organizationId,
       conversionId: claim.id,
@@ -256,8 +283,9 @@ async function completeConversion(
       progress: 100,
       attempt: claim.attempts,
       durationMs: processingTimeMs,
-      metadata: {},
+      metadata: { timings: workerTimings },
     });
+    logWorkerTimings(claim, workerTimings);
     const reservation = await reservationFor(claim, transaction);
     if (!reservation) throw new Error("usage_reservation_not_found");
     await confirmUsage(reservation.id, claim.organizationId, transaction);
@@ -532,12 +560,22 @@ export async function reconcileExpiredConversionClaims(dependencies: ProcessorDe
   return recovered;
 }
 
+function logWorkerTimings(claim: ClaimRow, timings: WorkerTimings): void {
+  if (process.env.VITEST === "true") return;
+  // One structured line per completed attempt, for the service logs. No file
+  // names or customer data: identifiers and durations only.
+  console.log(JSON.stringify({ event: "conversion.completed", conversionId: claim.id, attempt: claim.attempts, ...timings }));
+}
+
 export async function processConversion(conversionId: string, dependencies: ProcessorDependencies = defaults()): Promise<void> {
+  const startedAtMs = performance.now();
   const claim = await claimConversion(conversionId, dependencies.randomId(), dependencies);
   if (!claim) {
     await reconcileExhaustedConversion(conversionId, dependencies);
     return;
   }
+  const claimMs = Math.round(performance.now() - startedAtMs);
+  const queueWaitMs = claim.queuedAt ? Math.max(0, dependencies.now().getTime() - claim.queuedAt.getTime()) : null;
   let claimLost = false;
   const renewal = setInterval(() => {
     void renewLease(claim, dependencies).then((owned) => { if (!owned) claimLost = true; }, () => { claimLost = true; });
@@ -546,7 +584,9 @@ export async function processConversion(conversionId: string, dependencies: Proc
   let attemptOutputKey: string | undefined;
   try {
     assertProcessingClaimSupported(claim);
+    const downloadStartedMs = performance.now();
     const input = await dependencies.storage.read(claim.inputObjectKey, claim.sourceByteLength);
+    const downloadMs = Math.round(performance.now() - downloadStartedMs);
     if (input.length !== claim.sourceByteLength || createHash("sha256").update(input).digest("hex") !== claim.inputSha256) {
       const disposition = await failOrRetry(claim, {
         code: "input_integrity_failed",
@@ -556,23 +596,32 @@ export async function processConversion(conversionId: string, dependencies: Proc
       if (disposition === "retry") throw new Error("retry_conversion");
       return;
     }
+    const convertStartedMs = performance.now();
+    let spawnMs: number | null = null;
     const result = await dependencies.convert(
       input,
       outputSize(claim),
       `${claim.templateKey}@${claim.templateVersion}`,
       async (event) => {
+        spawnMs ??= Math.round(performance.now() - convertStartedMs);
         if (claimLost) throw new Error("conversion_claim_lost");
         await persistProgress(claim, event, dependencies);
       },
       claim.productHeader ? { product: claim.productHeader } : {},
     );
+    const convertMs = Math.round(performance.now() - convertStartedMs);
     assertEngineResultMatchesClaim(claim, result);
     if (claimLost || !await stillOwnsClaim(claim, dependencies)) return;
     attemptOutputKey = `organizations/${claim.organizationId}/conversion-outputs/${claim.id}/${claim.token}.pdf`;
     const output = Buffer.from(result.bytes);
+    const uploadStartedMs = performance.now();
     await dependencies.storage.putBytes(attemptOutputKey, output, "application/pdf", MAX_OUTPUT_BYTES);
+    const uploadMs = Math.round(performance.now() - uploadStartedMs);
+    const engineMs = Math.round(Object.values(result.timingsMs).reduce((total, value) => total + value, 0));
     try {
-      const completed = await completeConversion(claim, result, attemptOutputKey, dependencies);
+      const completed = await completeConversion(claim, result, attemptOutputKey, dependencies, {
+        startedAtMs, commitStartedMs: performance.now(), queueWaitMs, claimMs, downloadMs, spawnMs, engineMs, convertMs, uploadMs,
+      });
       if (!completed) await dependencies.storage.delete(attemptOutputKey).catch(() => undefined);
     } catch (error) {
       try {

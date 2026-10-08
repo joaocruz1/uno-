@@ -21,7 +21,9 @@ import { publishPendingConversionJobs } from "@/server/queue/outbox";
 import { getStorage, type StorageGateway } from "@/server/storage";
 import {
   findUploadIntentForOrganization,
+  inspectValidatedUpload,
   readValidatedUpload,
+  type InspectedUpload,
   type ReadValidatedUpload,
   type UploadIntentRecord,
 } from "@/server/uploads";
@@ -38,11 +40,14 @@ export const createConversionInputSchema = z.object({
 export type CreateConversionInput = z.infer<typeof createConversionInputSchema>;
 export type AcceptedConversion = { id: string; status: "queued"; progress: 0; createdAt: string };
 
+/** What the commit transaction needs about the snapshotted upload; never the bytes. */
+type CommittedUpload = Pick<InspectedUpload, "contentLength" | "checksumSha256" | "originalFileName">;
+
 type CommitInput = {
   actor: Pick<Actor, "organizationId" | "userId">;
   request: CreateConversionInput;
   intent: UploadIntentRecord;
-  upload: ReadValidatedUpload;
+  upload: CommittedUpload;
   snapshotKey: string;
   conversionId: string;
   reservationId: string;
@@ -53,6 +58,9 @@ type CommitInput = {
 export type CreationDependencies = {
   storage: StorageGateway;
   loadIntent(organizationId: string, intentId: string): Promise<UploadIntentRecord>;
+  /** Used when the intent carries a checksum: validates metadata only, then copies server-side. */
+  inspectUpload(intent: UploadIntentRecord, storage: StorageGateway): Promise<InspectedUpload>;
+  /** Fallback without a checksum: downloads, hashes and re-uploads the bytes. */
   readUpload(intent: UploadIntentRecord, storage: StorageGateway): Promise<ReadValidatedUpload>;
   commit(input: CommitInput): Promise<{ createdAt: Date; outboxId: string }>;
   recoverCommitted(input: Pick<CommitInput, "actor" | "intent" | "snapshotKey" | "conversionId">): Promise<{
@@ -215,6 +223,7 @@ function defaultDependencies(): CreationDependencies {
     randomId: randomUUID,
     now: () => new Date(),
     loadIntent: findUploadIntentForOrganization,
+    inspectUpload: (intent, gateway) => inspectValidatedUpload(intent, { storage: gateway }),
     readUpload: (intent, gateway) => readValidatedUpload(intent, { storage: gateway }),
     commit: (input) => commitConversion(input),
     recoverCommitted: (input) => recoverCommittedConversion(input),
@@ -231,11 +240,23 @@ export async function createConversionFromUpload(
 ): Promise<AcceptedConversion> {
   const request = createConversionInputSchema.parse(rawInput);
   const intent = await dependencies.loadIntent(actor.organizationId, request.uploadIntentId);
-  const upload = await dependencies.readUpload(intent, dependencies.storage);
+  // With a declared checksum the signed PUT already bound the bytes and the worker re-hashes
+  // the snapshot, so a metadata check plus a server-side copy replaces download + re-upload.
+  const read = intent.checksumSha256 ? undefined : await dependencies.readUpload(intent, dependencies.storage);
+  const source: InspectedUpload | ReadValidatedUpload = read ?? await dependencies.inspectUpload(intent, dependencies.storage);
   const conversionId = dependencies.randomId();
   const snapshotId = dependencies.randomId();
   const snapshotKey = `organizations/${actor.organizationId}/conversion-inputs/${snapshotId}.pdf`;
-  await dependencies.storage.putBytes(snapshotKey, upload.bytes, "application/pdf", upload.contentLength);
+  if (read) {
+    await dependencies.storage.putBytes(snapshotKey, read.bytes, "application/pdf", read.contentLength);
+  } else {
+    await dependencies.storage.copy(intent.objectKey, snapshotKey, "application/pdf");
+  }
+  const upload: CommittedUpload = {
+    contentLength: source.contentLength,
+    checksumSha256: source.checksumSha256,
+    originalFileName: source.originalFileName,
+  };
 
   let committed: { createdAt: Date; outboxId: string };
   const commitInput: CommitInput = {
@@ -271,4 +292,4 @@ export async function createConversionFromUpload(
   return { id: conversionId, status: "queued", progress: 0, createdAt: committed.createdAt.toISOString() };
 }
 
-export type { CommitInput };
+export type { CommitInput, CommittedUpload };
