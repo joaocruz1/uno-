@@ -64,7 +64,7 @@ export function assertTemplateEligible(template: TemplateEligibility, size: Outp
     throw new AppError("unsupported_template", "O modelo selecionado não está disponível.", 400);
   }
   if (template.status === "RELEASED" && template.releasedAt && exactReleasedSize(template, size)) return;
-  if (template.status === "DRAFT" && draftAllowed && process.env.NODE_ENV !== "production") return;
+  if (template.status === "DRAFT" && draftAllowed) return;
   throw new AppError("template_not_released", "Este modelo e formato ainda não estão disponíveis.", 409);
 }
 

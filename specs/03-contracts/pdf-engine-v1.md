@@ -142,3 +142,12 @@ regions. When present in compact mode, blank bands above and below each
 logistics region's real content are trimmed and the label may shrink uniformly
 down to 80 %; below that the conversion fails `format_too_small`. Code
 equivalence is still decoded at 203 and 300 dpi on every output.
+
+# Amendment 2026-10-08 — unreleased templates in production (owner decision)
+
+The product owner chose to open the service before the physical print proof.
+`UNO_ALLOW_UNRELEASED_TEMPLATES=true` makes a DRAFT template eligible in
+production. It is off by default, the automated validation (geometry and code
+equivalence at 203/300 dpi) still runs on every conversion, and the
+template/size remains **not certified** until a release with the physical proof
+is published in `/admin/templates`. The flag should be removed once it is.
