@@ -135,7 +135,8 @@ class S3StorageGateway implements StorageGateway {
           ContentLength: input.contentLength,
           ChecksumSHA256: input.checksumSha256,
         }),
-        { expiresIn: seconds },
+        // Keep the checksum as a signed header: R2 rejects it when hoisted into the query string.
+        { expiresIn: seconds, unhoistableHeaders: new Set(["x-amz-checksum-sha256"]) },
       );
       return { url, headers, expiresAt };
     } catch (error) {
