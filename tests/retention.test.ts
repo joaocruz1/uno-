@@ -25,6 +25,7 @@ import {
   type UnoDatabase,
 } from "@/db";
 import { recoverAbandonedEngineWorkspaces } from "@/engine/isolated";
+import { EngineChildPool, liveEngineWorkspaceRoots } from "@/engine/isolated-child";
 import { AppError } from "@/lib/errors";
 import { listBatchItems, listBatches, readBatch, reconcileBatch, signBatchDownload } from "@/server/batches";
 import { listConversionHistory } from "@/server/conversions/history";
@@ -80,6 +81,11 @@ class MemoryStorage implements StorageGateway {
     return Buffer.from(bytes);
   }
   async putBytes(key: string, bytes: Buffer) { this.objects.set(key, Buffer.from(bytes)); }
+  async copy(sourceKey: string, targetKey: string) {
+    const bytes = this.objects.get(sourceKey);
+    if (!bytes) throw new AppError("upload_not_found", "missing", 404);
+    this.objects.set(targetKey, Buffer.from(bytes));
+  }
   async delete(key: string) {
     this.deletes.push(key);
     await this.onDelete?.(key);
@@ -651,6 +657,32 @@ describe("abandoned engine workspaces", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
       await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("skips the root of a live engine pool of this process whatever its age", async () => {
+    const root = await mkdtemp(join(tmpdir(), "uno-retention-live-"));
+    const pool = new EngineChildPool({ size: 1, tmpRoot: root });
+    try {
+      const old = new Date(NOW.getTime() - 2 * 3_600_000);
+      const live = await pool.prepareRoot();
+      expect(liveEngineWorkspaceRoots()).toContain(live);
+      await utimes(live, old, old);
+
+      const abandoned = join(root, "uno-engine-ZZZZZZ");
+      await mkdir(abandoned, { mode: 0o700 });
+      await utimes(abandoned, old, old);
+
+      expect(await recoverAbandonedEngineWorkspaces({ root, maxAgeMs: 3_600_000, now: NOW })).toBe(1);
+      expect((await lstat(live)).isDirectory()).toBe(true);
+      await expect(lstat(abandoned)).rejects.toMatchObject({ code: "ENOENT" });
+
+      await pool.close();
+      expect(liveEngineWorkspaceRoots()).not.toContain(live);
+      await expect(lstat(live)).rejects.toMatchObject({ code: "ENOENT" });
+    } finally {
+      await pool.close();
+      await rm(root, { recursive: true, force: true });
     }
   });
 

@@ -161,8 +161,18 @@ export type AdminActivity = {
   total30d: number;
   completed30d: number;
   averageProcessingMs: number | null;
+  /** Mean of completed_at − created_at: what the customer waits, end to end. */
+  averageTotalMs: number | null;
+  /** Mean of processing_started_at − queued_at: time spent waiting for a worker. */
+  averageQueueWaitMs: number | null;
   signupsByDay: Array<{ day: string; total: number }>;
 };
+
+function averageMs(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
 
 /** Where labels come from: channel, marketplace template, format and plan over the last 30 days. */
 export async function adminActivity(identity: AdminIdentity, database: Database = getDb(), now = new Date()): Promise<AdminActivity> {
@@ -188,7 +198,9 @@ export async function adminActivity(identity: AdminIdentity, database: Database 
   const totals = await database.execute<Record<string, unknown>>(sql`
     select count(*) as total, count(*) filter (where c.status = 'completed') as completed,
       count(*) filter (where c.product_header is not null) as with_header,
-      avg(c.processing_time_ms) filter (where c.status = 'completed') as average_ms
+      avg(c.processing_time_ms) filter (where c.status = 'completed') as average_ms,
+      avg(extract(epoch from (c.completed_at - c.created_at)) * 1000) filter (where c.status = 'completed' and c.completed_at is not null) as average_total_ms,
+      avg(extract(epoch from (c.processing_started_at - c.queued_at)) * 1000) filter (where c.processing_started_at is not null) as average_queue_wait_ms
     from conversions c where ${window}`);
   const signups = await database.execute<Record<string, unknown>>(sql`
     select to_char(date_trunc('day', created_at at time zone 'America/Sao_Paulo'), 'YYYY-MM-DD') as day, count(*) as total
@@ -204,7 +216,9 @@ export async function adminActivity(identity: AdminIdentity, database: Database 
     bySource: pairs(bySource.rows), byTemplate: pairs(byTemplate.rows), byPlan: pairs(byPlan.rows),
     bySize: bySize.rows.map((row) => ({ key: String(row.key), total: number(row.total) })),
     withProductHeader: number(summary.with_header), total30d: number(summary.total), completed30d: number(summary.completed),
-    averageProcessingMs: summary.average_ms === null || summary.average_ms === undefined ? null : Math.round(Number(summary.average_ms)),
+    averageProcessingMs: averageMs(summary.average_ms),
+    averageTotalMs: averageMs(summary.average_total_ms),
+    averageQueueWaitMs: averageMs(summary.average_queue_wait_ms),
     signupsByDay: window14.map((day) => ({ day, total: number(signups.rows.find((candidate) => candidate.day === day)?.total) })),
   };
 }

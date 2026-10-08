@@ -1,9 +1,17 @@
-import { execFile, fork, type ChildProcess } from "node:child_process";
-import { chmod, lstat, mkdtemp, readdir, rm } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { lstat, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { EngineError, type EngineErrorCode } from "./errors";
+import {
+  EngineChildPool,
+  engineChildPoolSize,
+  isLiveEngineWorkspaceRoot,
+  processGroupRssReader,
+  type EngineChildPoolStats,
+  type ResidentEngineChild,
+} from "./isolated-child";
 import type { ConversionResult, OutputSize, ProductHeader, ProgressEvent, ProgressHandler } from "./types";
 
 const DEFAULT_TIMEOUT_MS = 90_000;
@@ -16,7 +24,6 @@ const MIN_RSS_MB = 128;
 const MAX_RSS_MB = 1_024;
 const MAX_INPUT_BYTES = 100 * 1_024 * 1_024;
 const RSS_POLL_INTERVAL_MS = 250;
-const WORKSPACE_PREFIX = "uno-engine-";
 const WORKSPACE_NAME = /^uno-engine-[A-Za-z0-9]{6}$/;
 const MIN_ABANDONED_WORKSPACE_AGE_MS = 2 * MAX_TIMEOUT_MS;
 
@@ -41,13 +48,16 @@ type IsolationOptions = {
   maxRssMb?: number;
 };
 
-type ChildProgressMessage = { type: "progress"; event: ProgressEvent };
-type ChildResultMessage = { type: "result"; result: ConversionResult };
+type ChildProgressMessage = { type: "progress"; jobId: string; event: ProgressEvent };
+type ChildResultMessage = { type: "result"; jobId: string; result: ConversionResult };
 type ChildErrorMessage = {
   type: "error";
+  jobId: string;
   code: EngineErrorCode;
   terminal?: boolean;
   suggestedSize?: OutputSize;
+  /** The child hit an untyped failure and asks to be replaced. */
+  retire?: boolean;
 };
 type ChildMessage = ChildProgressMessage | ChildResultMessage | ChildErrorMessage;
 
@@ -81,38 +91,6 @@ function heapFor(options: IsolationOptions) {
 
 function rssFor(options: IsolationOptions) {
   return boundedInteger(options.maxRssMb, DEFAULT_RSS_MB, MIN_RSS_MB, MAX_RSS_MB);
-}
-
-function processGroupRssKb(processGroupId: number) {
-  return new Promise<number>((resolve, reject) => {
-    execFile(
-      "ps",
-      ["-axo", "pgid=,rss="],
-      {
-        encoding: "utf8",
-        env: Object.fromEntries(
-          Object.entries({ PATH: process.env.PATH, LANG: process.env.LANG })
-            .filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-        ) as NodeJS.ProcessEnv,
-        maxBuffer: 1_024 * 1_024,
-        timeout: 1_000,
-      },
-      (error, stdout) => {
-        if (error) {
-          reject(error);
-          return;
-        }
-
-        let totalKb = 0;
-        for (const line of stdout.split("\n")) {
-          const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
-          if (!match || Number(match[1]) !== processGroupId) continue;
-          totalKb += Number(match[2]);
-        }
-        resolve(totalKb);
-      },
-    );
-  });
 }
 
 function isOutputSize(value: unknown): value is OutputSize {
@@ -160,9 +138,10 @@ function isConversionResult(value: unknown): value is ConversionResult {
   );
 }
 
-function isChildMessage(value: unknown): value is ChildMessage {
+function isChildMessage(value: unknown, jobId: string): value is ChildMessage {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ChildMessage>;
+  if (candidate.jobId !== jobId) return false;
   if (candidate.type === "progress") return isProgressEvent((candidate as Partial<ChildProgressMessage>).event);
   if (candidate.type === "result") return isConversionResult((candidate as Partial<ChildResultMessage>).result);
   if (candidate.type === "error") return ENGINE_ERROR_CODES.has((candidate as Partial<ChildErrorMessage>).code as EngineErrorCode);
@@ -177,60 +156,13 @@ function reconstructError(message: ChildErrorMessage) {
   });
 }
 
-function childEnvironment(jobDirectory: string): NodeJS.ProcessEnv {
-  const allowed: NodeJS.ProcessEnv = {
-    PATH: process.env.PATH,
-    TESSDATA_PREFIX: process.env.TESSDATA_PREFIX,
-    LANG: process.env.LANG,
-    NODE_ENV: process.env.NODE_ENV,
-    TMPDIR: jobDirectory,
-    UNO_ENGINE_TMP_DIR: jobDirectory,
-    UNO_ISOLATED_CHILD: "1",
-  };
-  return Object.fromEntries(
-    Object.entries(allowed).filter((entry): entry is [string, string] => typeof entry[1] === "string"),
-  ) as NodeJS.ProcessEnv;
-}
-
-function killProcessGroup(child: ChildProcess) {
-  const leaderIsRunning = child.exitCode === null && child.signalCode === null;
-  if (process.platform !== "win32" && child.pid) {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    } catch {
-      // Fall through when the group no longer exists or cannot be signalled.
-    }
-  }
-  if (leaderIsRunning) child.kill("SIGKILL");
-}
-
-async function stopChildAndRemoveWorkspace(child: ChildProcess, jobDirectory: string) {
-  const ignoreCleanupError = () => undefined;
-  child.once("error", ignoreCleanupError);
-  const exited = child.exitCode !== null || child.signalCode !== null
-    ? Promise.resolve()
-    : new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-    });
-  try {
-    killProcessGroup(child);
-    await Promise.race([
-      exited,
-      new Promise<void>((resolve) => setTimeout(resolve, 1_000)),
-    ]);
-  } finally {
-    child.removeListener("error", ignoreCleanupError);
-    await rm(jobDirectory, { recursive: true, force: true });
-  }
-}
-
 /**
  * Removes private per-run workspaces left behind when a parent process died
  * before its own cleanup ran. Only real directories created by this module
  * (name pattern, owned by this user, private mode) and older than `maxAgeMs`
  * are removed. Symbolic links are never followed: a link in place of a
  * workspace is ignored and links inside one are unlinked, not traversed.
+ * Roots of live pools of this process are skipped whatever their age.
  * `root` is an operator/test override; it must never come from a request.
  */
 export async function recoverAbandonedEngineWorkspaces(
@@ -257,6 +189,7 @@ export async function recoverAbandonedEngineWorkspaces(
       const entry = await lstat(directory);
       if (
         entry.isSymbolicLink() || !entry.isDirectory() ||
+        isLiveEngineWorkspaceRoot(directory, entry) ||
         (ownerId !== undefined && entry.uid !== ownerId) ||
         (process.platform !== "win32" && (entry.mode & 0o077) !== 0) ||
         now - entry.mtimeMs < options.maxAgeMs
@@ -270,9 +203,35 @@ export async function recoverAbandonedEngineWorkspaces(
   return removed;
 }
 
+let pool: EngineChildPool | undefined;
+
+function enginePool() {
+  pool ??= new EngineChildPool({ size: engineChildPoolSize() });
+  return pool;
+}
+
+/** Pre-spawns the resident children so the first job does not pay the boot. */
+export function warmEngineChildPool(): Promise<void> {
+  return enginePool().warm();
+}
+
+/** Terminates every child, fails pending jobs and removes the pool root. */
+export async function closeEngineChildPool(): Promise<void> {
+  const current = pool;
+  pool = undefined;
+  await current?.close();
+}
+
+export function engineChildPoolStats(): EngineChildPoolStats | undefined {
+  return pool?.stats();
+}
+
 /**
- * Converts one PDF in a bounded, disposable Node process. The child receives
- * exactly one job and is terminated on every success or failure path.
+ * Converts one PDF in a bounded, resident Node process. The deadline starts
+ * now and also covers the wait for a free child. While the job is dispatched
+ * the child's process group is watched for RSS; any isolation failure (deadline,
+ * memory, exit, IPC or protocol error, caller progress handler throwing) kills
+ * the group and retires the child. A typed engine error keeps the child.
  */
 export async function convertPdfIsolated(
   bytes: Uint8Array,
@@ -291,131 +250,127 @@ export async function convertPdfIsolated(
     throw new EngineError("invalid_pdf");
   }
 
-  let jobDirectory = "";
-  try {
-    jobDirectory = await mkdtemp(join(tmpdir(), WORKSPACE_PREFIX));
-    await chmod(jobDirectory, 0o700);
-  } catch {
-    if (jobDirectory) {
-      await rm(jobDirectory, { recursive: true, force: true }).catch(() => undefined);
-    }
-    throw isolationFailure();
-  }
-
-  let child: ChildProcess;
-  try {
-    child = fork(new URL("./isolated-entry.mjs", import.meta.url), [], {
-      cwd: process.cwd(),
-      detached: process.platform !== "win32",
-      env: childEnvironment(jobDirectory),
-      execArgv: [`--max-old-space-size=${heapFor(options)}`, "--import", "tsx"],
-      serialization: "advanced",
-      stdio: ["ignore", "ignore", "ignore", "ipc"],
-    });
-  } catch {
-    await rm(jobDirectory, { recursive: true, force: true });
-    throw isolationFailure();
-  }
+  const engine = enginePool();
+  const jobId = randomUUID();
+  const rssLimitKb = rssFor(options) * 1_024;
 
   return new Promise<ConversionResult>((resolve, reject) => {
     let settled = false;
     let terminalReceived = false;
+    let child: ResidentEngineChild | undefined;
+    let workspace: string | undefined;
     let progressQueue = Promise.resolve();
     let rssTimer: NodeJS.Timeout | undefined;
+    const acquisition = new AbortController();
 
-    const cleanup = async () => {
-      clearTimeout(deadline);
+    // Idempotent: hands the child back (or retires it, waiting for the group
+    // to die) and then removes the job workspace again.
+    const releaseChild = async (retire: boolean) => {
+      const held = child;
+      child = undefined;
       if (rssTimer) clearTimeout(rssTimer);
-      child.removeAllListeners("message");
-      child.removeAllListeners("error");
-      child.removeAllListeners("exit");
-      await stopChildAndRemoveWorkspace(child, jobDirectory);
+      if (!held) return;
+      held.detach();
+      try {
+        await engine.release(held, { retire });
+      } finally {
+        if (workspace) await rm(workspace, { recursive: true, force: true });
+      }
     };
     const fail = (error: EngineError | EngineIsolationError = isolationFailure()) => {
       if (settled) return;
       settled = true;
-      void cleanup().then(
+      clearTimeout(deadline);
+      acquisition.abort();
+      void releaseChild(true).then(
         () => reject(error),
         () => reject(error),
       );
     };
-    const succeed = (result: ConversionResult) => {
-      if (settled) return;
-      settled = true;
-      void cleanup().then(
-        () => resolve(result),
-        () => reject(isolationFailure()),
-      );
+    const settleAfterTerminal = (retire: boolean, outcome: () => void) => {
+      terminalReceived = true;
+      const released = releaseChild(retire);
+      void progressQueue
+        .then(() => released)
+        .then(() => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(deadline);
+          outcome();
+        })
+        .catch(() => fail());
     };
     const deadline = setTimeout(() => fail(), timeoutFor(options));
     deadline.unref();
 
     const scheduleRssCheck = () => {
-      if (
-        process.platform === "win32" ||
-        process.env.VITEST === "true" ||
-        !child.pid ||
-        settled
-      ) return;
+      const pid = child?.pid;
+      // Windows cannot enforce aggregate process-group RSS here. Deployments on
+      // that platform must provide a container/job-object memory limit instead.
+      if (process.platform === "win32" || process.env.VITEST === "true" || !pid || settled || terminalReceived) return;
       rssTimer = setTimeout(() => {
-        void processGroupRssKb(child.pid as number).then(
-          (rssKb) => {
-            if (rssKb > rssFor(options) * 1_024) {
-              fail();
-              return;
-            }
-            scheduleRssCheck();
-          },
-          () => fail(),
-        );
+        void processGroupRssReader()
+          .then((read) => read(pid))
+          .then(
+            (rssKb) => {
+              if (settled || terminalReceived || child?.pid !== pid) return;
+              if (rssKb > rssLimitKb) {
+                fail();
+                return;
+              }
+              scheduleRssCheck();
+            },
+            () => {
+              if (!terminalReceived) fail();
+            },
+          );
       }, RSS_POLL_INTERVAL_MS);
       rssTimer.unref();
     };
 
-    // Windows cannot enforce aggregate process-group RSS here. Deployments on
-    // that platform must provide a container/job-object memory limit instead.
-    scheduleRssCheck();
-
-    child.on("error", () => fail());
-    child.on("exit", () => {
-      if (!settled && !terminalReceived) fail();
-    });
-    child.on("message", (rawMessage: unknown) => {
-      if (settled || !isChildMessage(rawMessage)) {
-        if (!settled) fail();
+    const onMessage = (rawMessage: unknown) => {
+      if (settled || terminalReceived) return;
+      if (!isChildMessage(rawMessage, jobId)) {
+        fail();
         return;
       }
       if (rawMessage.type === "progress") {
         progressQueue = progressQueue.then(async () => {
           await onProgress?.(rawMessage.event);
         });
-        void progressQueue.catch(() => fail());
+        void progressQueue.catch(() => {
+          if (!terminalReceived) fail();
+        });
         return;
       }
       if (rawMessage.type === "error") {
-        terminalReceived = true;
-        void progressQueue.then(() => fail(reconstructError(rawMessage))).catch(() => fail());
+        settleAfterTerminal(rawMessage.retire === true, () => reject(reconstructError(rawMessage)));
         return;
       }
-      terminalReceived = true;
-      void progressQueue.then(() => succeed(rawMessage.result)).catch(() => fail());
-    });
+      settleAfterTerminal(false, () => resolve(rawMessage.result));
+    };
 
-    try {
-      child.send(
-        {
+    engine.acquire(heapFor(options), acquisition.signal).then(
+      (acquired) => {
+        if (settled) {
+          void engine.release(acquired, { retire: false }).catch(() => undefined);
+          return;
+        }
+        child = acquired;
+        workspace = join(acquired.root, `job-${jobId}`);
+        acquired.attach({ onMessage, onExit: () => fail() });
+        scheduleRssCheck();
+        acquired.send({
           type: "job",
+          jobId,
+          workspace,
           bytes: Uint8Array.from(bytes),
           size,
           selectedTemplate,
           ...(options.product ? { product: options.product } : {}),
-        },
-        (error) => {
-          if (error) fail();
-        },
-      );
-    } catch {
-      fail();
-    }
+        }).catch(() => fail());
+      },
+      () => fail(),
+    );
   });
 }

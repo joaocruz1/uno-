@@ -1,5 +1,10 @@
 # syntax=docker/dockerfile:1
-# procps provides `ps`, which the engine uses to watch the memory of its child process.
+# The engine runs in resident, supervised child processes (one per conversion
+# slot). Each worker process owns a private 0700 root in TMPDIR; every job gets
+# its own job-<uuid> directory inside it, removed after the job. A child is
+# retired on deadline, memory overrun, crash or protocol violation, after a
+# bounded number of jobs and when idle. The memory watchdog reads /proc;
+# procps (`ps`) stays installed as its fallback.
 # Worker image: queue, engine subprocess, batches, webhooks, billing reconcile
 # and retention. On start it applies pending migrations, then runs the workers.
 FROM node:24-bookworm-slim

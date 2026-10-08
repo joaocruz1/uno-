@@ -22,7 +22,8 @@
     "dev:s3": "node --env-file-if-exists=.env.local scripts/local-s3.mjs",
     "stripe:setup": "node --import tsx scripts/stripe-setup.ts",
     "admin:local": "node --env-file-if-exists=.env.local --import tsx scripts/create-local-admin.ts",
-    "proof:print": "node --env-file-if-exists=.env.local --import tsx scripts/generate-print-proof.ts"
+    "proof:print": "node --env-file-if-exists=.env.local --import tsx scripts/generate-print-proof.ts",
+    "bench:engine": "node --import tsx scripts/bench-engine.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
