@@ -119,6 +119,8 @@ export async function listOrganizations(
     status: subscriptions.status,
     currentPeriodStart: subscriptions.currentPeriodStart,
     currentPeriodEnd: subscriptions.currentPeriodEnd,
+    prepaidPlanId: subscriptions.prepaidPlanId,
+    prepaidPeriodEnd: subscriptions.prepaidPeriodEnd,
   }).from(memberships)
     .innerJoin(organizations, eq(organizations.id, memberships.organizationId))
     .leftJoin(subscriptions, eq(subscriptions.organizationId, organizations.id))
@@ -133,6 +135,8 @@ export async function listOrganizations(
       status: row.status ?? "ACTIVE",
       currentPeriodStart: row.currentPeriodStart,
       currentPeriodEnd: row.currentPeriodEnd,
+      prepaidPlanId: row.prepaidPlanId,
+      prepaidPeriodEnd: row.prepaidPeriodEnd,
     } : undefined, now),
     createdAt: row.createdAt.toISOString(),
   }));
