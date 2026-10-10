@@ -72,6 +72,8 @@ export const billingCheckoutStatusEnum = pgEnum("billing_checkout_status", ["CRE
 /** Where a prepaid grant of plan days came from. */
 export const billingGrantSourceEnum = pgEnum("billing_grant_source", ["PIX", "REFERRAL"]);
 export const billingGrantStatusEnum = pgEnum("billing_grant_status", ["APPLIED", "REVOKED"]);
+/** Lifecycle of a one-off PIX charge that buys prepaid plan days. */
+export const pixChargeStatusEnum = pgEnum("pix_charge_status", ["PENDING", "APPROVED", "EXPIRED", "FAILED"]);
 
 // Better Auth 1.7.7 core tables. Property names stay canonical for the adapter;
 // physical names are snake_case for PostgreSQL tooling and raw SQL.
@@ -246,6 +248,80 @@ export const billingGrants = pgTable(
     check("billing_grants_days_ck", sql`${table.days} > 0`),
     check("billing_grants_plan_ck", sql`${table.planId} <> 'FREE'`),
     check("billing_grants_amount_ck", sql`${table.amountBrlCents} is null or ${table.amountBrlCents} >= 0`),
+  ],
+);
+
+/**
+ * One-off PIX charge (via the PixProvider, e.g. Mercado Pago) that buys prepaid
+ * plan days. The webhook reconsults the payment and, once approved, grants the
+ * days through `applyGrant` keyed by `pix:<provider_charge_id>`, so a replayed
+ * notification never grants twice.
+ */
+export const pixCharges = pgTable(
+  "pix_charges",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    planId: planIdEnum("plan_id").notNull(),
+    days: integer("days").notNull(),
+    amountBrlCents: integer("amount_brl_cents").notNull(),
+    provider: text("provider").notNull().default("mercadopago"),
+    providerChargeId: text("provider_charge_id"),
+    status: pixChargeStatusEnum("status").notNull().default("PENDING"),
+    qrCode: text("qr_code"),
+    qrCodeBase64: text("qr_code_base64"),
+    grantExternalRef: text("grant_external_ref"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("pix_charges_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("pix_charges_provider_charge_uq").on(table.providerChargeId).where(sql`${table.providerChargeId} is not null`),
+    index("pix_charges_org_created_idx").on(table.organizationId, table.createdAt),
+    check("pix_charges_days_ck", sql`${table.days} > 0`),
+    check("pix_charges_plan_ck", sql`${table.planId} <> 'FREE'`),
+    check("pix_charges_amount_ck", sql`${table.amountBrlCents} >= 0`),
+  ],
+);
+
+/** A user's shareable referral code (one per user). */
+export const referralCodes = pgTable(
+  "referral_codes",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("referral_codes_user_id_uq").on(table.userId),
+    uniqueIndex("referral_codes_code_uq").on(table.code),
+  ],
+);
+
+/**
+ * Who referred whom. One referrer per referred (immutable), never self.
+ * "Active" is computed on read (the referred has ≥1 completed conversion), and
+ * the reward is a billing_grants row keyed by `referral:<referrer>`, so the
+ * once-ever bonus cannot be granted twice.
+ */
+export const referrals = pgTable(
+  "referrals",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    referrerUserId: text("referrer_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    referredUserId: text("referred_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    /** Hashed signup IP, for same-source review; never the raw IP. */
+    signupIpHash: text("signup_ip_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("referrals_referred_user_id_uq").on(table.referredUserId),
+    index("referrals_referrer_user_id_idx").on(table.referrerUserId),
+    check("referrals_not_self_ck", sql`${table.referrerUserId} <> ${table.referredUserId}`),
   ],
 );
 
