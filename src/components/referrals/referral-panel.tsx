@@ -104,7 +104,7 @@ export function ReferralPanel() {
         ) : progress.eligible ? (
           <div className="mt-5"><Button onClick={() => void reward()} disabled={claiming}>{claiming ? <LoaderCircle size={17} className="animate-spin motion-reduce:animate-none" /> : <Gift size={17} />}Resgatar 5 dias grátis</Button></div>
         ) : (
-          <p className="mt-5 text-sm text-zinc-400">{remaining === 0 ? "Quase lá." : `Faltam ${remaining} indicação${remaining === 1 ? "" : "ões"} ativa${remaining === 1 ? "" : "s"}`} para ganhar 5 dias de acesso completo, uma única vez.</p>
+          <p className="mt-5 text-sm text-zinc-400">{remaining === 0 ? "Quase lá." : `Faltam ${remaining} indicaç${remaining === 1 ? "ão" : "ões"} ativa${remaining === 1 ? "" : "s"}`} para ganhar 5 dias de acesso completo, uma única vez.</p>
         )}
         {error ? <p role="alert" className="mt-4 text-sm text-red-300">{error}</p> : null}
       </section>
