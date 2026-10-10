@@ -38,6 +38,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
                 <Link href="/dashboard/webhooks" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Webhooks</Link>
                 <Link href="/dashboard/usage" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Uso</Link>
                 <Link href="/dashboard/billing" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Assinatura</Link>
+                <Link href="/dashboard/indicacoes" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Indicações</Link>
                 <Link href="/dashboard/settings" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Configurações</Link>
               </nav>
             </details>
