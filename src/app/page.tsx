@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, Boxes, Braces, FileCheck2, Files, Fingerprint, History, Layers3, LockKeyhole, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, Boxes, Braces, FileCheck2, Files, Fingerprint, History, Layers3, LockKeyhole, Package, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
 import { Footer, Navbar } from "@/components";
 import { ApiTerminal, BeforeAfter, MergeDemo, PricingGrid, Reveal, TemplateMarquee, TrialDrop } from "@/components/marketing";
 import { Badge, ButtonLink, Card } from "@/components/ui";
@@ -18,6 +18,7 @@ const features = [
   { icon: ScanLine, title: "Códigos preservados", text: "O fluxo mantém proporções, áreas de silêncio e conteúdo original dos códigos.", className: "md:col-span-2" },
   { icon: History, title: "Histórico", text: "Localize e baixe resultados durante a retenção do seu plano.", className: "" },
   { icon: Boxes, title: "Templates versionados", text: "Mercado Livre é o primeiro template. Novos layouts passam por validação antes da liberação.", className: "" },
+  { icon: Package, title: "Lote de marketplace", text: "Um PDF do Mercado Livre com vários pedidos vira um PDF único: uma etiqueta 10×15 por pedido, com numeração.", className: "" },
 ];
 
 const faqs = [
@@ -26,6 +27,8 @@ const faqs = [
   ["Como a DANFE aparece na etiqueta?", "Em PDFs digitais, a DANFE vira uma faixa com tipo, NF, série, emissão e o código de barras original da chave de acesso. Os dados são lidos do próprio PDF e conferidos com a chave. Em documentos escaneados, nada é reescrito: as regiões originais são mantidas."],
   ["A API está disponível em todos os planos?", `A API e os webhooks são um adicional opcional (+ API, ${formatBrlCents(getApiAddon().priceBrlCents)}/mês) que pode ser contratado em qualquer plano pago: Starter, Pro ou Business. As chaves são exibidas uma única vez e usadas como credenciais Bearer.`],
   ["Posso testar sem criar conta?", "Sim, uma vez: solte o PDF no topo desta página e baixe a etiqueta unificada. O arquivo é processado em memória e não fica armazenado. Para continuar, o plano Free inclui 10 etiquetas por mês."],
+  ["Dá para converter vários pedidos de uma vez?", "Sim. No lote de marketplace, você envia o PDF de etiquetas do Mercado Livre com o lote inteiro e recebe um PDF único, uma etiqueta por pedido, com numeração opcional. Cada pedido passa pela mesma validação de códigos."],
+  ["Como posso pagar?", "No cartão, como assinatura mensal recorrente, ou avulso por PIX — pague uma vez e use por 30 dias ou 1 ano, sem renovação automática, com os dias somando ao que você já tiver. O PIX é processado pelo Mercado Pago."],
   ["O que acontece se a etiqueta não couber?", "A conversão é bloqueada para evitar perda de legibilidade e indica um formato maior quando houver uma alternativa compatível."],
 ];
 
@@ -120,7 +123,7 @@ export default function Home() {
       </section>
 
       <section id="precos" className="section-space">
-        <div className="page-shell"><div className="mx-auto max-w-2xl text-center"><p className="section-kicker">Planos</p><h2 className="section-title mt-4">Comece pequeno. Aumente quando a operação pedir.</h2><p className="section-copy mx-auto mt-5">Sem cobrança automática por excedente e sem marca d&apos;água.</p></div><Reveal className="mt-12"><PricingGrid compact /></Reveal><div className="mt-8 text-center"><Link href="/pricing" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-300 hover:text-white">Comparar todos os recursos <ArrowRight size={15} /></Link></div></div>
+        <div className="page-shell"><div className="mx-auto max-w-2xl text-center"><p className="section-kicker">Planos</p><h2 className="section-title mt-4">Comece pequeno. Aumente quando a operação pedir.</h2><p className="section-copy mx-auto mt-5">Sem cobrança automática por excedente e sem marca d&apos;água. Pague no cartão (assinatura mensal) ou avulso por PIX.</p></div><Reveal className="mt-12"><PricingGrid compact /></Reveal><div className="mt-8 text-center"><Link href="/pricing" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-300 hover:text-white">Comparar todos os recursos <ArrowRight size={15} /></Link></div></div>
       </section>
 
       <section className="section-space border-y border-white/[.06] bg-[#030303]">
