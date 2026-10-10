@@ -100,6 +100,8 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
       currentPeriodEnd: subscriptions.currentPeriodEnd,
       apiAddonStatus: subscriptions.apiAddonStatus,
       apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
+      prepaidPlanId: subscriptions.prepaidPlanId,
+      prepaidPeriodEnd: subscriptions.prepaidPeriodEnd,
     })
     .from(memberships)
     .innerJoin(organizations, eq(organizations.id, memberships.organizationId))
@@ -131,6 +133,8 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
     currentPeriodEnd: membership.currentPeriodEnd,
     apiAddonStatus: membership.apiAddonStatus,
     apiAddonCurrentPeriodEnd: membership.apiAddonCurrentPeriodEnd,
+    prepaidPlanId: membership.prepaidPlanId,
+    prepaidPeriodEnd: membership.prepaidPeriodEnd,
   } : undefined);
   return {
     ...identity,
