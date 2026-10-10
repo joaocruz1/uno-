@@ -6,6 +6,7 @@ import {
 import { processPendingBatchArchives } from "@/server/batches/archive";
 import { reconcilePendingBatches } from "@/server/batches";
 import { cleanupExpiredApiPreparations } from "@/server/api-ingestion";
+import { processPendingMarketplaceCombines } from "@/server/marketplace/combine";
 
 export type RunningBatchWorker = { close(): Promise<void> };
 
@@ -23,6 +24,7 @@ export function startBatchWorker(): RunningBatchWorker {
       await cleanupExpiredApiPreparations();
       await reconcilePendingBatches();
       await processPendingBatchArchives();
+      await processPendingMarketplaceCombines();
     } catch {
       // Durable database state is retried on the next maintenance tick.
     } finally {

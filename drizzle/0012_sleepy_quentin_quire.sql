@@ -1,0 +1,1 @@
+ALTER TABLE "conversions" ADD COLUMN "batch_order_index" integer;

@@ -48,6 +48,7 @@ async function claimArchive(batchId: string, dependencies: ArchiveDependencies):
   return dependencies.database.transaction(async (transaction) => {
     const rows = await transaction.select().from(batches).where(and(
       eq(batches.id, batchId),
+      eq(batches.kind, "files"),
       eq(batches.phase, "packaging"),
       eq(batches.status, "processing"),
       or(
@@ -413,6 +414,7 @@ export async function processBatchArchive(batchId: string, dependencies: Archive
 
 export async function processPendingBatchArchives(dependencies: ArchiveDependencies = defaults()): Promise<number> {
   const rows = await dependencies.database.select({ id: batches.id }).from(batches).where(and(
+    eq(batches.kind, "files"),
     eq(batches.status, "processing"),
     eq(batches.phase, "packaging"),
     or(eq(batches.archiveStatus, "PENDING"), and(eq(batches.archiveStatus, "PACKAGING"), sql`${batches.archiveLeaseExpiresAt} < now()`)),

@@ -78,6 +78,20 @@
       "when": 1791486099077,
       "tag": "0010_rich_zodiak",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1791666945788,
+      "tag": "0011_real_cyclops",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1791667050758,
+      "tag": "0012_sleepy_quentin_quire",
+      "breakpoints": true
     }
   ]
 }
