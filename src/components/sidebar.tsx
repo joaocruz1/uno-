@@ -3,11 +3,12 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { BarChart3, CreditCard, FileClock, Gauge, History, KeyRound, Layers3, Settings, ShieldCheck, Webhook } from "lucide-react";
+import { BarChart3, CreditCard, FileClock, Gauge, History, KeyRound, Layers3, Package, Settings, ShieldCheck, Webhook } from "lucide-react";
 
 const items = [
   ["Início", "/dashboard", Gauge],
   ["Nova conversão", "/dashboard/process", Layers3],
+  ["Lote de marketplace", "/dashboard/marketplace", Package],
   ["Histórico", "/dashboard/history", History],
   ["Lotes", "/dashboard/batches", FileClock],
   ["API", "/dashboard/api", KeyRound],
