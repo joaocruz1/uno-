@@ -39,16 +39,24 @@ export function ChannelMark({ id, size = 28, muted = false }: { id: ChannelId; s
   const channel = CHANNEL_BY_ID[id];
   const [officialLogo, setOfficialLogo] = useState<string | null>(null);
 
-  // Upgrade to the official logo only if the asset actually exists, so there is
-  // never a broken-image flash when it does not.
+  // Upgrade to the official logo only if an asset actually exists (trying the
+  // common extensions the download script may save), so there is never a
+  // broken-image flash when none is present.
   useEffect(() => {
     let active = true;
-    const url = `/channels/${id}.svg`;
-    const probe = new Image();
-    probe.onload = () => {
-      if (active) setOfficialLogo(url);
+    const candidates = [`/channels/${id}.svg`, `/channels/${id}.png`, `/channels/${id}.webp`];
+    let next = 0;
+    const tryNext = () => {
+      if (!active || next >= candidates.length) return;
+      const url = candidates[next++];
+      const probe = new Image();
+      probe.onload = () => {
+        if (active) setOfficialLogo(url);
+      };
+      probe.onerror = tryNext;
+      probe.src = url;
     };
-    probe.src = url;
+    tryNext();
     return () => {
       active = false;
     };
