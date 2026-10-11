@@ -3,7 +3,10 @@ import type { Marketplace, MarketplaceBatchOptions, MarketplaceBatchResult } fro
 
 export * from "./errors";
 export * from "./types";
+export * from "./order";
 export { concatPdfs, splitIntoOrderPdfs, stampTopLeftNumber } from "./pdf";
+export { buildPickingListPdf, type PickingListOptions, type PickingListPaper } from "./picking-list";
+export { type OrderExtractor, extractMercadoLivreOrders, orderExtractorFor } from "./extraction";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 
 /**
