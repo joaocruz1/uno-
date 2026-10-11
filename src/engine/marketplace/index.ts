@@ -7,6 +7,18 @@ export * from "./order";
 export { concatPdfs, splitIntoOrderPdfs, stampTopLeftNumber } from "./pdf";
 export { buildPickingListPdf, type PickingListOptions, type PickingListPaper } from "./picking-list";
 export { type OrderExtractor, extractMercadoLivreOrders, orderExtractorFor } from "./extraction";
+export {
+  createZplRenderer,
+  DEFAULT_ZPL_LIMITS,
+  preprocessZpl,
+  ZplError,
+  type ZplBlock,
+  type ZplDocument,
+  type ZplErrorCode,
+  type ZplLimits,
+  type ZplRenderer,
+  type ZplRenderTarget,
+} from "./zpl";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 
 /**
