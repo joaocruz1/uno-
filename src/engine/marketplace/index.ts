@@ -19,6 +19,16 @@ export {
   type ZplRenderer,
   type ZplRenderTarget,
 } from "./zpl";
+export {
+  assertSpreadsheetSafe,
+  createShopeeWorkbookReader,
+  normalizeHeader,
+  parseShopeePacking,
+  SHOPEE_MAX_BYTES,
+  ShopeeError,
+  type ShopeeErrorCode,
+  type ShopeeWorkbookReader,
+} from "./shopee-excel";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 
 /**
