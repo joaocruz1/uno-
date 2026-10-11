@@ -64,19 +64,22 @@ export default function Home() {
         </div>
       </section>
 
-      <section className={`${GUTTER} py-14`}>
-        <div className="mx-auto grid max-w-7xl gap-5 sm:grid-cols-3">
-          {steps.map((step) => (
-            <div key={step.title} className="card-soft rounded-2xl p-6">
-              <span className="grid size-11 place-items-center rounded-xl bg-uno-red/10 text-uno-red"><step.icon size={22} /></span>
-              <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{step.title}</h3>
-              <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{step.text}</p>
-            </div>
-          ))}
+      <section id="como-funciona" className={`scroll-mt-24 ${GUTTER} py-14`}>
+        <div className="mx-auto max-w-7xl">
+          <h2 className="font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">Como funciona</h2>
+          <div className="mt-8 grid gap-5 sm:grid-cols-3">
+            {steps.map((step) => (
+              <div key={step.title} className="card-soft rounded-2xl p-6">
+                <span className="grid size-11 place-items-center rounded-xl bg-uno-red/10 text-uno-red"><step.icon size={22} /></span>
+                <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{step.title}</h3>
+                <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{step.text}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      <section className={`${GUTTER} py-14`}>
+      <section id="produto" className={`scroll-mt-24 ${GUTTER} py-14`}>
         <div className="mx-auto max-w-7xl">
           <h2 className="max-w-2xl font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">
             Por que a UNO, e não só um conversor.
@@ -93,7 +96,7 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="precos" className={`${GUTTER} py-14`}>
+      <section id="precos" className={`scroll-mt-24 ${GUTTER} py-14`}>
         <div className="mx-auto max-w-7xl">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <h2 className="font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">Planos</h2>

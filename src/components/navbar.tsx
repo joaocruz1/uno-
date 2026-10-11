@@ -4,10 +4,9 @@ import { Menu } from "lucide-react";
 import { ButtonLink } from "./ui/button";
 
 const links = [
-  ["Produto", "/#produto"],
   ["Como funciona", "/#como-funciona"],
-  ["API", "/api"],
-  ["Preços", "/pricing"],
+  ["Recursos", "/#produto"],
+  ["Preços", "/#precos"],
 ] as const;
 
 export function Navbar() {
