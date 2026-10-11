@@ -69,6 +69,11 @@ export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESS
 export const invitationStatusEnum = pgEnum("invitation_status", ["PENDING", "ACCEPTED", "REVOKED"]);
 export const stripeEventStatusEnum = pgEnum("stripe_event_status", ["PROCESSING", "PROCESSED", "FAILED"]);
 export const billingCheckoutStatusEnum = pgEnum("billing_checkout_status", ["CREATING", "OPEN", "COMPLETED", "EXPIRED", "FAILED"]);
+/** Where a prepaid grant of plan days came from. */
+export const billingGrantSourceEnum = pgEnum("billing_grant_source", ["PIX", "REFERRAL"]);
+export const billingGrantStatusEnum = pgEnum("billing_grant_status", ["APPLIED", "REVOKED"]);
+/** Lifecycle of a one-off PIX charge that buys prepaid plan days. */
+export const pixChargeStatusEnum = pgEnum("pix_charge_status", ["PENDING", "APPROVED", "EXPIRED", "FAILED"]);
 
 // Better Auth 1.7.7 core tables. Property names stay canonical for the adapter;
 // physical names are snake_case for PostgreSQL tooling and raw SQL.
@@ -197,6 +202,10 @@ export const subscriptions = pgTable(
     apiAddonSubscriptionId: text("api_addon_subscription_id"),
     apiAddonStatus: subscriptionStatusEnum("api_addon_status"),
     apiAddonCurrentPeriodEnd: timestamp("api_addon_current_period_end", { withTimezone: true }),
+    // Prepaid plan days bought by PIX or earned by referral, independent of Stripe.
+    // Reconciliation never writes these, so an active Stripe sub cannot clear them.
+    prepaidPlanId: planIdEnum("prepaid_plan_id"),
+    prepaidPeriodEnd: timestamp("prepaid_period_end", { withTimezone: true }),
     reconciliationVersion: integer("reconciliation_version").notNull().default(0),
     lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
@@ -207,6 +216,112 @@ export const subscriptions = pgTable(
     uniqueIndex("subscriptions_stripe_customer_id_uq").on(table.stripeCustomerId).where(sql`${table.stripeCustomerId} is not null`),
     uniqueIndex("subscriptions_stripe_subscription_id_uq").on(table.stripeSubscriptionId).where(sql`${table.stripeSubscriptionId} is not null`),
     check("subscriptions_reconciliation_version_ck", sql`${table.reconciliationVersion} >= 0`),
+    check("subscriptions_prepaid_ck", sql`(${table.prepaidPlanId} is null and ${table.prepaidPeriodEnd} is null) or (${table.prepaidPlanId} is not null and ${table.prepaidPlanId} <> 'FREE' and ${table.prepaidPeriodEnd} is not null)`),
+  ],
+);
+
+/**
+ * Idempotent ledger of prepaid plan days granted to an organization. `externalRef`
+ * (the PIX payment id or the referral cycle key) is unique, so replaying a webhook
+ * or a referral reward never grants twice. The effective prepaid state lives on
+ * `subscriptions.prepaid_*`; this table is the audit trail and the dedup key.
+ */
+export const billingGrants = pgTable(
+  "billing_grants",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    planId: planIdEnum("plan_id").notNull(),
+    days: integer("days").notNull(),
+    source: billingGrantSourceEnum("source").notNull(),
+    externalRef: text("external_ref").notNull(),
+    amountBrlCents: integer("amount_brl_cents"),
+    status: billingGrantStatusEnum("status").notNull().default("APPLIED"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().default(now),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("billing_grants_external_ref_uq").on(table.externalRef),
+    index("billing_grants_org_idx").on(table.organizationId, table.appliedAt),
+    check("billing_grants_days_ck", sql`${table.days} > 0`),
+    check("billing_grants_plan_ck", sql`${table.planId} <> 'FREE'`),
+    check("billing_grants_amount_ck", sql`${table.amountBrlCents} is null or ${table.amountBrlCents} >= 0`),
+  ],
+);
+
+/**
+ * One-off PIX charge (via the PixProvider, e.g. Mercado Pago) that buys prepaid
+ * plan days. The webhook reconsults the payment and, once approved, grants the
+ * days through `applyGrant` keyed by `pix:<provider_charge_id>`, so a replayed
+ * notification never grants twice.
+ */
+export const pixCharges = pgTable(
+  "pix_charges",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    planId: planIdEnum("plan_id").notNull(),
+    days: integer("days").notNull(),
+    amountBrlCents: integer("amount_brl_cents").notNull(),
+    provider: text("provider").notNull().default("mercadopago"),
+    providerChargeId: text("provider_charge_id"),
+    status: pixChargeStatusEnum("status").notNull().default("PENDING"),
+    qrCode: text("qr_code"),
+    qrCodeBase64: text("qr_code_base64"),
+    grantExternalRef: text("grant_external_ref"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    approvedAt: timestamp("approved_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    unique("pix_charges_org_id_uq").on(table.organizationId, table.id),
+    uniqueIndex("pix_charges_provider_charge_uq").on(table.providerChargeId).where(sql`${table.providerChargeId} is not null`),
+    index("pix_charges_org_created_idx").on(table.organizationId, table.createdAt),
+    check("pix_charges_days_ck", sql`${table.days} > 0`),
+    check("pix_charges_plan_ck", sql`${table.planId} <> 'FREE'`),
+    check("pix_charges_amount_ck", sql`${table.amountBrlCents} >= 0`),
+  ],
+);
+
+/** A user's shareable referral code (one per user). */
+export const referralCodes = pgTable(
+  "referral_codes",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("referral_codes_user_id_uq").on(table.userId),
+    uniqueIndex("referral_codes_code_uq").on(table.code),
+  ],
+);
+
+/**
+ * Who referred whom. One referrer per referred (immutable), never self.
+ * "Active" is computed on read (the referred has ≥1 completed conversion), and
+ * the reward is a billing_grants row keyed by `referral:<referrer>`, so the
+ * once-ever bonus cannot be granted twice.
+ */
+export const referrals = pgTable(
+  "referrals",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    referrerUserId: text("referrer_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    referredUserId: text("referred_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+    /** Hashed signup IP, for same-source review; never the raw IP. */
+    signupIpHash: text("signup_ip_hash"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("referrals_referred_user_id_uq").on(table.referredUserId),
+    index("referrals_referrer_user_id_idx").on(table.referrerUserId),
+    check("referrals_not_self_ck", sql`${table.referrerUserId} <> ${table.referredUserId}`),
   ],
 );
 

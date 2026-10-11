@@ -193,6 +193,10 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
       planId, status, currentPeriodStart, currentPeriodEnd,
       apiAddonStatus: addonState.apiAddonStatus,
       apiAddonCurrentPeriodEnd: addonState.apiAddonCurrentPeriodEnd,
+      // Reconciliation never writes the prepaid columns; carry them so a prepaid
+      // org keeps its quota period even when the Stripe side reconciles to FREE.
+      prepaidPlanId: current.prepaidPlanId,
+      prepaidPeriodEnd: current.prepaidPeriodEnd,
     }, now);
     await transaction.update(subscriptions).set({
       planId,

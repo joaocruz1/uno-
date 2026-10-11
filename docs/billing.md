@@ -1,9 +1,19 @@
 # Cobrança e cota
 
-O plano efetivo é calculado no servidor. Apenas assinaturas ACTIVE/TRIALING
+O plano efetivo é calculado no servidor, como o **maior** entre duas fontes:
+a assinatura Stripe e um crédito pré-pago. Pela Stripe, apenas ACTIVE/TRIALING
 com período vigente habilitam o plano pago. Cancelamento agendado preserva
 direitos até o fim; inadimplência, pausa, cancelamento ou período expirado usam
 Free. Operações já aceitas preservam reservas e retenção.
+
+Crédito pré-pago (PIX avulso ou indicação): dias de um plano pago gravados em
+`subscriptions.prepaid_plan_id`/`prepaid_period_end`, independentes da Stripe. A
+reconciliação da Stripe nunca escreve essas colunas, então o pré-pago coexiste
+com uma assinatura no cartão (vale o plano de maior tier). Enquanto o período
+pré-pago não vence, o plano vale; a cota usa o mês civil UTC quando a fonte é o
+pré-pago. As concessões ficam na tabela `billing_grants`, idempotentes por
+`external_ref` (o id do pagamento PIX ou a chave do ciclo de indicação), somando
+dias sobre um período ainda vigente e nunca rebaixando o plano no período.
 
 Preços mensais padrão: Starter R$ 9,99, Pro R$ 15,99 e Business R$ 29,90.
 Nenhum plano inclui API. Chaves de API, API pública e webhooks são o adicional
