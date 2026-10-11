@@ -3,8 +3,8 @@ import { ArrowRight, BadgeCheck, Braces, Lock, Package, Printer, ScanLine, Uploa
 
 import { Footer, Navbar } from "@/components";
 import { ButtonLink } from "@/components/ui";
-import { ChannelStrip } from "@/components/marketplace-logos";
 import { LabelScanner } from "@/components/marketing/label-scanner";
+import { TrialStudio } from "@/components/marketing/trial-studio";
 import { formatBrlCents, getApiAddon, getPlanCatalog } from "@/lib/plans";
 
 const GUTTER = "px-[clamp(1.25rem,5vw,6rem)]";
@@ -44,8 +44,8 @@ export default function Home() {
               Solte o PDF do marketplace e receba uma etiqueta 10×15 pronta pra térmica — com cada código conferido antes de sair.
             </p>
             <div className="uno-enter uno-d3 mt-8 flex flex-col gap-3 sm:flex-row">
-              <ButtonLink href="/register" size="lg" className="glow-cta">Criar conta grátis <ArrowRight size={17} /></ButtonLink>
-              <ButtonLink href="/pricing" variant="secondary" size="lg">Ver planos</ButtonLink>
+              <ButtonLink href="#testar" size="lg" className="glow-cta">Testar sem cadastro <ArrowRight size={17} /></ButtonLink>
+              <ButtonLink href="/register" variant="secondary" size="lg">Criar conta grátis</ButtonLink>
             </div>
             <p className="uno-enter uno-d3 mt-4 text-sm text-[var(--color-faint)]">Grátis até {plans.FREE.monthlyLimit} etiquetas por mês. Sem cartão.</p>
           </div>
@@ -56,11 +56,13 @@ export default function Home() {
         </div>
       </section>
 
-      <section className={`${GUTTER} py-14`}>
-        <div className="mx-auto max-w-7xl">
-          <h2 className="font-heading text-xl font-bold text-[var(--color-ink)]">Comece pelo Mercado Livre</h2>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">Os outros canais entram em seguida.</p>
-          <ChannelStrip className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" />
+      <section id="testar" className={`scroll-mt-24 ${GUTTER} py-14`}>
+        <div className="mx-auto max-w-6xl">
+          <div className="text-center">
+            <h2 className="font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">Teste agora, sem cadastro</h2>
+            <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-[var(--color-muted)]">Escolha o marketplace, jogue uma etiqueta e veja o resultado na hora — Mercado Livre, Shopee ou TikTok.</p>
+          </div>
+          <div className="mt-8"><TrialStudio /></div>
         </div>
       </section>
 

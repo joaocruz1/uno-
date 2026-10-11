@@ -3,7 +3,7 @@
 import { FileText, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
-export function PdfCanvasPreview({ url, data, title, expectedPages, className }: { url?: string; data?: Uint8Array; title: string; expectedPages: 1 | 2; className?: string }) {
+export function PdfCanvasPreview({ url, data, title, expectedPages, className }: { url?: string; data?: Uint8Array; title: string; expectedPages: 1 | 2 | "first"; className?: string }) {
   const container = useRef<HTMLDivElement>(null);
   const [phase, setPhase] = useState<"loading" | "ready" | "unavailable">("loading");
 
@@ -32,9 +32,10 @@ export function PdfCanvasPreview({ url, data, title, expectedPages, className }:
           standardFontDataUrl: `${assetRoot}standard_fonts/`, cMapUrl: `${assetRoot}cmaps/`, cMapPacked: true, wasmUrl: `${assetRoot}wasm/` });
         loadingTask = task;
         const pdf = await task.promise;
-        if (pdf.numPages !== expectedPages) throw new Error("preview_unavailable");
+        if (expectedPages !== "first" && pdf.numPages !== expectedPages) throw new Error("preview_unavailable");
+        const lastPage = expectedPages === "first" ? 1 : pdf.numPages;
         const fragment = document.createDocumentFragment();
-        for (let index = 1; index <= pdf.numPages; index += 1) {
+        for (let index = 1; index <= lastPage; index += 1) {
           if (controller.signal.aborted) return;
           const page = await pdf.getPage(index);
           const natural = page.getViewport({ scale: 1 });
