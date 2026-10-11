@@ -13,6 +13,7 @@ import {
   History,
   KeyRound,
   Layers3,
+  ListChecks,
   Package,
   Settings,
   ShieldCheck,
@@ -35,6 +36,7 @@ const PRIMARY: Item[] = [
 ];
 
 const MORE: Item[] = [
+  ["Lista Shopee", "/dashboard/shopee-lista", ListChecks],
   ["Lotes", "/dashboard/batches", FileClock],
   ["Uso", "/dashboard/usage", BarChart3],
   ["Indicações", "/dashboard/indicacoes", Gift],
