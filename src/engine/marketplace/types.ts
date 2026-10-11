@@ -1,7 +1,7 @@
 import type { OutputSize } from "../types";
 
 /** Marketplaces the lote pipeline can convert. Grows one entry per template. */
-export type Marketplace = "mercado-livre";
+export type Marketplace = "mercado-livre" | "shopee";
 
 /** "12/28" on the top of each label, continued from the previous lote. */
 export type LabelNumbering = {

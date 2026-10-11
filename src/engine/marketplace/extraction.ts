@@ -50,6 +50,14 @@ export function orderExtractorFor(marketplace: Marketplace): OrderExtractor {
   switch (marketplace) {
     case "mercado-livre":
       return { extract: extractMercadoLivreOrders };
+    case "shopee":
+      // Shopee's picking list is built from the packing-list spreadsheet
+      // (./shopee-excel), not from the label text, so there is no label extractor.
+      return {
+        extract: async () => {
+          throw new MarketplaceError("extraction_unavailable", "A leitura de itens da Shopee usa a planilha de embalagem (Excel), não a etiqueta.");
+        },
+      };
     default:
       throw new Error(`Marketplace sem extrator: ${marketplace satisfies never}`);
   }

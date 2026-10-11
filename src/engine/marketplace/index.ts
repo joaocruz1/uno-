@@ -1,4 +1,5 @@
 import { convertMercadoLivreBatch } from "./mercado-livre";
+import { convertShopeeBatch } from "./shopee";
 import type { Marketplace, MarketplaceBatchOptions, MarketplaceBatchResult } from "./types";
 
 export * from "./errors";
@@ -44,6 +45,7 @@ export {
   type TikTokExtractor,
 } from "./tiktok";
 export { convertMercadoLivreBatch } from "./mercado-livre";
+export { convertShopeeBatch, readShopeeBarcode, type ShopeeBatchOptions, type ShopeeOrderValidator } from "./shopee";
 
 /**
  * Converts a marketplace export (N orders in one file) into a single
@@ -58,6 +60,8 @@ export async function convertMarketplaceBatch(
   switch (marketplace) {
     case "mercado-livre":
       return convertMercadoLivreBatch(input, options);
+    case "shopee":
+      return convertShopeeBatch(input, options);
     default:
       throw new Error(`Marketplace não suportado: ${marketplace satisfies never}`);
   }
