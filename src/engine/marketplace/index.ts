@@ -30,6 +30,7 @@ export {
   type ShopeeErrorCode,
   type ShopeeWorkbookReader,
 } from "./shopee-excel";
+export { createTikTokDocumentExtractor } from "./tiktok-extract";
 export {
   combineInterleaved,
   convertTikTokBatch,
