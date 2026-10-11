@@ -12,7 +12,7 @@ const statusClass: Record<WebhookDelivery["status"], string> = {
   processing: "text-amber-300",
   delivered: "text-emerald-400",
   failed: "text-red-300",
-  canceled: "text-zinc-400",
+  canceled: "text-[var(--color-muted)]",
 };
 
 function hostOf(url: string | undefined): string {
@@ -76,13 +76,13 @@ export function WebhookDeliveryHistory({ endpoints, canRetry }: { endpoints: Web
 
   const urls = new Map(endpoints.map(endpoint => [endpoint.id, endpoint.url]));
   return <section>
-    <div className="flex justify-between gap-3"><div><h2 className="font-heading text-xl font-semibold">Entregas recentes</h2><p className="mt-2 text-sm text-zinc-400">Cada evento tem um envio inicial e até cinco novas tentativas: 1 min, 5 min, 30 min, 2 h e 12 h após a falha anterior.</p></div><Button variant="ghost" size="sm" disabled={loading} onClick={reload}>Atualizar</Button></div>
+    <div className="flex justify-between gap-3"><div><h2 className="font-heading text-xl font-semibold">Entregas recentes</h2><p className="mt-2 text-sm text-[var(--color-muted)]">Cada evento tem um envio inicial e até cinco novas tentativas: 1 min, 5 min, 30 min, 2 h e 12 h após a falha anterior.</p></div><Button variant="ghost" size="sm" disabled={loading} onClick={reload}>Atualizar</Button></div>
     {error ? <p role="alert" className="mt-5 text-sm text-red-300">{error}</p> : null}
-    {!items ? (error ? null : <p role="status" className="mt-5 text-zinc-400">Consultando entregas…</p>) : !items.length ? <div className="mt-5"><EmptyState title="Nenhuma entrega registrada" description="As entregas aparecem aqui quando uma conversão ou um lote termina depois da criação do endpoint."/></div> : <div className="mt-5 rounded-xl border border-white/10">
+    {!items ? (error ? null : <p role="status" className="mt-5 text-[var(--color-muted)]">Consultando entregas…</p>) : !items.length ? <div className="mt-5"><EmptyState title="Nenhuma entrega registrada" description="As entregas aparecem aqui quando uma conversão ou um lote termina depois da criação do endpoint."/></div> : <div className="mt-5 rounded-xl border border-[var(--color-line)]">
       <Table aria-label="Histórico de entregas de webhook">
         <TableHeader><tr><TableHead>Evento</TableHead><TableHead>Destino</TableHead><TableHead>Situação</TableHead><TableHead>Tentativas</TableHead><TableHead>Última resposta</TableHead><TableHead>Próxima tentativa</TableHead><TableHead><span className="sr-only">Ações</span></TableHead></tr></TableHeader>
         <tbody>{items.map(item => <TableRow key={item.id}>
-          <TableCell><p className="text-white">{eventLabels[item.eventType as WebhookEventType] ?? item.eventType}</p><p className="mt-1 text-xs text-zinc-500">{formatDateTime(item.createdAt)}</p><p className="mt-1 font-mono text-[11px] text-zinc-600" title="Identificador enviado em X-Label-Delivery">{item.id}</p></TableCell>
+          <TableCell><p className="text-[var(--color-ink)]">{eventLabels[item.eventType as WebhookEventType] ?? item.eventType}</p><p className="mt-1 text-xs text-[var(--color-muted)]">{formatDateTime(item.createdAt)}</p><p className="mt-1 font-mono text-[11px] text-[var(--color-faint)]" title="Identificador enviado em X-Label-Delivery">{item.id}</p></TableCell>
           <TableCell className="max-w-48 truncate font-mono text-xs">{hostOf(urls.get(item.endpointId))}</TableCell>
           <TableCell><span className={statusClass[item.status]}>{deliveryStatusLabels[item.status]}</span></TableCell>
           <TableCell>{item.attemptCount} de 6</TableCell>

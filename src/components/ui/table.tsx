@@ -6,11 +6,11 @@ export function Table({ className, ...props }: TableHTMLAttributes<HTMLTableElem
 }
 
 export function TableHeader({ className, ...props }: HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("border-b border-white/10 text-xs text-zinc-500", className)} {...props} />;
+  return <thead className={cn("border-b border-[var(--c-line)] text-xs text-[var(--c-muted)]", className)} {...props} />;
 }
 
 export function TableRow({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
-  return <tr className={cn("border-b border-white/[.06] transition-colors hover:bg-white/[.025]", className)} {...props} />;
+  return <tr className={cn("border-b border-[var(--c-line)] transition-colors hover:bg-[var(--c-surface-2)]", className)} {...props} />;
 }
 
 export function TableHead({ className, ...props }: HTMLAttributes<HTMLTableCellElement>) {
@@ -18,5 +18,5 @@ export function TableHead({ className, ...props }: HTMLAttributes<HTMLTableCellE
 }
 
 export function TableCell({ className, ...props }: HTMLAttributes<HTMLTableCellElement>) {
-  return <td className={cn("px-4 py-4 text-zinc-300", className)} {...props} />;
+  return <td className={cn("px-4 py-4 text-[var(--c-ink)]", className)} {...props} />;
 }
