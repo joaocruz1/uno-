@@ -11,3 +11,7 @@ output/
 .tmp/
 .DS_Store
 public/pdfjs/
+
+# Logos oficiais de marketplaces (marcas de terceiros) ficam fora do Git
+public/channels/*
+!public/channels/README.md
