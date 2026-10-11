@@ -1,3 +1,5 @@
+import { inflateRawSync } from "node:zlib";
+
 import type { Order, OrderItem } from "./order";
 
 /**
@@ -171,15 +173,119 @@ export interface ShopeeWorkbookReader {
   read(bytes: Uint8Array): string[][];
 }
 
-/** No workbook reader is bound until SheetJS is vendored and validated against a
- * real export; refuses with a typed error rather than guessing. */
+// ── .xlsx reading (dependency-free) ────────────────────────────────────────
+// Parses the ZIP central directory, inflates only the first sheet (and shared
+// strings), and maps cells to a matrix. Each decompressed entry is bounded, so a
+// crafted file cannot exhaust memory — the anti zip-bomb concern, handled via
+// node:zlib instead of a vendored library.
+
+const MAX_ENTRY_BYTES = 20 * 1024 * 1024;
+
+function u16(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+function u32(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16) | (bytes[offset + 3] << 24)) >>> 0;
+}
+
+function unzip(data: Uint8Array, wanted: Set<string>): Map<string, string> {
+  let eocd = -1;
+  for (let i = data.length - 22; i >= 0 && i >= data.length - 22 - 65_536; i -= 1) {
+    if (u32(data, i) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new ShopeeError("shopee_bad_signature");
+
+  const entries = u16(data, eocd + 10);
+  let offset = u32(data, eocd + 16);
+  const found = new Map<string, string>();
+  for (let index = 0; index < entries && offset + 46 <= data.length; index += 1) {
+    if (u32(data, offset) !== 0x02014b50) break;
+    const method = u16(data, offset + 10);
+    const compressedSize = u32(data, offset + 20);
+    const uncompressedSize = u32(data, offset + 24);
+    const nameLength = u16(data, offset + 28);
+    const extraLength = u16(data, offset + 30);
+    const commentLength = u16(data, offset + 32);
+    const localOffset = u32(data, offset + 42);
+    const name = Buffer.from(data.subarray(offset + 46, offset + 46 + nameLength)).toString("utf8");
+    offset += 46 + nameLength + extraLength + commentLength;
+    if (!wanted.has(name)) continue;
+    if (uncompressedSize > MAX_ENTRY_BYTES || compressedSize > MAX_ENTRY_BYTES) throw new ShopeeError("shopee_file_too_large");
+
+    const localNameLength = u16(data, localOffset + 26);
+    const localExtraLength = u16(data, localOffset + 28);
+    const start = localOffset + 30 + localNameLength + localExtraLength;
+    const compressed = data.subarray(start, start + compressedSize);
+    let content: Buffer;
+    if (method === 0) content = Buffer.from(compressed);
+    else if (method === 8) {
+      try {
+        content = inflateRawSync(Buffer.from(compressed), { maxOutputLength: MAX_ENTRY_BYTES });
+      } catch {
+        throw new ShopeeError("shopee_file_too_large", "Planilha compactada inválida ou grande demais.");
+      }
+    } else throw new ShopeeError("shopee_bad_signature", "Compressão da planilha não suportada.");
+    found.set(name, content.toString("utf8"));
+  }
+  return found;
+}
+
+function unescapeXml(value: string): string {
+  return value
+    .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (_, n: string) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, n: string) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&amp;/g, "&");
+}
+
+function readSharedStrings(xml: string | undefined): string[] {
+  if (!xml) return [];
+  return [...xml.matchAll(/<si>([\s\S]*?)<\/si>/g)].map((si) =>
+    [...si[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => unescapeXml(t[1])).join(""),
+  );
+}
+
+function columnIndex(ref: string): number {
+  let n = 0;
+  for (const ch of ref.replace(/[0-9]+/g, "")) n = n * 26 + (ch.charCodeAt(0) - 64);
+  return n - 1;
+}
+
+function parseSheet(xml: string, strings: string[]): string[][] {
+  const rows: string[][] = [];
+  for (const rowXml of xml.match(/<row\b[^>]*>[\s\S]*?<\/row>/g) ?? []) {
+    const row: string[] = [];
+    let auto = 0;
+    for (const cell of rowXml.match(/<c\b[^>]*?(?:\/>|>[\s\S]*?<\/c>)/g) ?? []) {
+      const ref = /r="([A-Z]+)\d+"/.exec(cell)?.[1];
+      const column = ref ? columnIndex(ref) : auto;
+      auto = column + 1;
+      const type = /\bt="([^"]+)"/.exec(cell)?.[1];
+      let value = "";
+      if (type === "inlineStr") {
+        value = [...cell.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map((t) => unescapeXml(t[1])).join("");
+      } else {
+        const raw = /<v>([\s\S]*?)<\/v>/.exec(cell)?.[1];
+        if (raw != null) value = type === "s" ? (strings[Number(raw)] ?? "") : unescapeXml(raw);
+      }
+      row[column] = value;
+    }
+    for (let i = 0; i < row.length; i += 1) if (row[i] === undefined) row[i] = "";
+    rows.push(row);
+  }
+  return rows;
+}
+
+/** Reads a Shopee packing-list .xlsx into a cell matrix, dependency-free and
+ * guarded against oversized / compression-bomb inputs. */
 export function createShopeeWorkbookReader(): ShopeeWorkbookReader {
   return {
-    read: () => {
-      throw new ShopeeError(
-        "shopee_excel_unavailable",
-        "A leitura de .xlsx depende do SheetJS CE 0.20.3 vendorizado (lido com opções seguras, anti zip-bomb); o mapeamento das colunas e os guardas de bytes já estão prontos.",
-      );
+    read(bytes: Uint8Array): string[][] {
+      assertSpreadsheetSafe(bytes);
+      const files = unzip(bytes, new Set(["xl/worksheets/sheet1.xml", "xl/sharedStrings.xml"]));
+      const sheet = files.get("xl/worksheets/sheet1.xml");
+      if (!sheet) throw new ShopeeError("shopee_empty", "A planilha não tem uma primeira aba legível.");
+      return parseSheet(sheet, readSharedStrings(files.get("xl/sharedStrings.xml")));
     },
   };
 }

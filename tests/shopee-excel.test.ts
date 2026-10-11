@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
 import { PDFDocument } from "pdf-lib";
 import { describe, expect, it } from "vitest";
 
@@ -122,12 +125,32 @@ describe("parseShopeePacking", () => {
 });
 
 describe("ShopeeWorkbookReader", () => {
-  it("refuses to decode .xlsx until SheetJS is vendored", () => {
+  const sample = readFileSync(fileURLToPath(new URL("./fixtures/shopee-packing-sample.xlsx", import.meta.url)));
+
+  it("reads a real .xlsx into a matrix and parses the orders end to end", () => {
+    const matrix = createShopeeWorkbookReader().read(sample);
+    expect(matrix[0]).toContain("SKU");
+    expect(matrix[0]).toContain("Quantidade");
+
+    const orders = parseShopeePacking(matrix);
+    expect(orders).toHaveLength(6);
+    const units = orders.reduce((sum, order) => sum + order.items.reduce((inner, item) => inner + item.quantity, 0), 0);
+    expect(units).toBe(25);
+    expect(summarizeBySku(orders)).toHaveLength(5);
+  });
+
+  it("feeds the parsed orders into the picking list", async () => {
+    const orders = parseShopeePacking(createShopeeWorkbookReader().read(sample));
+    const bytes = await buildPickingListPdf(orders, { marketplaceLabel: "Shopee", order: "sum-sku", paper: "a4" });
+    expect((await PDFDocument.load(bytes)).getPageCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("rejects bytes that are not a spreadsheet", () => {
     try {
-      createShopeeWorkbookReader().read(new Uint8Array([0x50, 0x4b, 0x03, 0x04]));
+      createShopeeWorkbookReader().read(new Uint8Array([1, 2, 3, 4]));
       throw new Error("should have thrown");
     } catch (error) {
-      expect((error as ShopeeError).code).toBe("shopee_excel_unavailable");
+      expect(error).toBeInstanceOf(ShopeeError);
     }
   });
 });
