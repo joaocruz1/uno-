@@ -7,6 +7,7 @@ import { z } from "zod";
 import { Button, Progress } from "@/components/ui";
 import { ChannelMark } from "@/components/marketplace-logos";
 import { ShopeeLoteFlow } from "@/components/marketplace/shopee-lote-flow";
+import { TikTokLoteFlow } from "@/components/marketplace/tiktok-lote-flow";
 import { startPollingClock } from "@/components/conversion/use-polling-delay";
 import { acceptedLoteSchema, loteDownloadSchema, loteViewSchema, type LoteView } from "@/lib/marketplace-model";
 import { inspectPdf, putFile, requestUploadIntent, PDF_CONTENT_TYPE } from "@/lib/upload-client";
@@ -18,7 +19,7 @@ const MAX_FILES = 10;
 const MARKETPLACES = [
   { id: "mercado-livre" as const, name: "Mercado Livre", available: true },
   { id: "shopee" as const, name: "Shopee", available: true },
-  { id: "tiktok" as const, name: "TikTok Shop", available: false },
+  { id: "tiktok" as const, name: "TikTok Shop", available: true },
 ];
 const PHASES: Record<string, string> = {
   queued: "Na fila",
@@ -37,7 +38,7 @@ type Picked = { file: File; key: string };
 type Phase = "idle" | "uploading" | "working" | "error";
 
 export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB: number }) {
-  const [marketplace, setMarketplace] = useState<"mercado-livre" | "shopee">("mercado-livre");
+  const [marketplace, setMarketplace] = useState<"mercado-livre" | "shopee" | "tiktok">("mercado-livre");
   const [files, setFiles] = useState<Picked[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [uploadingIndex, setUploadingIndex] = useState(0);
@@ -216,7 +217,7 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
             type="button"
             disabled={!channel.available}
             aria-pressed={selected}
-            onClick={() => { if (channel.id === "mercado-livre" || channel.id === "shopee") setMarketplace(channel.id); }}
+            onClick={() => setMarketplace(channel.id)}
             title={channel.available ? channel.name : `${channel.name} — em breve`}
             className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-colors ${
               selected
@@ -238,6 +239,8 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
 
       {marketplace === "shopee" ? (
         <ShopeeLoteFlow planName={planName} maxFileMB={maxFileMB} />
+      ) : marketplace === "tiktok" ? (
+        <TikTokLoteFlow planName={planName} maxFileMB={maxFileMB} />
       ) : (
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="card-soft overflow-hidden rounded-2xl">
