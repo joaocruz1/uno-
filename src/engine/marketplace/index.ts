@@ -29,6 +29,20 @@ export {
   type ShopeeErrorCode,
   type ShopeeWorkbookReader,
 } from "./shopee-excel";
+export {
+  combineInterleaved,
+  convertTikTokBatch,
+  createTikTokExtractor,
+  normalizeTrackingKey,
+  planInterleave,
+  TikTokError,
+  type InterleaveEntry,
+  type InterleavePlan,
+  type InvoiceUnit,
+  type LabelUnit,
+  type TikTokErrorCode,
+  type TikTokExtractor,
+} from "./tiktok";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 
 /**
