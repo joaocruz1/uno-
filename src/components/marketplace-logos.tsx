@@ -1,13 +1,15 @@
-import type { CSSProperties } from "react";
+"use client";
+
+import { useEffect, useState, type CSSProperties } from "react";
 
 /**
  * Channel marks for the marketplaces UNO handles (and the ones on the roadmap).
  *
- * These are ORIGINAL marks — a brand-accent tile with the two-letter sigla UNO
- * already uses on the picking list (ML / SH / TT …) — not the platforms' own
- * trademarked logos. To show an official logo instead, drop its asset at
- * `public/channels/<id>.svg` and render it over this mark; the brand assets are
- * sourced outside the repo (owner's decision), so none are reproduced here.
+ * By default these are ORIGINAL marks — a brand-accent tile with the two-letter
+ * sigla UNO already uses on the picking list (ML / SH / TT …) — NOT the
+ * platforms' trademarked logos, which are not reproduced here. To show an
+ * official logo, drop its asset at `public/channels/<id>.svg`: {@link ChannelMark}
+ * detects it and renders it in place of the sigla automatically.
  */
 export type ChannelId = "mercado-livre" | "shopee" | "amazon" | "magalu" | "tiktok" | "tray";
 
@@ -15,9 +17,7 @@ export type Channel = {
   id: ChannelId;
   name: string;
   sigla: string;
-  /** Tile background. */
   accent: string;
-  /** Sigla color for contrast on the accent. */
   ink: string;
   status: "active" | "soon";
 };
@@ -37,21 +37,51 @@ export const CHANNEL_BY_ID: Record<ChannelId, Channel> = Object.fromEntries(
 
 export function ChannelMark({ id, size = 28, muted = false }: { id: ChannelId; size?: number; muted?: boolean }) {
   const channel = CHANNEL_BY_ID[id];
+  const [officialLogo, setOfficialLogo] = useState<string | null>(null);
+
+  // Upgrade to the official logo only if the asset actually exists, so there is
+  // never a broken-image flash when it does not.
+  useEffect(() => {
+    let active = true;
+    const url = `/channels/${id}.svg`;
+    const probe = new Image();
+    probe.onload = () => {
+      if (active) setOfficialLogo(url);
+    };
+    probe.src = url;
+    return () => {
+      active = false;
+    };
+  }, [id]);
+
+  const radius = size * 0.28;
+
+  if (officialLogo) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={officialLogo}
+        alt=""
+        aria-hidden
+        width={size}
+        height={size}
+        style={{ width: size, height: size, borderRadius: radius, opacity: muted ? 0.55 : 1, filter: muted ? "grayscale(1)" : undefined }}
+        className="shrink-0 object-contain"
+      />
+    );
+  }
+
   const style: CSSProperties = {
     width: size,
     height: size,
-    background: muted ? "var(--color-surface-2)" : channel.accent,
-    color: muted ? "var(--color-faint)" : channel.ink,
+    background: muted ? "var(--color-surface-2, #fafafa)" : channel.accent,
+    color: muted ? "var(--color-faint, #9a9aa2)" : channel.ink,
     fontSize: size * 0.4,
-    borderRadius: size * 0.28,
-    boxShadow: muted ? "inset 0 0 0 1px var(--color-line)" : "none",
+    borderRadius: radius,
+    boxShadow: muted ? "inset 0 0 0 1px var(--color-line, #e8e8ec)" : "none",
   };
   return (
-    <span
-      aria-hidden
-      style={style}
-      className="grid shrink-0 place-items-center font-heading font-extrabold tracking-tight"
-    >
+    <span aria-hidden style={style} className="grid shrink-0 place-items-center font-heading font-extrabold tracking-tight">
       {channel.sigla}
     </span>
   );
@@ -65,7 +95,7 @@ export function ChannelStrip({ className }: { className?: string }) {
       {CHANNELS.map((channel) => (
         <li
           key={channel.id}
-          className="flex items-center gap-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5"
+          className="flex items-center gap-2.5 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)] px-3 py-2.5 transition-colors hover:border-[var(--color-line-strong)]"
         >
           <ChannelMark id={channel.id} muted={channel.status === "soon"} />
           <span className="min-w-0">
