@@ -1,7 +1,13 @@
 import { createHash } from "node:crypto";
 
 import { EngineError } from "@/engine/errors";
+import { MarketplaceError } from "@/engine/marketplace/errors";
+import { TikTokError } from "@/engine/marketplace/tiktok";
 import type { ConversionResult, OutputSize } from "@/engine/types";
+
+/** Marketplaces the landing demo accepts. Broader than the engine's
+ * {@link Marketplace} union because TikTok runs through its own (two-file) path. */
+export type TrialMarketplace = "mercado-livre" | "shopee" | "tiktok";
 import { positiveIntegerEnv } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { assertTemplateEligible, findTemplate, INITIAL_TEMPLATE, seedInitialDraftTemplate } from "@/server/conversions/templates";
@@ -19,6 +25,8 @@ export const TRIAL_MAX_BYTES = 5 * 1_024 * 1_024;
 const TRIAL_SIZE: OutputSize = { preset: "100x150" };
 const TRIAL_TTL_SECONDS = 30 * 86_400;
 const MULTIPART_OVERHEAD_BYTES = 64 * 1_024;
+/** Demo ceiling on orders per file, so one upload can't tie up the server. */
+const TRIAL_MAX_ORDERS = 50;
 
 export interface TrialStore {
   isUsed(key: string): Promise<boolean>;
@@ -100,21 +108,62 @@ async function readBounded(request: Request): Promise<Uint8Array> {
   return Buffer.concat(chunks, length);
 }
 
-async function readPdf(request: Request): Promise<Uint8Array> {
-  const contentType = request.headers.get("content-type") ?? "";
-  if (!/^multipart\/form-data;\s*boundary=/i.test(contentType)) throw new AppError("invalid_request", "Envie um arquivo PDF.", 400);
-  const body = await readBounded(request);
-  let file: FormDataEntryValue | null;
-  try {
-    file = (await new Response(Buffer.from(body), { headers: { "content-type": contentType } }).formData()).get("file");
-  } catch {
-    throw new AppError("invalid_request", "Envie um arquivo PDF.", 400);
-  }
+async function readFormPdf(file: FormDataEntryValue | null): Promise<Uint8Array> {
   if (!(file instanceof File) || file.size < 1) throw new AppError("invalid_request", "Envie um arquivo PDF.", 400);
   if (file.size > TRIAL_MAX_BYTES) throw new AppError("file_too_large", "O teste aceita PDFs de até 5 MB.", 413);
   const bytes = new Uint8Array(await file.arrayBuffer());
   if (!Buffer.from(bytes.subarray(0, 1_024)).includes("%PDF-")) throw new AppError("invalid_pdf", "O arquivo enviado não é um PDF válido.", 422);
   return bytes;
+}
+
+const TRIAL_MARKETPLACES = new Set<TrialMarketplace>(["mercado-livre", "shopee", "tiktok"]);
+
+/** Reads the chosen marketplace, the label PDF (`file`) and, for TikTok, the
+ * optional NF-e (`nfe`) from the multipart body, bounded to the trial ceiling. */
+async function readTrialForm(request: Request): Promise<{ marketplace: TrialMarketplace; bytes: Uint8Array; nfe?: Uint8Array }> {
+  const contentType = request.headers.get("content-type") ?? "";
+  if (!/^multipart\/form-data;\s*boundary=/i.test(contentType)) throw new AppError("invalid_request", "Envie um arquivo PDF.", 400);
+  const body = await readBounded(request);
+  let form: FormData;
+  try {
+    form = await new Response(Buffer.from(body), { headers: { "content-type": contentType } }).formData();
+  } catch {
+    throw new AppError("invalid_request", "Envie um arquivo PDF.", 400);
+  }
+  const requested = String(form.get("marketplace") ?? "mercado-livre") as TrialMarketplace;
+  const marketplace = TRIAL_MARKETPLACES.has(requested) ? requested : "mercado-livre";
+  const bytes = await readFormPdf(form.get("file"));
+  const nfeEntry = form.get("nfe");
+  const nfe = nfeEntry instanceof File && nfeEntry.size > 0 ? await readFormPdf(nfeEntry) : undefined;
+  return { marketplace, bytes, nfe };
+}
+
+function trialError(error: unknown): AppError {
+  if (error instanceof AppError) return error;
+  if (error instanceof EngineError) return new AppError(error.code, error.message, 422);
+  if (error instanceof MarketplaceError || error instanceof TikTokError) return new AppError(error.code, error.message, 422);
+  return new AppError("internal_error", "Não foi possível processar este PDF.", 500);
+}
+
+/**
+ * Runs the chosen marketplace's conversion for the demo, reusing the same engine
+ * as the dashboard. Mercado Livre fuses the two pages; Shopee validates each
+ * 10×15 label and passes it through; TikTok pairs each label with its NF-e when
+ * one is sent. The ML template check stays outside, so its error is unwrapped.
+ */
+async function convertTrial(marketplace: TrialMarketplace, bytes: Uint8Array, nfe: Uint8Array | undefined, dependencies: TrialDependencies): Promise<Uint8Array> {
+  if (marketplace === "mercado-livre") {
+    return (await dependencies.convert(bytes, TRIAL_SIZE)).bytes;
+  }
+  if (marketplace === "shopee") {
+    const { convertShopeeBatch } = await import("@/engine/marketplace");
+    return (await convertShopeeBatch(bytes, { maxOrders: TRIAL_MAX_ORDERS })).bytes;
+  }
+  const { createTikTokDocumentExtractor, planInterleave, combineInterleaved } = await import("@/engine/marketplace");
+  const extractor = createTikTokDocumentExtractor();
+  const labels = (await extractor.extractLabels(bytes)).slice(0, TRIAL_MAX_ORDERS);
+  const invoices = nfe ? await extractor.extractInvoices(nfe) : [];
+  return combineInterleaved(planInterleave(labels, invoices));
 }
 
 export async function runPublicTrial(request: Request, dependencies: TrialDependencies = defaults()): Promise<Uint8Array> {
@@ -126,21 +175,22 @@ export async function runPublicTrial(request: Request, dependencies: TrialDepend
   if (!await trialAvailable(headers, dependencies)) {
     throw new AppError("trial_used", "Você já usou o teste gratuito. Crie uma conta para continuar.", 403);
   }
-  await dependencies.assertAvailable();
-  const bytes = await readPdf(request);
+  const { marketplace, bytes, nfe } = await readTrialForm(request);
+  // Only Mercado Livre depends on the released template; checked here so its
+  // error propagates unwrapped and before the conversion is attempted.
+  if (marketplace === "mercado-livre") await dependencies.assertAvailable();
   if (active >= positiveIntegerEnv("UNO_TRIAL_CONCURRENCY", 2)) {
     throw new AppError("rate_limit_exceeded", "Muitas pessoas testando agora. Tente novamente em instantes.", 429, { retryAfterSeconds: 10 });
   }
   active += 1;
-  let result: ConversionResult;
+  let output: Uint8Array;
   try {
-    result = await dependencies.convert(bytes, TRIAL_SIZE);
+    output = await convertTrial(marketplace, bytes, nfe, dependencies);
   } catch (error) {
-    if (error instanceof EngineError) throw new AppError(error.code, error.message, 422);
-    throw new AppError("internal_error", "Não foi possível unificar este PDF.", 500);
+    throw trialError(error);
   } finally {
     active -= 1;
   }
   await dependencies.store.markUsed(visitor, TRIAL_TTL_SECONDS).catch(() => undefined);
-  return result.bytes;
+  return output;
 }
