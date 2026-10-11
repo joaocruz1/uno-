@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
+import Image from "next/image";
+import { Layers3 } from "lucide-react";
 
 import { LogoutButton } from "@/components/auth";
 import { Sidebar } from "@/components/sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { AppError } from "@/lib/errors";
 import { getPlanCatalog } from "@/lib/plans";
 import { isPlatformAdmin } from "@/server/auth/actor";
@@ -10,6 +13,20 @@ import { requireActor } from "@/server/http";
 
 // Authenticated area: never prerender at build time, when no database is available.
 export const dynamic = "force-dynamic";
+
+const MOBILE_LINKS = [
+  ["Início", "/dashboard"],
+  ["Nova conversão", "/dashboard/process"],
+  ["Lote de marketplace", "/dashboard/marketplace"],
+  ["Histórico", "/dashboard/history"],
+  ["Assinatura", "/dashboard/billing"],
+  ["Lotes", "/dashboard/batches"],
+  ["Uso", "/dashboard/usage"],
+  ["Indicações", "/dashboard/indicacoes"],
+  ["API", "/dashboard/api"],
+  ["Webhooks", "/dashboard/webhooks"],
+  ["Configurações", "/dashboard/settings"],
+] as const;
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let actor;
@@ -21,36 +38,59 @@ export default async function DashboardLayout({ children }: { children: React.Re
     throw error;
   }
 
+  const planName = getPlanCatalog()[actor.planId].name;
+
   return (
-    <div className="min-h-screen bg-black lg:flex">
-      <div className="hidden lg:block"><Sidebar accountName={actor.organizationName} planName={getPlanCatalog()[actor.planId].name} showAdmin={isPlatformAdmin(actor)} /></div>
-      <main className="min-w-0 flex-1">
-        <header className="flex min-h-16 items-center justify-between gap-4 border-b border-white/[.06] px-4 sm:px-8">
+    <div className="app-shell min-h-screen lg:flex">
+      <div className="hidden lg:block">
+        <Sidebar accountName={actor.organizationName} planName={planName} showAdmin={isPlatformAdmin(actor)} />
+      </div>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b border-[var(--color-line)] bg-[color-mix(in_srgb,var(--color-canvas)_82%,transparent)] px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <details className="relative lg:hidden">
-              <summary className="cursor-pointer list-none rounded-lg border border-white/10 px-3 py-2 text-sm text-zinc-200">Menu</summary>
-              <nav aria-label="Dashboard móvel" className="absolute left-0 top-12 z-20 w-52 rounded-xl border border-white/10 bg-[#090909] p-2 shadow-2xl">
-                <Link href="/dashboard" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Início</Link>
-                <Link href="/dashboard/process" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Nova conversão</Link>
-                <Link href="/dashboard/history" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Histórico</Link>
-                <Link href="/dashboard/batches" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Lotes</Link>
-                <Link href="/dashboard/api" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">API</Link>
-                <Link href="/dashboard/webhooks" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Webhooks</Link>
-                <Link href="/dashboard/usage" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Uso</Link>
-                <Link href="/dashboard/billing" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Assinatura</Link>
-                <Link href="/dashboard/indicacoes" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Indicações</Link>
-                <Link href="/dashboard/settings" className="block rounded-lg px-3 py-2 text-sm hover:bg-white/[.06]">Configurações</Link>
+              <summary className="grid size-9 cursor-pointer list-none place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink)]">
+                <span className="flex flex-col gap-[3px]"><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /></span>
+              </summary>
+              <nav aria-label="Menu" className="card-soft absolute left-0 top-11 z-30 w-60 rounded-2xl p-2">
+                {MOBILE_LINKS.map(([label, href]) => (
+                  <Link key={href} href={href} className="block rounded-lg px-3 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--hover-ink)]">
+                    {label}
+                  </Link>
+                ))}
+                <div className="mt-1 flex items-center justify-between border-t border-[var(--color-line)] px-3 pt-2">
+                  <span className="text-xs text-[var(--color-muted)]">Tema</span>
+                  <ThemeToggle className="grid size-8 place-items-center rounded-lg text-[var(--color-muted)] hover:bg-[var(--hover-ink)]" />
+                </div>
               </nav>
             </details>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-white">{actor.organizationName}</p>
-              <p className="truncate text-xs text-zinc-500">{actor.email}</p>
+
+            <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
+              <Image src="/uno-icon.png" width={24} height={24} alt="" />
+              <span className="font-heading text-base font-extrabold tracking-tight text-[var(--color-ink)]">UNO</span>
+            </Link>
+
+            <div className="hidden min-w-0 lg:block">
+              <p className="truncate text-sm font-semibold text-[var(--color-ink)]">{actor.organizationName}</p>
+              <p className="truncate text-xs text-[var(--color-muted)]">{actor.email}</p>
             </div>
           </div>
-          <LogoutButton />
+
+          <div className="flex items-center gap-2">
+            <Link
+              href="/dashboard/process"
+              className="hidden items-center gap-2 rounded-xl bg-uno-red px-4 py-2 text-sm font-semibold text-white shadow-[0_8px_20px_-10px_rgba(239,35,60,.9)] transition hover:brightness-110 sm:inline-flex"
+            >
+              <Layers3 size={16} />
+              Nova conversão
+            </Link>
+            <LogoutButton />
+          </div>
         </header>
-        <div className="px-4 py-8 sm:px-8">{children}</div>
-      </main>
+
+        <main className="px-4 py-7 sm:px-6 sm:py-8 lg:px-8">{children}</main>
+      </div>
     </div>
   );
 }
