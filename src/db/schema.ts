@@ -53,6 +53,8 @@ export const batchStatusEnum = pgEnum("batch_status", [
 export const batchUploadSessionStatusEnum = pgEnum("batch_upload_session_status", ["OPEN", "ACCEPTED", "EXPIRED"]);
 export const batchUploadItemStatusEnum = pgEnum("batch_upload_item_status", ["PENDING", "UPLOADING", "PREPARING", "READY", "FAILED"]);
 export const batchArchiveStatusEnum = pgEnum("batch_archive_status", ["PENDING", "PACKAGING", "READY", "FAILED"]);
+/** A lote of independent files (ZIP output) or a marketplace export split into orders (one combined PDF). */
+export const batchKindEnum = pgEnum("batch_kind", ["files", "marketplace"]);
 export const pageRoleEnum = pgEnum("page_role", ["logistics", "danfe"]);
 export const pageKindEnum = pgEnum("page_kind", ["digital", "scanned"]);
 export const usageReservationStatusEnum = pgEnum("usage_reservation_status", [
@@ -389,12 +391,21 @@ export const batches = pgTable(
     requestHash: text("request_hash"),
     status: batchStatusEnum("status").notNull().default("queued"),
     phase: text("phase").notNull().default("queued"),
+    /** "files" = ZIP of independent uploads; "marketplace" = one combined PDF from a split export. */
+    kind: batchKindEnum("kind").notNull().default("files"),
+    /** Source marketplace for kind='marketplace' (e.g. "mercado-livre"); null for "files". */
+    marketplace: text("marketplace"),
+    /** Label numbering options for the combined PDF (kind='marketplace'); null when off. */
+    numbering: jsonb("numbering").$type<{ letter?: string; start: number; showTotal: boolean }>(),
     itemCount: integer("item_count").notNull(),
     completedCount: integer("completed_count").notNull().default(0),
     failedCount: integer("failed_count").notNull().default(0),
     progress: integer("progress").notNull().default(0),
     zipObjectKey: text("zip_object_key"),
     zipByteLength: bigint("zip_byte_length", { mode: "number" }),
+    /** Output for kind='marketplace': one combined PDF instead of a ZIP. */
+    combinedPdfObjectKey: text("combined_pdf_object_key"),
+    combinedPdfByteLength: bigint("combined_pdf_byte_length", { mode: "number" }),
     archiveStatus: batchArchiveStatusEnum("archive_status").notNull().default("PENDING"),
     archiveAttempts: integer("archive_attempts").notNull().default(0),
     archiveMaxAttempts: integer("archive_max_attempts").notNull().default(3),
@@ -428,6 +439,7 @@ export const batches = pgTable(
     check("batches_idempotency_ck", sql`(${table.idempotencyKey} is null and ${table.requestHash} is null) or (${table.idempotencyKey} is not null and ${table.requestHash} is not null and char_length(${table.idempotencyKey}) between 16 and 128 and ${table.requestHash} ~ '^[0-9a-f]{64}$')`),
     check("batches_archive_attempts_ck", sql`${table.archiveAttempts} >= 0 and ${table.archiveMaxAttempts} > 0 and ${table.archiveAttempts} <= ${table.archiveMaxAttempts}`),
     check("batches_archive_claim_ck", sql`(${table.archiveStatus} = 'PACKAGING' and ${table.archiveToken} is not null and ${table.archiveLeaseExpiresAt} is not null) or (${table.archiveStatus} <> 'PACKAGING' and ${table.archiveToken} is null and ${table.archiveLeaseExpiresAt} is null)`),
+    check("batches_kind_ck", sql`(${table.kind} = 'files' and ${table.marketplace} is null) or (${table.kind} = 'marketplace' and ${table.marketplace} is not null)`),
   ],
 );
 
@@ -441,6 +453,8 @@ export const conversions = pgTable(
     createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
     apiKeyId: text("api_key_id"),
     batchId: text("batch_id"),
+    /** Position of this order inside a kind='marketplace' lote, so the combined PDF keeps upload order. */
+    batchOrderIndex: integer("batch_order_index"),
     uploadIntentId: text("upload_intent_id"),
     sourceConversionId: text("source_conversion_id"),
     reprocessIdempotencyKey: text("reprocess_idempotency_key"),
