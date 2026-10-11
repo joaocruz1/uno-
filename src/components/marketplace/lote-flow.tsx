@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Download, FileText, LoaderCircle, ShieldCheck, TriangleAlert, UploadCloud, X } from "lucide-react";
+import { ArrowDown, ArrowUp, CheckCircle2, Download, FileText, LoaderCircle, Plus, ShieldCheck, TriangleAlert, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { z } from "zod";
 
@@ -11,6 +11,7 @@ import { acceptedLoteSchema, loteDownloadSchema, loteViewSchema, type LoteView }
 import { inspectPdf, putFile, requestUploadIntent, PDF_CONTENT_TYPE } from "@/lib/upload-client";
 
 const MEBIBYTE = 1_024 * 1_024;
+const MAX_FILES = 10;
 const PHASES: Record<string, string> = {
   queued: "Na fila",
   processing: "Convertendo os pedidos",
@@ -24,12 +25,14 @@ function safeMessage(value: unknown, fallback: string): string {
   return typeof body?.error?.message === "string" ? body.error.message : fallback;
 }
 
-type Phase = "idle" | "preparing" | "requesting" | "uploading" | "working" | "error";
+type Picked = { file: File; key: string };
+type Phase = "idle" | "uploading" | "working" | "error";
 
 export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB: number }) {
+  const [files, setFiles] = useState<Picked[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
+  const [uploadingIndex, setUploadingIndex] = useState(0);
   const [progress, setProgress] = useState(0);
-  const [fileName, setFileName] = useState<string>();
   const [error, setError] = useState<string>();
   const [dragging, setDragging] = useState(false);
   const [loteId, setLoteId] = useState<string>();
@@ -45,26 +48,54 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
   const inputRef = useRef<HTMLInputElement>(null);
   const requestRef = useRef<XMLHttpRequest | null>(null);
   const operationRef = useRef(0);
-  const busy = phase === "preparing" || phase === "requesting" || phase === "uploading";
+  const uploading = phase === "uploading";
+  const busy = uploading;
   const maxBytes = maxFileMB * MEBIBYTE;
 
   const reset = () => {
     operationRef.current += 1;
     requestRef.current?.abort();
     requestRef.current = null;
-    setPhase("idle"); setProgress(0); setFileName(undefined); setError(undefined);
-    setLoteId(undefined); setLote(undefined);
+    setPhase("idle"); setProgress(0); setUploadingIndex(0); setError(undefined);
+    setFiles([]); setLoteId(undefined); setLote(undefined);
     if (inputRef.current) inputRef.current.value = "";
   };
 
-  const start = useCallback(async (file: File) => {
+  const addFiles = (incoming: FileList | File[] | null) => {
+    if (!incoming || busy) return;
+    const chosen = Array.from(incoming);
+    if (chosen.length === 0) return;
+    setError(undefined);
+    setFiles((current) => {
+      const next = [...current];
+      for (const file of chosen) {
+        if (next.length >= MAX_FILES) { setError(`Máximo de ${MAX_FILES} arquivos por lote.`); break; }
+        if (file.type && file.type !== PDF_CONTENT_TYPE) { setError("Envie apenas arquivos PDF."); continue; }
+        if (file.size < 1) { setError("Um dos arquivos está vazio."); continue; }
+        if (file.size > maxBytes) { setError(`Cada arquivo deve ter até ${maxFileMB} MB no plano ${planName}.`); continue; }
+        next.push({ file, key: `${file.name}-${file.size}-${file.lastModified}-${next.length}-${Math.random().toString(36).slice(2, 7)}` });
+      }
+      return next;
+    });
+    if (inputRef.current) inputRef.current.value = "";
+  };
+
+  const move = (index: number, delta: number) => {
+    setFiles((current) => {
+      const target = index + delta;
+      if (target < 0 || target >= current.length) return current;
+      const next = [...current];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  };
+  const removeAt = (index: number) => setFiles((current) => current.filter((_, i) => i !== index));
+
+  const convert = useCallback(async () => {
+    if (files.length === 0 || busy) return;
     const operation = ++operationRef.current;
     requestRef.current?.abort();
-    setFileName(file.name); setError(undefined); setProgress(0); setLote(undefined); setLoteId(undefined);
-
-    if (file.size < 1) { setPhase("error"); setError("O arquivo está vazio."); return; }
-    if (file.size > maxBytes) { setPhase("error"); setError(`O arquivo excede o limite de ${maxFileMB} MB do plano ${planName}.`); return; }
-    if (file.type && file.type !== PDF_CONTENT_TYPE) { setPhase("error"); setError("Selecione um arquivo PDF."); return; }
+    setError(undefined); setProgress(0); setUploadingIndex(0); setLote(undefined); setLoteId(undefined);
 
     const startNumber = Number(inicio);
     const numbering = numerar
@@ -72,21 +103,25 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
       : undefined;
 
     try {
-      setPhase("preparing");
-      const { checksumSha256 } = await inspectPdf(file);
-      if (operationRef.current !== operation) return;
-      setPhase("requesting");
-      const intent = await requestUploadIntent(file, checksumSha256);
-      if (operationRef.current !== operation) return;
       setPhase("uploading");
-      await putFile(intent, file, setProgress, (request) => { requestRef.current = request; });
-      if (operationRef.current !== operation) return;
+      const uploadIntentIds: string[] = [];
+      for (let index = 0; index < files.length; index += 1) {
+        setUploadingIndex(index); setProgress(0);
+        const { file } = files[index];
+        const { checksumSha256 } = await inspectPdf(file);
+        if (operationRef.current !== operation) return;
+        const intent = await requestUploadIntent(file, checksumSha256);
+        if (operationRef.current !== operation) return;
+        await putFile(intent, file, setProgress, (request) => { requestRef.current = request; });
+        if (operationRef.current !== operation) return;
+        uploadIntentIds.push(intent.id);
+      }
 
       setPhase("working");
       const response = await fetch("/api/dashboard/marketplace-lotes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uploadIntentId: intent.id, marketplace: "mercado-livre", size: { preset: "100x150" }, ...(numbering ? { numbering } : {}) }),
+        body: JSON.stringify({ uploadIntentIds, marketplace: "mercado-livre", size: { preset: "100x150" }, ...(numbering ? { numbering } : {}) }),
         cache: "no-store",
       });
       const body: unknown = await response.json();
@@ -97,9 +132,9 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
       if (operationRef.current !== operation) return;
       requestRef.current = null;
       setPhase("error");
-      setError(cause instanceof Error && !(cause instanceof z.ZodError) ? cause.message : "Não foi possível enviar o arquivo.");
+      setError(cause instanceof Error && !(cause instanceof z.ZodError) ? cause.message : "Não foi possível enviar os arquivos.");
     }
-  }, [inicio, letra, maxBytes, maxFileMB, mostrarTotal, numerar, planName]);
+  }, [files, busy, inicio, letra, mostrarTotal, numerar]);
 
   useEffect(() => {
     if (!loteId) return;
@@ -147,13 +182,11 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
     }
   };
 
-  const receive = (files: FileList | null) => { const file = files?.item(0); if (file) void start(file); };
   const onDrop = (event: DragEvent<HTMLDivElement>) => {
     event.preventDefault();
     if (busy) return;
     setDragging(false);
-    if (event.dataTransfer.files.length !== 1) { setPhase("error"); setError("Envie um PDF por vez."); return; }
-    receive(event.dataTransfer.files);
+    addFiles(event.dataTransfer.files);
   };
 
   const done = lote?.status === "completed";
@@ -161,52 +194,91 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
   const working = phase === "working" && !done && !failed;
   const processed = lote ? lote.completedCount + lote.failedCount : 0;
   const pct = lote && lote.itemCount > 0 ? Math.round((processed / lote.itemCount) * 100) : lote?.progress ?? 0;
+  const showComposer = phase === "idle" || phase === "error";
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="card-soft overflow-hidden rounded-2xl">
-        <div className="border-b border-[var(--color-line)] px-5 py-4 sm:px-7">
-          <p className="font-heading text-lg font-semibold text-[var(--color-ink)]">Arquivo do marketplace</p>
-          <p className="mt-1 text-sm text-[var(--color-muted)]">O PDF de etiquetas do Mercado Livre, com vários pedidos.</p>
+        <div className="flex items-center justify-between gap-4 border-b border-[var(--color-line)] px-5 py-4 sm:px-7">
+          <div>
+            <p className="font-heading text-lg font-semibold text-[var(--color-ink)]">Arquivos do marketplace</p>
+            <p className="mt-1 text-sm text-[var(--color-muted)]">PDFs de etiquetas do Mercado Livre — arraste vários e reordene.</p>
+          </div>
+          {showComposer && files.length > 0 ? <span className="shrink-0 text-xs text-[var(--color-faint)]">{files.length}/{MAX_FILES}</span> : null}
         </div>
+
         <div className="p-5 sm:p-7">
-          {phase === "idle" ? (
-            <div
-              className={`grid min-h-72 place-items-center rounded-xl border border-dashed p-8 text-center transition-colors ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-[var(--color-line-strong)] bg-[var(--color-surface-2)] hover:border-uno-red/60"}`}
-              onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
-              onDragOver={(event) => event.preventDefault()}
-              onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
-              onDrop={onDrop}
-            >
-              <div className="max-w-md">
-                <span className="mx-auto grid size-14 place-items-center rounded-full border border-uno-red/20 bg-uno-red/10 text-uno-red"><UploadCloud size={26} /></span>
-                <h2 className="mt-5 font-heading text-xl font-bold text-[var(--color-ink)]">Arraste o PDF do lote aqui</h2>
-                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">PDF do Mercado Livre, um arquivo, até {maxFileMB} MB no plano {planName}</p>
-                <Button className="mt-6" onClick={() => inputRef.current?.click()}>Selecionar arquivo</Button>
-              </div>
+          {showComposer ? (
+            <div className="space-y-4">
+              {files.length > 0 ? (
+                <ul className="space-y-2" aria-label="Arquivos do lote">
+                  {files.map((item, index) => (
+                    <li key={item.key} className="flex items-center gap-3 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2.5">
+                      <span className="grid size-8 shrink-0 place-items-center rounded-lg bg-[var(--color-surface)] text-xs font-bold text-[var(--color-muted)] ring-1 ring-inset ring-[var(--color-line)]">{index + 1}</span>
+                      <FileText size={18} className="shrink-0 text-uno-red" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-[var(--color-ink)]">{item.file.name}</span>
+                        <span className="block text-xs text-[var(--color-faint)]">{(item.file.size / MEBIBYTE).toFixed(1)} MB</span>
+                      </span>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button type="button" onClick={() => move(index, -1)} disabled={index === 0} className="grid size-8 place-items-center rounded-lg text-[var(--color-muted)] transition-colors hover:bg-[var(--hover-ink)] hover:text-[var(--color-ink)] disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label={`Mover ${item.file.name} para cima`}><ArrowUp size={16} /></button>
+                        <button type="button" onClick={() => move(index, 1)} disabled={index === files.length - 1} className="grid size-8 place-items-center rounded-lg text-[var(--color-muted)] transition-colors hover:bg-[var(--hover-ink)] hover:text-[var(--color-ink)] disabled:opacity-30 disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label={`Mover ${item.file.name} para baixo`}><ArrowDown size={16} /></button>
+                        <button type="button" onClick={() => removeAt(index)} className="grid size-8 place-items-center rounded-lg text-[var(--color-faint)] transition-colors hover:bg-[var(--hover-ink)] hover:text-uno-red focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label={`Remover ${item.file.name}`}><X size={16} /></button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              {files.length < MAX_FILES ? (
+                <div
+                  className={`grid place-items-center rounded-xl border border-dashed p-6 text-center transition-colors ${files.length === 0 ? "min-h-64 p-8" : ""} ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-[var(--color-line-strong)] bg-[var(--color-surface-2)] hover:border-uno-red/60"}`}
+                  onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
+                  onDrop={onDrop}
+                >
+                  <div className="max-w-md">
+                    <span className="mx-auto grid size-12 place-items-center rounded-full border border-uno-red/20 bg-uno-red/10 text-uno-red"><UploadCloud size={22} /></span>
+                    {files.length === 0 ? <h2 className="mt-4 font-heading text-xl font-bold text-[var(--color-ink)]">Arraste os PDFs do lote aqui</h2> : null}
+                    <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">{files.length === 0 ? `Vários arquivos, até ${MAX_FILES}, ${maxFileMB} MB cada no plano ${planName}` : "Arraste mais PDFs ou"}</p>
+                    <Button className="mt-4" variant={files.length === 0 ? "primary" : "secondary"} onClick={() => inputRef.current?.click()}>{files.length === 0 ? "Selecionar arquivos" : <><Plus size={16} />Adicionar</>}</Button>
+                  </div>
+                </div>
+              ) : null}
+
+              {files.length > 0 ? (
+                <div className="flex flex-wrap items-center gap-3 border-t border-[var(--color-line)] pt-4">
+                  <Button onClick={() => void convert()}>Converter {files.length} arquivo{files.length === 1 ? "" : "s"}</Button>
+                  <button type="button" onClick={reset} className="text-sm font-medium text-[var(--color-muted)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline">Limpar</button>
+                </div>
+              ) : null}
+
+              {phase === "error" && error ? <p role="alert" className="text-sm font-medium leading-6 text-uno-red">{error}</p> : null}
+              {phase !== "error" && error ? <p role="alert" className="text-xs text-[var(--color-warn)]">{error}</p> : null}
             </div>
           ) : (
-            <div className="min-h-72 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-5 sm:p-7" aria-live="polite">
+            <div className="min-h-64 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-5 sm:p-7" aria-live="polite">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 gap-4">
                   <span className={`grid size-11 shrink-0 place-items-center rounded-full ${done ? "bg-[var(--color-ok-surface)] text-[var(--color-ok)]" : failed ? "bg-uno-red/10 text-uno-red" : "bg-uno-red/10 text-uno-red"}`}>
                     {done ? <CheckCircle2 size={21} /> : failed ? <TriangleAlert size={21} /> : <FileText size={21} />}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-[var(--color-ink)]">{fileName}</p>
-                    <p className="mt-1 text-xs text-[var(--color-muted)]">{lote ? `${lote.itemCount} pedido${lote.itemCount === 1 ? "" : "s"}` : "PDF"}</p>
+                    <p className="truncate text-sm font-semibold text-[var(--color-ink)]">{files.length} arquivo{files.length === 1 ? "" : "s"}</p>
+                    <p className="mt-1 text-xs text-[var(--color-muted)]">{lote ? `${lote.itemCount} pedido${lote.itemCount === 1 ? "" : "s"}` : "Mercado Livre"}</p>
                   </div>
                 </div>
-                {!busy && (done || failed || phase === "error") ? (
+                {!busy && (done || failed) ? (
                   <button type="button" onClick={reset} className="rounded-full p-2 text-[var(--color-faint)] transition-colors hover:bg-[var(--hover-ink)] hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label="Novo lote"><X size={18} /></button>
                 ) : null}
               </div>
 
               <div className="mt-10">
-                {busy ? (
+                {uploading ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-ink)]"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>{phase === "uploading" ? `Enviando arquivo · ${progress}%` : phase === "requesting" ? "Preparando upload privado" : "Verificando o PDF"}</span></div>
-                    {phase === "uploading" ? <Progress className="mt-4" value={progress} label="Progresso do envio" /> : <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--color-line)]"><div className="h-full w-1/3 animate-pulse rounded-full bg-uno-red motion-reduce:animate-none" /></div>}
+                    <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-ink)]"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>Enviando arquivo {uploadingIndex + 1} de {files.length} · {progress}%</span></div>
+                    <Progress className="mt-4" value={progress} label="Progresso do envio" />
                   </>
                 ) : null}
 
@@ -235,20 +307,15 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
                     <div className="flex items-center gap-3"><TriangleAlert className="shrink-0 text-uno-red" size={20} /><h3 className="font-heading font-semibold text-[var(--color-ink)]">Não foi possível montar o lote</h3></div>
                     <p role="alert" className="mt-2 text-sm text-[var(--color-ink)]">{lote?.error?.message ?? "Nenhum pedido do arquivo pôde ser convertido."}</p>
                     <p className="mt-2 text-xs text-[var(--color-muted)]">Os pedidos que falharam não consumiram cota.</p>
+                    <Button className="mt-5" variant="secondary" onClick={reset}>Tentar de novo</Button>
                   </div>
                 ) : null}
 
-                {phase === "error" && error ? (
-                  <>
-                    <p role="alert" className="text-sm font-medium leading-6 text-uno-red">{error}</p>
-                    <Button className="mt-5" variant="secondary" onClick={reset}>Escolher outro arquivo</Button>
-                  </>
-                ) : null}
-                {error && phase !== "error" ? <p role="alert" className="mt-3 text-xs text-[var(--color-warn)]">{error}</p> : null}
+                {error && (working || uploading) ? <p role="alert" className="mt-3 text-xs text-[var(--color-warn)]">{error}</p> : null}
               </div>
             </div>
           )}
-          <input ref={inputRef} type="file" accept="application/pdf,.pdf" className="sr-only" disabled={busy} onChange={(event) => receive(event.target.files)} aria-label="Selecionar PDF do lote" />
+          <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple className="sr-only" disabled={busy} onChange={(event) => addFiles(event.target.files)} aria-label="Selecionar PDFs do lote" />
         </div>
       </section>
 

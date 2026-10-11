@@ -29,8 +29,11 @@ export const labelNumberingSchema = z.object({
   showTotal: z.boolean(),
 }).strict();
 
+/** Up to this many files can be sent in one lote (reorderable multi-upload). */
+export const MAX_LOTE_FILES = 10;
+
 export const createMarketplaceLoteInputSchema = z.object({
-  uploadIntentId: z.uuid(),
+  uploadIntentIds: z.array(z.uuid()).min(1).max(MAX_LOTE_FILES),
   marketplace: z.enum(["mercado-livre"]),
   size: outputSizeSchema,
   numbering: labelNumberingSchema.optional(),
@@ -39,15 +42,15 @@ export const createMarketplaceLoteInputSchema = z.object({
 export type CreateMarketplaceLoteInput = z.infer<typeof createMarketplaceLoteInputSchema>;
 export type AcceptedLote = { id: string; status: "queued"; progress: 0; itemCount: number; createdAt: string };
 
-/** One order already split out of the uploaded file and snapshotted to its own object. */
-type OrderSnapshot = { objectKey: string; sha256: string; byteLength: number };
+/** One order already split out of an uploaded file and snapshotted to its own
+ * object. Carries the name of the file it came from, for the conversion record. */
+type OrderSnapshot = { objectKey: string; sha256: string; byteLength: number; originalFileName: string | undefined };
 
 type CommitInput = {
   actor: Pick<Actor, "organizationId" | "userId">;
   request: CreateMarketplaceLoteInput;
-  intent: UploadIntentRecord;
-  originalFileName: string | undefined;
-  sourceByteLength: number;
+  intents: UploadIntentRecord[];
+  sourceByteLengths: number[];
   orders: OrderSnapshot[];
   batchId: string;
   now(): Date;
@@ -78,12 +81,16 @@ export async function commitMarketplaceLote(
   database: UnoDatabase = getDb(),
 ): Promise<{ createdAt: Date; outboxIds: string[] }> {
   return database.transaction(async (transaction) => {
-    const locked = await transaction.select().from(uploadIntents)
-      .where(and(eq(uploadIntents.organizationId, input.actor.organizationId), eq(uploadIntents.id, input.intent.id)))
-      .limit(1).for("update");
-    const intent = locked[0];
-    if (!intent) throw new AppError("upload_not_found", "Upload não encontrado.", 404);
-    if (intent.consumedAt) return consumedConflict(input.actor.organizationId, intent.id);
+    const lockedIntents: UploadIntentRecord[] = [];
+    for (const requested of input.intents) {
+      const locked = await transaction.select().from(uploadIntents)
+        .where(and(eq(uploadIntents.organizationId, input.actor.organizationId), eq(uploadIntents.id, requested.id)))
+        .limit(1).for("update");
+      const intent = locked[0];
+      if (!intent) throw new AppError("upload_not_found", "Upload não encontrado.", 404);
+      if (intent.consumedAt) return consumedConflict(input.actor.organizationId, intent.id);
+      lockedIntents.push(intent);
+    }
 
     if (process.env.NODE_ENV !== "production" && process.env.UNO_ALLOW_DRAFT_TEMPLATES === "true") {
       await seedInitialDraftTemplate(transaction);
@@ -94,10 +101,10 @@ export async function commitMarketplaceLote(
     const subscriptionRows = await transaction.select({ ...subscriptionEntitlementColumns })
       .from(subscriptions).where(eq(subscriptions.organizationId, input.actor.organizationId)).limit(1).for("update");
     const decisionNow = input.now();
-    if (intent.expiresAt <= decisionNow) throw new AppError("upload_expired", "Este upload expirou.", 410);
+    if (lockedIntents.some((locked) => locked.expiresAt <= decisionNow)) throw new AppError("upload_expired", "Este upload expirou.", 410);
     const entitlement = effectivePlanFromSubscription(subscriptionRows[0], decisionNow);
-    if (input.sourceByteLength > entitlement.plan.maxFileMB * 1_024 * 1_024) {
-      throw new AppError("file_too_large", "O arquivo excede o limite permitido pelo plano atual.", 413);
+    if (input.sourceByteLengths.some((length) => length > entitlement.plan.maxFileMB * 1_024 * 1_024)) {
+      throw new AppError("file_too_large", "Um dos arquivos excede o limite permitido pelo plano atual.", 413);
     }
     if (input.orders.length > entitlement.plan.batchLimit) {
       throw new AppError("batch_limit_exceeded", "O lote excede o limite de pedidos do plano atual.", 413);
@@ -139,7 +146,7 @@ export async function commitMarketplaceLote(
           engineVersion: template.engineVersion,
           status: "queued",
           source: "dashboard",
-          originalFileName: input.originalFileName,
+          originalFileName: order.originalFileName,
           progress: 0,
           currentStage: "queued",
           outputPreset: input.request.size.preset,
@@ -175,10 +182,12 @@ export async function commitMarketplaceLote(
       throw error;
     }
 
-    const consumed = await transaction.update(uploadIntents).set({ consumedAt: decisionNow })
-      .where(and(eq(uploadIntents.id, intent.id), eq(uploadIntents.organizationId, input.actor.organizationId), isNull(uploadIntents.consumedAt)))
-      .returning({ id: uploadIntents.id });
-    if (consumed.length !== 1) return consumedConflict(input.actor.organizationId, intent.id);
+    for (const locked of lockedIntents) {
+      const consumed = await transaction.update(uploadIntents).set({ consumedAt: decisionNow })
+        .where(and(eq(uploadIntents.id, locked.id), eq(uploadIntents.organizationId, input.actor.organizationId), isNull(uploadIntents.consumedAt)))
+        .returning({ id: uploadIntents.id });
+      if (consumed.length !== 1) return consumedConflict(input.actor.organizationId, locked.id);
+    }
 
     return { createdAt: decisionNow, outboxIds };
   });
@@ -211,25 +220,36 @@ export async function createMarketplaceLote(
   dependencies: MarketplaceCreationDependencies = defaultDependencies(),
 ): Promise<AcceptedLote> {
   const request = createMarketplaceLoteInputSchema.parse(rawInput);
+  if (new Set(request.uploadIntentIds).size !== request.uploadIntentIds.length) {
+    throw new AppError("invalid_request", "Um arquivo foi enviado mais de uma vez.", 400);
+  }
   const pagesPerOrder = MARKETPLACE_PAGES_PER_ORDER[request.marketplace];
-  const intent = await dependencies.loadIntent(actor.organizationId, request.uploadIntentId);
-  const source = await dependencies.readUpload(intent, dependencies.storage);
 
-  const orderPdfs = await splitIntoOrderPdfs(source.bytes, pagesPerOrder);
+  const intents: UploadIntentRecord[] = [];
+  const sourceByteLengths: number[] = [];
   const orders: OrderSnapshot[] = [];
-  for (const bytes of orderPdfs) {
-    const objectKey = `organizations/${actor.organizationId}/conversion-inputs/${dependencies.randomId()}.pdf`;
-    await dependencies.storage.putBytes(objectKey, Buffer.from(bytes), "application/pdf", bytes.length);
-    orders.push({ objectKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.length });
+  // Files are read in the order the caller sent them, and each is split into its
+  // orders in page sequence, so the combined output follows the chosen order.
+  for (const intentId of request.uploadIntentIds) {
+    const intent = await dependencies.loadIntent(actor.organizationId, intentId);
+    const source = await dependencies.readUpload(intent, dependencies.storage);
+    intents.push(intent);
+    sourceByteLengths.push(source.contentLength);
+
+    const orderPdfs = await splitIntoOrderPdfs(source.bytes, pagesPerOrder);
+    for (const bytes of orderPdfs) {
+      const objectKey = `organizations/${actor.organizationId}/conversion-inputs/${dependencies.randomId()}.pdf`;
+      await dependencies.storage.putBytes(objectKey, Buffer.from(bytes), "application/pdf", bytes.length);
+      orders.push({ objectKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.length, originalFileName: source.originalFileName });
+    }
   }
 
   const batchId = dependencies.randomId();
   const commitInput: CommitInput = {
     actor,
     request,
-    intent,
-    originalFileName: source.originalFileName,
-    sourceByteLength: source.contentLength,
+    intents,
+    sourceByteLengths,
     orders,
     batchId,
     now: dependencies.now,

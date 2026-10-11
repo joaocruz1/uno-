@@ -162,7 +162,7 @@ describe("marketplace lote — create", () => {
   it("splits N orders into one conversion each and reserves N quota units", async () => {
     const intentId = await seedUpload(await syntheticMercadoLivreBatch(3));
     const accepted = await createMarketplaceLote({ organizationId: ORG, userId: USER }, {
-      uploadIntentId: intentId, marketplace: "mercado-livre", size: { preset: "100x150" },
+      uploadIntentIds: [intentId], marketplace: "mercado-livre", size: { preset: "100x150" },
     }, deps());
 
     expect(accepted.itemCount).toBe(3);
@@ -179,10 +179,34 @@ describe("marketplace lote — create", () => {
     expect(intent[0]!.consumedAt).not.toBeNull();
   });
 
+  it("combines several files into one lote, in the order sent, consuming all", async () => {
+    const first = await seedUpload(await syntheticMercadoLivreBatch(2));
+    const second = await seedUpload(await syntheticMercadoLivreBatch(3));
+    const accepted = await createMarketplaceLote({ organizationId: ORG, userId: USER }, {
+      uploadIntentIds: [first, second], marketplace: "mercado-livre", size: { preset: "100x150" },
+    }, deps());
+
+    expect(accepted.itemCount).toBe(5);
+    const orderRows = await database.select().from(conversions).where(eq(conversions.batchId, accepted.id));
+    expect(orderRows).toHaveLength(5);
+    expect(orderRows.map((row) => row.batchOrderIndex ?? -1).sort((a, b) => a - b)).toEqual([0, 1, 2, 3, 4]);
+    const reservations = await database.select().from(usageReservations).where(eq(usageReservations.organizationId, ORG));
+    expect(reservations).toHaveLength(5);
+    const intents = await database.select().from(uploadIntents).where(eq(uploadIntents.organizationId, ORG));
+    expect(intents.every((intent) => intent.consumedAt !== null)).toBe(true);
+  });
+
+  it("rejects the same file sent twice in one lote", async () => {
+    const id = await seedUpload(await syntheticMercadoLivreBatch(2));
+    await expect(createMarketplaceLote({ organizationId: ORG, userId: USER }, {
+      uploadIntentIds: [id, id], marketplace: "mercado-livre", size: { preset: "100x150" },
+    }, deps())).rejects.toMatchObject({ code: "invalid_request" });
+  });
+
   it("carries numbering options onto the lote", async () => {
     const intentId = await seedUpload(await syntheticMercadoLivreBatch(2));
     const accepted = await createMarketplaceLote({ organizationId: ORG, userId: USER }, {
-      uploadIntentId: intentId, marketplace: "mercado-livre", size: { preset: "100x150" },
+      uploadIntentIds: [intentId], marketplace: "mercado-livre", size: { preset: "100x150" },
       numbering: { start: 1, showTotal: true, letter: "C" },
     }, deps());
     const batchRows = await database.select().from(batches).where(eq(batches.id, accepted.id));
@@ -191,7 +215,7 @@ describe("marketplace lote — create", () => {
 
   it("refuses a second lote from the same consumed upload", async () => {
     const intentId = await seedUpload(await syntheticMercadoLivreBatch(2));
-    const input = { uploadIntentId: intentId, marketplace: "mercado-livre" as const, size: { preset: "100x150" as const } };
+    const input = { uploadIntentIds: [intentId], marketplace: "mercado-livre" as const, size: { preset: "100x150" as const } };
     await createMarketplaceLote({ organizationId: ORG, userId: USER }, input, deps());
     await expect(createMarketplaceLote({ organizationId: ORG, userId: USER }, input, deps())).rejects.toBeInstanceOf(AppError);
   });
@@ -201,7 +225,7 @@ describe("marketplace lote — create", () => {
     base.removePage(3);
     const intentId = await seedUpload(await base.save());
     await expect(createMarketplaceLote({ organizationId: ORG, userId: USER }, {
-      uploadIntentId: intentId, marketplace: "mercado-livre", size: { preset: "100x150" },
+      uploadIntentIds: [intentId], marketplace: "mercado-livre", size: { preset: "100x150" },
     }, deps())).rejects.toMatchObject({ code: "page_count_mismatch" });
   });
 });
