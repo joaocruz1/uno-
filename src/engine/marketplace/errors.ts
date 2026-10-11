@@ -5,13 +5,15 @@ export type MarketplaceErrorCode =
   | "empty_document"
   | "page_count_mismatch"
   | "too_many_orders"
-  | "all_orders_failed";
+  | "all_orders_failed"
+  | "extraction_unavailable";
 
 const SAFE_MESSAGES: Record<MarketplaceErrorCode, string> = {
   empty_document: "O arquivo não contém páginas.",
   page_count_mismatch: "O número de páginas não corresponde a pedidos completos.",
   too_many_orders: "O arquivo tem mais pedidos do que o limite por lote.",
   all_orders_failed: "Nenhum pedido do arquivo pôde ser convertido.",
+  extraction_unavailable: "A leitura de itens deste marketplace ainda não está disponível.",
 };
 
 export class MarketplaceError extends Error {

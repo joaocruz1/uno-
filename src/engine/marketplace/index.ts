@@ -3,7 +3,46 @@ import type { Marketplace, MarketplaceBatchOptions, MarketplaceBatchResult } fro
 
 export * from "./errors";
 export * from "./types";
+export * from "./order";
 export { concatPdfs, splitIntoOrderPdfs, stampTopLeftNumber } from "./pdf";
+export { buildPickingListPdf, type PickingListOptions, type PickingListPaper } from "./picking-list";
+export { type OrderExtractor, extractMercadoLivreOrders, orderExtractorFor } from "./extraction";
+export {
+  createZplRenderer,
+  DEFAULT_ZPL_LIMITS,
+  preprocessZpl,
+  ZplError,
+  type ZplBlock,
+  type ZplDocument,
+  type ZplErrorCode,
+  type ZplLimits,
+  type ZplRenderer,
+  type ZplRenderTarget,
+} from "./zpl";
+export {
+  assertSpreadsheetSafe,
+  createShopeeWorkbookReader,
+  normalizeHeader,
+  parseShopeePacking,
+  SHOPEE_MAX_BYTES,
+  ShopeeError,
+  type ShopeeErrorCode,
+  type ShopeeWorkbookReader,
+} from "./shopee-excel";
+export {
+  combineInterleaved,
+  convertTikTokBatch,
+  createTikTokExtractor,
+  normalizeTrackingKey,
+  planInterleave,
+  TikTokError,
+  type InterleaveEntry,
+  type InterleavePlan,
+  type InvoiceUnit,
+  type LabelUnit,
+  type TikTokErrorCode,
+  type TikTokExtractor,
+} from "./tiktok";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 
 /**
