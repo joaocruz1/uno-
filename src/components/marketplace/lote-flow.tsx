@@ -12,6 +12,13 @@ import { inspectPdf, putFile, requestUploadIntent, PDF_CONTENT_TYPE } from "@/li
 
 const MEBIBYTE = 1_024 * 1_024;
 const MAX_FILES = 10;
+// Marketplaces shown in the converter: Mercado Livre is live; the others are
+// on the roadmap and appear disabled so the multi-channel direction is visible.
+const MARKETPLACES = [
+  { id: "mercado-livre" as const, name: "Mercado Livre", available: true },
+  { id: "shopee" as const, name: "Shopee", available: false },
+  { id: "tiktok" as const, name: "TikTok Shop", available: false },
+];
 const PHASES: Record<string, string> = {
   queued: "Na fila",
   processing: "Convertendo os pedidos",
@@ -197,7 +204,31 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
   const showComposer = phase === "idle" || phase === "error";
 
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
+    <div>
+      <div className="mb-5 flex flex-wrap gap-2.5" role="group" aria-label="Marketplace">
+        {MARKETPLACES.map((channel) => (
+          <button
+            key={channel.id}
+            type="button"
+            disabled={!channel.available}
+            aria-pressed={channel.available}
+            title={channel.available ? channel.name : `${channel.name} — em breve`}
+            className={`flex items-center gap-2.5 rounded-xl border px-3.5 py-2.5 text-sm font-semibold transition-colors ${
+              channel.available
+                ? "border-uno-red bg-uno-red/[.06] text-[var(--color-ink)]"
+                : "cursor-not-allowed border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-faint)]"
+            }`}
+          >
+            <ChannelMark id={channel.id} size={22} muted={!channel.available} />
+            {channel.name}
+            {channel.available
+              ? <span className="ml-0.5 rounded-full bg-[var(--color-ok-surface)] px-2 py-0.5 text-[10px] font-bold text-[var(--color-ok)]">Disponível</span>
+              : <span className="ml-0.5 rounded-full bg-[var(--color-surface-2)] px-2 py-0.5 text-[10px] font-semibold text-[var(--color-faint)]">Em breve</span>}
+          </button>
+        ))}
+      </div>
+
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="card-soft overflow-hidden rounded-2xl">
         <div className="flex items-center justify-between gap-4 border-b border-[var(--color-line)] px-5 py-4 sm:px-7">
           <div>
@@ -361,6 +392,7 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
           <p>Cada pedido passa pela mesma validação de códigos da UNO. Seus arquivos vão para armazenamento privado e não entram na telemetria.</p>
         </div>
       </aside>
+      </div>
     </div>
   );
 }
