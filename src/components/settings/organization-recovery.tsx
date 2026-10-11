@@ -31,11 +31,11 @@ export function OrganizationRecovery() {
 
   return (
     <form onSubmit={submit} className="space-y-4">
-      <label htmlFor="organization-name" className="block text-sm font-medium text-zinc-200">Nome da organização</label>
+      <label htmlFor="organization-name" className="block text-sm font-medium text-[var(--color-ink)]">Nome da organização</label>
       <Input id="organization-name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} required autoFocus />
       {error ? <p role="alert" className="text-sm text-red-400">{error}</p> : null}
       <Button type="submit" disabled={busy || name.trim().length === 0} className="w-full">{busy ? "Criando…" : "Criar organização"}</Button>
-      <p className="text-center text-xs text-zinc-500">Recebeu um convite? Abra o link enviado por e-mail para entrar na organização da sua equipe.</p>
+      <p className="text-center text-xs text-[var(--color-muted)]">Recebeu um convite? Abra o link enviado por e-mail para entrar na organização da sua equipe.</p>
     </form>
   );
 }

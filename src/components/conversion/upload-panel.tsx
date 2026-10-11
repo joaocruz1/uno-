@@ -271,16 +271,16 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="overflow-hidden rounded-2xl border border-white/[.08] bg-[#050505]">
-        <div className="border-b border-white/[.07] px-5 py-4 sm:px-7">
+      <section className="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)]">
+        <div className="border-b border-[var(--color-line)] px-5 py-4 sm:px-7">
           <p className="font-heading text-lg font-semibold">Arquivo de entrada</p>
-          <p className="mt-1 text-sm text-zinc-500">Um PDF com a etiqueta logística e a DANFE.</p>
+          <p className="mt-1 text-sm text-[var(--color-muted)]">Um PDF com a etiqueta logística e a DANFE.</p>
         </div>
 
         <div className="p-5 sm:p-7">
           {phase === "idle" ? (
             <div
-              className={`grid min-h-72 place-items-center border border-dashed p-8 text-center transition-colors ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-white/15 bg-black hover:border-uno-red/50"}`}
+              className={`grid min-h-72 place-items-center border border-dashed p-8 text-center transition-colors ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-[var(--color-line-strong)] bg-[var(--color-surface-2)] hover:border-uno-red/50"}`}
               onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
@@ -289,23 +289,23 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
               <div className="max-w-md">
                 <span className="mx-auto grid size-14 place-items-center rounded-full border border-uno-red/20 bg-uno-red/10 text-uno-red"><UploadCloud size={26} /></span>
                 <h2 className="mt-5 font-heading text-xl font-bold">Arraste seu PDF aqui</h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-500">Somente PDF · um arquivo · até {maxFileMB} MB no plano {planName}</p>
+                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Somente PDF · um arquivo · até {maxFileMB} MB no plano {planName}</p>
                 <Button className="mt-6" onClick={() => fileInputRef.current?.click()}>Selecionar arquivo</Button>
               </div>
             </div>
           ) : (
-            <div className="min-h-72 border border-white/[.08] bg-black p-5 sm:p-7">
+            <div className="min-h-72 border border-[var(--color-line)] bg-[var(--color-surface-2)] p-5 sm:p-7">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 gap-4">
                   <span className={`grid size-11 shrink-0 place-items-center rounded-full ${phase === "uploaded" ? "bg-emerald-400/10 text-emerald-400" : "bg-uno-red/10 text-uno-red"}`}>
                     {phase === "uploaded" ? <CheckCircle2 size={21} /> : <FileText size={21} />}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-white">{file?.name}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{file ? formatBytes(file.size) : null} · PDF</p>
+                    <p className="truncate text-sm font-semibold text-[var(--color-ink)]">{file?.name}</p>
+                    <p className="mt-1 text-xs text-[var(--color-muted)]">{file ? formatBytes(file.size) : null} · PDF</p>
                   </div>
                 </div>
-                <button type="button" onClick={reset} className="rounded-full p-2 text-zinc-500 hover:bg-white/[.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label={busy ? "Cancelar upload" : "Limpar arquivo"}><X size={18} /></button>
+                <button type="button" onClick={reset} className="rounded-full p-2 text-[var(--color-muted)] hover:bg-[var(--color-hover)] hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label={busy ? "Cancelar upload" : "Limpar arquivo"}><X size={18} /></button>
               </div>
 
               <div className="mt-12" aria-live="polite" aria-atomic="true">
@@ -314,11 +314,11 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
                   <span>{phaseLabel}</span>
                 </div>
                 {phase === "uploading" ? <Progress className="mt-4" value={progress} label="Progresso do envio" /> : null}
-                {phase === "preparing" || phase === "requesting" ? <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[.07]"><div className="h-full w-1/3 animate-pulse rounded-full bg-uno-red motion-reduce:animate-none" /></div> : null}
+                {phase === "preparing" || phase === "requesting" ? <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--color-surface-2)]"><div className="h-full w-1/3 animate-pulse rounded-full bg-uno-red motion-reduce:animate-none" /></div> : null}
                 {phase === "uploaded" && uploaded ? (
-                  <div className="mt-5 grid gap-3 border-t border-white/[.07] pt-5 text-sm sm:grid-cols-2">
-                    <div><p className="text-xs text-zinc-600">Tamanho</p><p className="mt-1 text-zinc-300">{formatBytes(uploaded.fileSize)}</p></div>
-                    <div><p className="text-xs text-zinc-600">Formato escolhido</p><p className="mt-1 text-zinc-300">{preset === "a6" ? "A6" : preset === "custom" ? `${customWidth} × ${customHeight} mm` : `${preset.replace("x", " × ")} mm`}</p></div>
+                  <div className="mt-5 grid gap-3 border-t border-[var(--color-line)] pt-5 text-sm sm:grid-cols-2">
+                    <div><p className="text-xs text-[var(--color-faint)]">Tamanho</p><p className="mt-1 text-[var(--color-ink)]">{formatBytes(uploaded.fileSize)}</p></div>
+                    <div><p className="text-xs text-[var(--color-faint)]">Formato escolhido</p><p className="mt-1 text-[var(--color-ink)]">{preset === "a6" ? "A6" : preset === "custom" ? `${customWidth} × ${customHeight} mm` : `${preset.replace("x", " × ")} mm`}</p></div>
                   </div>
                 ) : null}
                 {phase === "error" && error ? <p className="mt-4 text-sm leading-6 text-red-300" role="alert">{error}</p> : null}
@@ -330,7 +330,7 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
                   <Button variant="secondary" onClick={reset}>Escolher outro arquivo</Button>
                 </div>
               ) : null}
-              {phase === "uploaded" ? <p className="mt-7 text-xs leading-5 text-zinc-600">O arquivo foi recebido com segurança.</p> : null}
+              {phase === "uploaded" ? <p className="mt-7 text-xs leading-5 text-[var(--color-faint)]">O arquivo foi recebido com segurança.</p> : null}
             </div>
           )}
 
@@ -346,9 +346,9 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
         </div>
       </section>
 
-      <aside className="rounded-2xl border border-white/[.08] bg-[#050505] p-5 sm:p-6" aria-label="Configuração da saída">
+      <aside className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-5 sm:p-6" aria-label="Configuração da saída">
         <p className="font-heading text-lg font-semibold">Formato da etiqueta</p>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">Escolha a dimensão que será usada quando a conversão for criada.</p>
+        <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Escolha a dimensão que será usada quando a conversão for criada.</p>
         <fieldset className="mt-6 space-y-2" disabled={busy || phase === "uploaded"}>
           <legend className="sr-only">Formato de saída</legend>
           {[
@@ -357,36 +357,36 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
             ["a6", "A6", "105 × 148 mm"],
             ["custom", "Personalizado", "Defina as medidas"],
           ].map(([value, label, detail]) => (
-            <label key={value} className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 transition-colors ${preset === value ? "border-uno-red/60 bg-uno-red/[.07]" : "border-white/[.08] bg-black hover:border-white/20"}`}>
+            <label key={value} className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border p-3 transition-colors ${preset === value ? "border-uno-red/60 bg-uno-red/[.07]" : "border-[var(--color-line)] bg-[var(--color-surface-2)] hover:border-[var(--color-line-strong)]"}`}>
               <span className="flex items-center gap-3">
                 <input type="radio" name="output-size" value={value} checked={preset === value} onChange={() => setPreset(value as OutputPreset)} className="accent-[#ef233c]" />
-                <span className="text-sm font-medium text-zinc-200">{label}</span>
+                <span className="text-sm font-medium text-[var(--color-ink)]">{label}</span>
               </span>
-              <span className="text-[11px] text-zinc-600">{detail}</span>
+              <span className="text-[11px] text-[var(--color-faint)]">{detail}</span>
             </label>
           ))}
         </fieldset>
 
         {preset === "custom" ? (
           <div className="mt-4 grid grid-cols-2 gap-3">
-            <label className="text-xs text-zinc-500">Largura (mm)<Input className="mt-2" type="number" min={50} max={210} step={1} value={customWidth} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomWidth(event.currentTarget.value)} /></label>
-            <label className="text-xs text-zinc-500">Altura (mm)<Input className="mt-2" type="number" min={50} max={300} step={1} value={customHeight} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomHeight(event.currentTarget.value)} /></label>
-            <p className="col-span-2 text-[11px] leading-5 text-zinc-600">Largura de 50 a 210 mm e altura de 50 a 300 mm.</p>
+            <label className="text-xs text-[var(--color-muted)]">Largura (mm)<Input className="mt-2" type="number" min={50} max={210} step={1} value={customWidth} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomWidth(event.currentTarget.value)} /></label>
+            <label className="text-xs text-[var(--color-muted)]">Altura (mm)<Input className="mt-2" type="number" min={50} max={300} step={1} value={customHeight} disabled={busy || phase === "uploaded"} onChange={(event) => setCustomHeight(event.currentTarget.value)} /></label>
+            <p className="col-span-2 text-[11px] leading-5 text-[var(--color-faint)]">Largura de 50 a 210 mm e altura de 50 a 300 mm.</p>
           </div>
         ) : null}
 
-        <fieldset className="mt-6 border-t border-white/[.07] pt-5" disabled={busy || phase === "uploaded"}>
-          <legend className="font-heading text-sm font-semibold text-zinc-200">Produto no topo da etiqueta <span className="font-normal text-zinc-600">(opcional)</span></legend>
-          <p className="mt-2 text-[11px] leading-5 text-zinc-600">Preencha antes de selecionar o PDF para imprimir quantidade, produto e SKU acima da etiqueta. O arquivo não traz esses dados.</p>
+        <fieldset className="mt-6 border-t border-[var(--color-line)] pt-5" disabled={busy || phase === "uploaded"}>
+          <legend className="font-heading text-sm font-semibold text-[var(--color-ink)]">Produto no topo da etiqueta <span className="font-normal text-[var(--color-faint)]">(opcional)</span></legend>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--color-faint)]">Preencha antes de selecionar o PDF para imprimir quantidade, produto e SKU acima da etiqueta. O arquivo não traz esses dados.</p>
           <div className="mt-3 grid grid-cols-4 gap-3">
-            <label className="col-span-3 text-xs text-zinc-500">Produto<Input className="mt-2" maxLength={140} value={productTitle} onChange={(event) => setProductTitle(event.currentTarget.value)} /></label>
-            <label className="text-xs text-zinc-500">Qtd.<Input className="mt-2" type="number" min={1} max={9999} step={1} value={productQuantity} onChange={(event) => setProductQuantity(event.currentTarget.value)} /></label>
-            <label className="col-span-2 text-xs text-zinc-500">SKU<Input className="mt-2" maxLength={60} value={productSku} onChange={(event) => setProductSku(event.currentTarget.value)} /></label>
-            <label className="col-span-2 text-xs text-zinc-500">Variação<Input className="mt-2" maxLength={60} placeholder="Cor: Verde" value={productVariation} onChange={(event) => setProductVariation(event.currentTarget.value)} /></label>
+            <label className="col-span-3 text-xs text-[var(--color-muted)]">Produto<Input className="mt-2" maxLength={140} value={productTitle} onChange={(event) => setProductTitle(event.currentTarget.value)} /></label>
+            <label className="text-xs text-[var(--color-muted)]">Qtd.<Input className="mt-2" type="number" min={1} max={9999} step={1} value={productQuantity} onChange={(event) => setProductQuantity(event.currentTarget.value)} /></label>
+            <label className="col-span-2 text-xs text-[var(--color-muted)]">SKU<Input className="mt-2" maxLength={60} value={productSku} onChange={(event) => setProductSku(event.currentTarget.value)} /></label>
+            <label className="col-span-2 text-xs text-[var(--color-muted)]">Variação<Input className="mt-2" maxLength={60} placeholder="Cor: Verde" value={productVariation} onChange={(event) => setProductVariation(event.currentTarget.value)} /></label>
           </div>
         </fieldset>
 
-        <div className="mt-7 flex gap-3 border-t border-white/[.07] pt-5 text-xs leading-5 text-zinc-500">
+        <div className="mt-7 flex gap-3 border-t border-[var(--color-line)] pt-5 text-xs leading-5 text-[var(--color-muted)]">
           <ShieldCheck className="mt-0.5 shrink-0 text-uno-red" size={17} />
           <p>O upload vai direto para o armazenamento privado por uma URL temporária. O conteúdo do documento não é enviado à telemetria.</p>
         </div>

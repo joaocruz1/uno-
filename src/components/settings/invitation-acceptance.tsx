@@ -79,25 +79,25 @@ export function InvitationAcceptance() {
 
   if (state.step === "reading") return <LoadingState label="Lendo o convite" />;
   if (state.step === "missing") {
-    return <div><p role="alert" className="text-sm text-red-300">Este link de convite está incompleto.</p><p className="mt-3 text-sm text-zinc-400">Abra novamente o link recebido por e-mail ou peça um novo convite a quem administra a organização.</p><Link href="/dashboard" className="mt-5 inline-block text-sm font-semibold text-white hover:text-uno-red">Ir para o painel</Link></div>;
+    return <div><p role="alert" className="text-sm text-red-300">Este link de convite está incompleto.</p><p className="mt-3 text-sm text-[var(--color-muted)]">Abra novamente o link recebido por e-mail ou peça um novo convite a quem administra a organização.</p><Link href="/dashboard" className="mt-5 inline-block text-sm font-semibold text-[var(--color-ink)] hover:text-uno-red">Ir para o painel</Link></div>;
   }
   if (state.step === "done") {
-    return <div><p role="status" className="text-sm text-emerald-300">Convite aceito.</p><p className="mt-3 text-sm text-zinc-300">Você agora participa de <strong className="text-white">{state.accepted.organizationName}</strong> como {ROLE_LABELS[state.accepted.role]}.</p><Button className="mt-6 w-full" onClick={() => { router.push("/dashboard"); router.refresh(); }}>Abrir a organização</Button></div>;
+    return <div><p role="status" className="text-sm text-emerald-300">Convite aceito.</p><p className="mt-3 text-sm text-[var(--color-ink)]">Você agora participa de <strong className="text-[var(--color-ink)]">{state.accepted.organizationName}</strong> como {ROLE_LABELS[state.accepted.role]}.</p><Button className="mt-6 w-full" onClick={() => { router.push("/dashboard"); router.refresh(); }}>Abrir a organização</Button></div>;
   }
   if (state.step === "login") {
-    return <div><p role="status" className="text-sm text-zinc-300">Entre com a conta do e-mail que recebeu o convite. Ele continua guardado nesta aba.</p><div className="mt-6 grid gap-3"><ButtonLink href={LOGIN_URL}>Entrar para aceitar</ButtonLink><Link href={REGISTER_URL} className="text-center text-sm text-zinc-400 hover:text-white">Ainda não tenho conta</Link></div><p className="mt-4 text-xs text-zinc-500">Ao criar uma conta, confirme seu e-mail e abra o link do convite outra vez.</p></div>;
+    return <div><p role="status" className="text-sm text-[var(--color-ink)]">Entre com a conta do e-mail que recebeu o convite. Ele continua guardado nesta aba.</p><div className="mt-6 grid gap-3"><ButtonLink href={LOGIN_URL}>Entrar para aceitar</ButtonLink><Link href={REGISTER_URL} className="text-center text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)]">Ainda não tenho conta</Link></div><p className="mt-4 text-xs text-[var(--color-muted)]">Ao criar uma conta, confirme seu e-mail e abra o link do convite outra vez.</p></div>;
   }
   if (state.step === "verify") {
-    return <div><p role="alert" className="text-sm text-red-300">Confirme seu e-mail antes de aceitar o convite.</p><Link href="/verify-email" className="mt-5 inline-block text-sm font-semibold text-white hover:text-uno-red">Confirmar e-mail</Link></div>;
+    return <div><p role="alert" className="text-sm text-red-300">Confirme seu e-mail antes de aceitar o convite.</p><Link href="/verify-email" className="mt-5 inline-block text-sm font-semibold text-[var(--color-ink)] hover:text-uno-red">Confirmar e-mail</Link></div>;
   }
   if (state.step === "failed") {
-    return <div><p role="alert" className="text-sm text-red-300">{state.text}</p>{state.retry ? <Button className="mt-6 w-full" onClick={() => void accept()}>Tentar novamente</Button> : <Link href="/dashboard" className="mt-5 inline-block text-sm font-semibold text-white hover:text-uno-red">Ir para o painel</Link>}</div>;
+    return <div><p role="alert" className="text-sm text-red-300">{state.text}</p>{state.retry ? <Button className="mt-6 w-full" onClick={() => void accept()}>Tentar novamente</Button> : <Link href="/dashboard" className="mt-5 inline-block text-sm font-semibold text-[var(--color-ink)] hover:text-uno-red">Ir para o painel</Link>}</div>;
   }
   return (
     <div>
-      <p className="text-sm text-zinc-300">Ao aceitar, sua conta passa a participar da organização que enviou o convite.</p>
+      <p className="text-sm text-[var(--color-ink)]">Ao aceitar, sua conta passa a participar da organização que enviou o convite.</p>
       <Button className="mt-6 w-full" disabled={state.step === "sending"} onClick={() => void accept()}>{state.step === "sending" ? "Aceitando…" : "Aceitar convite"}</Button>
-      <p className="mt-4 text-xs text-zinc-500">O convite vale para o e-mail que o recebeu e só pode ser usado uma vez.</p>
+      <p className="mt-4 text-xs text-[var(--color-muted)]">O convite vale para o e-mail que o recebeu e só pode ser usado uma vez.</p>
     </div>
   );
 }

@@ -8,8 +8,8 @@ import { memberListSchema, ROLE_LABELS, type AssignableRole, type Member, type M
 
 import { errorMessage, formatDate, requestJson } from "./request";
 
-const sectionClass = "rounded-2xl border border-white/10 bg-[#080808] p-6";
-const selectClass = "h-9 rounded-lg border border-white/10 bg-[#0d0d0d] px-2 text-sm text-white outline-none focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-50";
+const sectionClass = "rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6";
+const selectClass = "h-9 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-2 text-sm text-[var(--color-ink)] outline-none focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-50";
 
 type Pending =
   | { kind: "remove"; member: Member }
@@ -95,10 +95,10 @@ export function MembersSection({ organizationId, viewerUserId }: { organizationI
           <h2 id="members-title" className="font-heading text-xl font-semibold">Membros</h2>
           <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
         </div>
-        <p className="mt-2 text-sm text-zinc-400">Há sempre um único proprietário. Administradores gerenciam membros; só o proprietário gerencia administradores.</p>
+        <p className="mt-2 text-sm text-[var(--color-muted)]">Há sempre um único proprietário. Administradores gerenciam membros; só o proprietário gerencia administradores.</p>
         {message ? <p role={message.kind === "error" ? "alert" : "status"} className={`mt-4 text-sm ${message.kind === "error" ? "text-red-300" : "text-emerald-300"}`}>{message.text}</p> : null}
         {loadError ? <p role="alert" className="mt-5 text-sm text-red-300">{loadError}</p> : !members || !viewerRole ? <LoadingState label="Consultando membros" /> : (
-          <div className="mt-5 rounded-xl border border-white/10">
+          <div className="mt-5 rounded-xl border border-[var(--color-line)]">
             <Table>
               <TableHeader><tr><TableHead>Pessoa</TableHead><TableHead>Papel</TableHead><TableHead>Desde</TableHead><TableHead className="text-right">Ações</TableHead></tr></TableHeader>
               <tbody>
@@ -108,7 +108,7 @@ export function MembersSection({ organizationId, viewerUserId }: { organizationI
                   const canChangeRole = manageable && viewerRole === "OWNER";
                   return (
                     <TableRow key={member.userId}>
-                      <TableCell><p className="font-medium text-white">{member.name}{self ? " (você)" : ""}</p><p className="mt-1 text-xs text-zinc-500">{member.email}</p></TableCell>
+                      <TableCell><p className="font-medium text-[var(--color-ink)]">{member.name}{self ? " (você)" : ""}</p><p className="mt-1 text-xs text-[var(--color-muted)]">{member.email}</p></TableCell>
                       <TableCell>
                         {canChangeRole ? (
                           <select className={selectClass} aria-label={`Papel de ${member.name}`} value={member.role} disabled={busy} onChange={(event) => setPending({ kind: "role", member, role: event.target.value as AssignableRole })}>
@@ -121,7 +121,7 @@ export function MembersSection({ organizationId, viewerUserId }: { organizationI
                       <TableCell className="text-right">
                         {self && member.role !== "OWNER" ? <Button variant="ghost" size="sm" disabled={busy} onClick={() => setPending({ kind: "leave", member })}>Sair</Button> : null}
                         {manageable ? <Button variant="ghost" size="sm" disabled={busy} aria-label={`Remover ${member.name}`} onClick={() => setPending({ kind: "remove", member })}>Remover</Button> : null}
-                        {!manageable && !(self && member.role !== "OWNER") ? <span className="text-xs text-zinc-600">—</span> : null}
+                        {!manageable && !(self && member.role !== "OWNER") ? <span className="text-xs text-[var(--color-faint)]">—</span> : null}
                       </TableCell>
                     </TableRow>
                   );
@@ -135,10 +135,10 @@ export function MembersSection({ organizationId, viewerUserId }: { organizationI
       {viewerRole === "OWNER" ? (
         <section className={sectionClass} aria-labelledby="transfer-title">
           <h2 id="transfer-title" className="font-heading text-xl font-semibold">Transferir propriedade</h2>
-          <p className="mt-2 max-w-2xl text-sm text-zinc-400">O novo proprietário precisa já ser membro. Você continua na organização como administrador.</p>
+          <p className="mt-2 max-w-2xl text-sm text-[var(--color-muted)]">O novo proprietário precisa já ser membro. Você continua na organização como administrador.</p>
           {others.length ? (
             <div className="mt-5 flex flex-wrap items-end gap-3">
-              <label className="min-w-0 flex-1 text-sm text-zinc-400">Novo proprietário
+              <label className="min-w-0 flex-1 text-sm text-[var(--color-muted)]">Novo proprietário
                 <select className={`${selectClass} mt-2 h-11 w-full`} value={transferTarget} disabled={busy} onChange={(event) => setTransferTarget(event.target.value)}>
                   <option value="">Selecione um membro</option>
                   {others.map((member) => <option key={member.userId} value={member.userId}>{member.name} — {member.email}</option>)}
@@ -146,7 +146,7 @@ export function MembersSection({ organizationId, viewerUserId }: { organizationI
               </label>
               <Button variant="secondary" disabled={busy || !transferTarget} onClick={() => { const member = others.find((item) => item.userId === transferTarget); if (member) setPending({ kind: "transfer", member }); }}>Transferir…</Button>
             </div>
-          ) : <p className="mt-5 text-sm text-zinc-500">Convide alguém antes de transferir a propriedade.</p>}
+          ) : <p className="mt-5 text-sm text-[var(--color-muted)]">Convide alguém antes de transferir a propriedade.</p>}
         </section>
       ) : null}
 
