@@ -225,9 +225,11 @@ function buildBlocks(mode: ListOrder, orders: readonly Order[], ctx: BlockContex
         draw: (page, y) => {
           ctx.drawCheckbox(page, y);
           drawItemLine(page, y, ctx, row.quantity, row.sku, row.variation, row.title);
+          // One full line below the item's baseline (y - bodySize), so the
+          // "Etiquetas:" line never overlaps the SKU above it.
           page.drawText(truncate(ctx.font, labelsLine, ctx.bodySize - 1, ctx.textWidth), {
             x: ctx.textLeft,
-            y: y - ctx.lineHeight,
+            y: y - ctx.bodySize - ctx.lineHeight,
             size: ctx.bodySize - 1,
             font: ctx.font,
             color: MUTED,
