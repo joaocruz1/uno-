@@ -1,10 +1,11 @@
 "use client";
 
-import { CheckCircle2, Download, FileText, LoaderCircle, Package, ShieldCheck, TriangleAlert, UploadCloud, X } from "lucide-react";
+import { CheckCircle2, Download, FileText, LoaderCircle, ShieldCheck, TriangleAlert, UploadCloud, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { z } from "zod";
 
 import { Button, Progress } from "@/components/ui";
+import { ChannelMark } from "@/components/marketplace-logos";
 import { startPollingClock } from "@/components/conversion/use-polling-delay";
 import { acceptedLoteSchema, loteDownloadSchema, loteViewSchema, type LoteView } from "@/lib/marketplace-model";
 import { inspectPdf, putFile, requestUploadIntent, PDF_CONTENT_TYPE } from "@/lib/upload-client";
@@ -163,15 +164,15 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
 
   return (
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
-      <section className="overflow-hidden rounded-2xl border border-white/[.08] bg-[#050505]">
-        <div className="border-b border-white/[.07] px-5 py-4 sm:px-7">
-          <p className="font-heading text-lg font-semibold">Arquivo do marketplace</p>
-          <p className="mt-1 text-sm text-zinc-500">O PDF de etiquetas do Mercado Livre, com vários pedidos.</p>
+      <section className="card-soft overflow-hidden rounded-2xl">
+        <div className="border-b border-[var(--color-line)] px-5 py-4 sm:px-7">
+          <p className="font-heading text-lg font-semibold text-[var(--color-ink)]">Arquivo do marketplace</p>
+          <p className="mt-1 text-sm text-[var(--color-muted)]">O PDF de etiquetas do Mercado Livre, com vários pedidos.</p>
         </div>
         <div className="p-5 sm:p-7">
           {phase === "idle" ? (
             <div
-              className={`grid min-h-72 place-items-center border border-dashed p-8 text-center transition-colors ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-white/15 bg-black hover:border-uno-red/50"}`}
+              className={`grid min-h-72 place-items-center rounded-xl border border-dashed p-8 text-center transition-colors ${dragging ? "border-uno-red bg-uno-red/[.06]" : "border-[var(--color-line-strong)] bg-[var(--color-surface-2)] hover:border-uno-red/60"}`}
               onDragEnter={(event) => { event.preventDefault(); if (!busy) setDragging(true); }}
               onDragOver={(event) => event.preventDefault()}
               onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false); }}
@@ -179,71 +180,71 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
             >
               <div className="max-w-md">
                 <span className="mx-auto grid size-14 place-items-center rounded-full border border-uno-red/20 bg-uno-red/10 text-uno-red"><UploadCloud size={26} /></span>
-                <h2 className="mt-5 font-heading text-xl font-bold">Arraste o PDF do lote aqui</h2>
-                <p className="mt-2 text-sm leading-6 text-zinc-500">PDF do Mercado Livre · um arquivo · até {maxFileMB} MB no plano {planName}</p>
+                <h2 className="mt-5 font-heading text-xl font-bold text-[var(--color-ink)]">Arraste o PDF do lote aqui</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">PDF do Mercado Livre, um arquivo, até {maxFileMB} MB no plano {planName}</p>
                 <Button className="mt-6" onClick={() => inputRef.current?.click()}>Selecionar arquivo</Button>
               </div>
             </div>
           ) : (
-            <div className="min-h-72 border border-white/[.08] bg-black p-5 sm:p-7" aria-live="polite">
+            <div className="min-h-72 rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] p-5 sm:p-7" aria-live="polite">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex min-w-0 gap-4">
-                  <span className={`grid size-11 shrink-0 place-items-center rounded-full ${done ? "bg-emerald-400/10 text-emerald-400" : failed ? "bg-red-400/10 text-red-300" : "bg-uno-red/10 text-uno-red"}`}>
+                  <span className={`grid size-11 shrink-0 place-items-center rounded-full ${done ? "bg-[var(--color-ok-surface)] text-[var(--color-ok)]" : failed ? "bg-uno-red/10 text-uno-red" : "bg-uno-red/10 text-uno-red"}`}>
                     {done ? <CheckCircle2 size={21} /> : failed ? <TriangleAlert size={21} /> : <FileText size={21} />}
                   </span>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-semibold text-white">{fileName}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{lote ? `${lote.itemCount} pedido${lote.itemCount === 1 ? "" : "s"}` : "PDF"}</p>
+                    <p className="truncate text-sm font-semibold text-[var(--color-ink)]">{fileName}</p>
+                    <p className="mt-1 text-xs text-[var(--color-muted)]">{lote ? `${lote.itemCount} pedido${lote.itemCount === 1 ? "" : "s"}` : "PDF"}</p>
                   </div>
                 </div>
                 {!busy && (done || failed || phase === "error") ? (
-                  <button type="button" onClick={reset} className="rounded-full p-2 text-zinc-500 hover:bg-white/[.06] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label="Novo lote"><X size={18} /></button>
+                  <button type="button" onClick={reset} className="rounded-full p-2 text-[var(--color-faint)] transition-colors hover:bg-[var(--hover-ink)] hover:text-[var(--color-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red" aria-label="Novo lote"><X size={18} /></button>
                 ) : null}
               </div>
 
               <div className="mt-10">
                 {busy ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm font-medium"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>{phase === "uploading" ? `Enviando arquivo · ${progress}%` : phase === "requesting" ? "Preparando upload privado" : "Verificando o PDF"}</span></div>
-                    {phase === "uploading" ? <Progress className="mt-4" value={progress} label="Progresso do envio" /> : <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-white/[.07]"><div className="h-full w-1/3 animate-pulse rounded-full bg-uno-red motion-reduce:animate-none" /></div>}
+                    <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-ink)]"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>{phase === "uploading" ? `Enviando arquivo · ${progress}%` : phase === "requesting" ? "Preparando upload privado" : "Verificando o PDF"}</span></div>
+                    {phase === "uploading" ? <Progress className="mt-4" value={progress} label="Progresso do envio" /> : <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-[var(--color-line)]"><div className="h-full w-1/3 animate-pulse rounded-full bg-uno-red motion-reduce:animate-none" /></div>}
                   </>
                 ) : null}
 
                 {working ? (
                   <>
-                    <div className="flex items-center gap-2 text-sm font-medium"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>{PHASES[lote?.phase ?? "processing"] ?? "Processando o lote"}</span></div>
+                    <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-ink)]"><LoaderCircle className="animate-spin text-uno-red motion-reduce:animate-none" size={16} /><span>{PHASES[lote?.phase ?? "processing"] ?? "Processando o lote"}</span></div>
                     <Progress className="mt-4" value={pct} label="Progresso do lote" />
-                    {lote ? <p className="mt-3 text-xs text-zinc-500">{processed} de {lote.itemCount} pedidos · a cota é confirmada por pedido que passa na validação.</p> : null}
+                    {lote ? <p className="mt-3 text-xs text-[var(--color-muted)]">{processed} de {lote.itemCount} pedidos · a cota é confirmada por pedido que passa na validação.</p> : null}
                   </>
                 ) : null}
 
                 {done && lote ? (
-                  <div className="rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] p-5">
-                    <div className="flex items-center gap-3"><CheckCircle2 className="shrink-0 text-emerald-400" size={20} /><h3 className="font-heading font-semibold">PDF do lote pronto</h3></div>
-                    <p className="mt-2 text-sm text-zinc-400">{lote.completedCount} etiqueta{lote.completedCount === 1 ? "" : "s"} 10×15{lote.failedCount > 0 ? ` · ${lote.failedCount} pedido${lote.failedCount === 1 ? "" : "s"} não passou na validação e ficou de fora` : ""}.</p>
+                  <div className="rounded-xl border border-[var(--color-ok)]/30 bg-[var(--color-ok-surface)] p-5">
+                    <div className="flex items-center gap-3"><CheckCircle2 className="shrink-0 text-[var(--color-ok)]" size={20} /><h3 className="font-heading font-semibold text-[var(--color-ink)]">PDF do lote pronto</h3></div>
+                    <p className="mt-2 text-sm text-[var(--color-muted)]">{lote.completedCount} etiqueta{lote.completedCount === 1 ? "" : "s"} 10×15{lote.failedCount > 0 ? ` · ${lote.failedCount} pedido${lote.failedCount === 1 ? "" : "s"} não passou na validação e ficou de fora` : ""}.</p>
                     <div className="mt-5 flex flex-wrap gap-3">
                       <Button onClick={() => void download()} disabled={!lote.downloadAvailable || downloading}>{downloading ? <LoaderCircle size={17} className="animate-spin motion-reduce:animate-none" /> : <Download size={17} />}Baixar PDF</Button>
                       <Button variant="secondary" onClick={reset}>Novo lote</Button>
                     </div>
-                    <p className="mt-5 text-xs leading-5 text-zinc-500">Imprima em tamanho real (100%), sem ajustar à página. Confira a leitura dos códigos na sua térmica.</p>
+                    <p className="mt-5 text-xs leading-5 text-[var(--color-muted)]">Imprima em tamanho real (100%), sem ajustar à página. Confira a leitura dos códigos na sua térmica.</p>
                   </div>
                 ) : null}
 
                 {failed ? (
-                  <div className="rounded-xl border border-red-400/20 bg-red-400/[.04] p-5">
-                    <div className="flex items-center gap-3"><TriangleAlert className="shrink-0 text-red-300" size={20} /><h3 className="font-heading font-semibold">Não foi possível montar o lote</h3></div>
-                    <p role="alert" className="mt-2 text-sm text-red-200">{lote?.error?.message ?? "Nenhum pedido do arquivo pôde ser convertido."}</p>
-                    <p className="mt-2 text-xs text-zinc-500">Os pedidos que falharam não consumiram cota.</p>
+                  <div className="rounded-xl border border-uno-red/25 bg-uno-red/[.05] p-5">
+                    <div className="flex items-center gap-3"><TriangleAlert className="shrink-0 text-uno-red" size={20} /><h3 className="font-heading font-semibold text-[var(--color-ink)]">Não foi possível montar o lote</h3></div>
+                    <p role="alert" className="mt-2 text-sm text-[var(--color-ink)]">{lote?.error?.message ?? "Nenhum pedido do arquivo pôde ser convertido."}</p>
+                    <p className="mt-2 text-xs text-[var(--color-muted)]">Os pedidos que falharam não consumiram cota.</p>
                   </div>
                 ) : null}
 
                 {phase === "error" && error ? (
                   <>
-                    <p role="alert" className="text-sm leading-6 text-red-300">{error}</p>
+                    <p role="alert" className="text-sm font-medium leading-6 text-uno-red">{error}</p>
                     <Button className="mt-5" variant="secondary" onClick={reset}>Escolher outro arquivo</Button>
                   </>
                 ) : null}
-                {error && phase !== "error" ? <p role="alert" className="mt-3 text-xs text-amber-200">{error}</p> : null}
+                {error && phase !== "error" ? <p role="alert" className="mt-3 text-xs text-[var(--color-warn)]">{error}</p> : null}
               </div>
             </div>
           )}
@@ -251,41 +252,44 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
         </div>
       </section>
 
-      <aside className="rounded-2xl border border-white/[.08] bg-[#050505] p-5 sm:p-6" aria-label="Opções do lote">
-        <p className="font-heading text-lg font-semibold">Opções</p>
-        <p className="mt-2 text-sm leading-6 text-zinc-500">Escolha antes de enviar: para mudar depois, converta de novo.</p>
+      <aside className="card-soft h-fit rounded-2xl p-5 sm:p-6" aria-label="Opções do lote">
+        <p className="font-heading text-lg font-semibold text-[var(--color-ink)]">Opções</p>
+        <p className="mt-2 text-sm leading-6 text-[var(--color-muted)]">Escolha antes de enviar: para mudar depois, converta de novo.</p>
 
-        <div className="mt-5 rounded-xl border border-uno-red/40 bg-uno-red/[.06] px-4 py-3">
-          <p className="flex items-center gap-2 text-sm font-medium text-zinc-200"><Package size={16} className="text-uno-red" />Mercado Livre</p>
-          <p className="mt-1 text-[11px] text-zinc-500">Saída 10×15, uma etiqueta por pedido, num PDF só.</p>
+        <div className="mt-5 flex items-center gap-3 rounded-xl border border-uno-red/30 bg-uno-red/[.05] px-4 py-3">
+          <ChannelMark id="mercado-livre" size={34} />
+          <div>
+            <p className="text-sm font-semibold text-[var(--color-ink)]">Mercado Livre</p>
+            <p className="mt-0.5 text-[11px] text-[var(--color-muted)]">Saída 10×15, uma etiqueta por pedido, num PDF só.</p>
+          </div>
         </div>
 
-        <fieldset className="mt-6 border-t border-white/[.07] pt-5" disabled={busy || phase === "working"}>
+        <fieldset className="mt-6 border-t border-[var(--color-line)] pt-5" disabled={busy || phase === "working"}>
           <label className="flex cursor-pointer items-center gap-3">
-            <input type="checkbox" checked={numerar} onChange={(event) => setNumerar(event.currentTarget.checked)} className="accent-[#ef233c]" />
-            <span className="text-sm font-medium text-zinc-200">Numerar pedidos</span>
+            <input type="checkbox" checked={numerar} onChange={(event) => setNumerar(event.currentTarget.checked)} className="size-4 accent-[#ef233c]" />
+            <span className="text-sm font-medium text-[var(--color-ink)]">Numerar pedidos</span>
           </label>
-          <p className="mt-2 text-[11px] leading-5 text-zinc-600">Um número no topo de cada etiqueta, para conferir a pilha (ex.: 12/28).</p>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--color-faint)]">Um número no topo de cada etiqueta, para conferir a pilha (ex.: 12/28).</p>
 
           {numerar ? (
             <div className="mt-4 grid grid-cols-2 gap-3">
-              <label className="text-xs text-zinc-500">Letra do lote
-                <input className="mt-2 w-full rounded-lg border border-white/[.1] bg-black px-3 py-2 text-sm text-white outline-none focus:border-uno-red" placeholder="—" maxLength={3} value={letra}
+              <label className="text-xs text-[var(--color-muted)]">Letra do lote
+                <input className="mt-2 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-ink)] outline-none focus:border-uno-red" placeholder="—" maxLength={3} value={letra}
                   onChange={(event) => setLetra(event.currentTarget.value.toUpperCase().replace(/[^A-Z]/g, "").slice(0, 3))} />
               </label>
-              <label className="text-xs text-zinc-500">Começar em
-                <input className="mt-2 w-full rounded-lg border border-white/[.1] bg-black px-3 py-2 text-sm text-white outline-none focus:border-uno-red" type="number" min={1} max={99999} value={inicio}
+              <label className="text-xs text-[var(--color-muted)]">Começar em
+                <input className="mt-2 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-ink)] outline-none focus:border-uno-red" type="number" min={1} max={99999} value={inicio}
                   onChange={(event) => setInicio(event.currentTarget.value)} />
               </label>
               <label className="col-span-2 flex cursor-pointer items-center gap-3 pt-1">
-                <input type="checkbox" checked={mostrarTotal} onChange={(event) => setMostrarTotal(event.currentTarget.checked)} className="accent-[#ef233c]" />
-                <span className="text-xs text-zinc-400">Mostrar o total ao lado (12/28)</span>
+                <input type="checkbox" checked={mostrarTotal} onChange={(event) => setMostrarTotal(event.currentTarget.checked)} className="size-4 accent-[#ef233c]" />
+                <span className="text-xs text-[var(--color-muted)]">Mostrar o total ao lado (12/28)</span>
               </label>
             </div>
           ) : null}
         </fieldset>
 
-        <div className="mt-7 flex gap-3 border-t border-white/[.07] pt-5 text-xs leading-5 text-zinc-500">
+        <div className="mt-7 flex gap-3 border-t border-[var(--color-line)] pt-5 text-xs leading-5 text-[var(--color-muted)]">
           <ShieldCheck className="mt-0.5 shrink-0 text-uno-red" size={17} />
           <p>Cada pedido passa pela mesma validação de códigos da UNO. Seus arquivos vão para armazenamento privado e não entram na telemetria.</p>
         </div>

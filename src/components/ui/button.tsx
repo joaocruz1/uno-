@@ -5,9 +5,9 @@ import { cva } from "class-variance-authority";
 import { Slot } from "@radix-ui/react-slot";
 
 const variants = {
-  primary: "bg-uno-red text-white shadow-[0_0_28px_rgba(239,35,60,.24)] hover:bg-[#ff334b]",
-  secondary: "border border-white/15 bg-white/[.04] text-white hover:bg-white/[.08]",
-  ghost: "text-zinc-300 hover:bg-white/[.06] hover:text-white",
+  primary: "bg-uno-red text-white shadow-[0_8px_22px_-10px_rgba(239,35,60,.8)] hover:bg-[#ff334b]",
+  secondary: "border border-[var(--btn-neutral-border)] bg-[var(--btn-neutral-bg)] text-[var(--btn-neutral-text)] hover:bg-[var(--btn-neutral-hover)]",
+  ghost: "text-[var(--btn-ghost-text)] hover:bg-[var(--btn-neutral-hover)] hover:text-[var(--btn-neutral-text)]",
 } as const;
 
 type SharedProps = {
@@ -22,7 +22,7 @@ const sizes = {
   md: "h-11 px-5 text-sm",
   lg: "h-13 px-7 text-sm",
 } as const;
-const buttonVariants = cva("inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red focus-visible:ring-offset-2 focus-visible:ring-offset-black disabled:pointer-events-none disabled:opacity-50", {
+const buttonVariants = cva("inline-flex items-center justify-center gap-2 rounded-full font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--focus-offset)] disabled:pointer-events-none disabled:opacity-50", {
   variants: { variant: variants, size: sizes }, defaultVariants: { variant: "primary", size: "md" },
 });
 

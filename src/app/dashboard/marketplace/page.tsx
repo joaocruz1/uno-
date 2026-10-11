@@ -17,9 +17,8 @@ export default async function MarketplaceLotePage() {
   return (
     <div className="mx-auto max-w-6xl">
       <header className="max-w-2xl">
-        <p className="text-sm font-semibold text-uno-red">Lote de marketplace</p>
-        <h1 className="mt-2 font-heading text-3xl font-bold tracking-tight sm:text-4xl">Vários pedidos. Um PDF.</h1>
-        <p className="mt-3 text-sm leading-6 text-zinc-400 sm:text-base">Envie o PDF de etiquetas do Mercado Livre com o lote inteiro. A UNO separa os pedidos, valida os códigos de cada um e devolve um PDF único, pronto para a térmica.</p>
+        <h1 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--color-ink)] sm:text-4xl">Vários pedidos. Um PDF.</h1>
+        <p className="mt-3 text-sm leading-6 text-[var(--color-muted)] sm:text-base">Envie o PDF de etiquetas do Mercado Livre com o lote inteiro. A UNO separa os pedidos, valida os códigos de cada um e devolve um PDF único, pronto para a térmica.</p>
       </header>
 
       <div className="mt-8">

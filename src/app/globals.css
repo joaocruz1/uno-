@@ -1,10 +1,31 @@
 @import "tailwindcss";
+/* agencia/ is an internal tool; its files must not feed utility classes into the product CSS. */
+@source not "../../agencia";
 
 @theme {
   --color-uno-red: #ef233c;
   --color-uno-black: #000000;
   --font-heading: "Manrope Variable", "Manrope", sans-serif;
   --font-sans: "Inter Variable", "Inter", sans-serif;
+
+  /* App (dashboard) semantic palette — light by default, overridden for dark
+     under html[data-theme="dark"]. Scoped to .app-shell so the dark landing
+     page (which uses zinc/white/black directly) is never touched. */
+  --color-canvas: #f5f5f6;
+  --color-surface: #ffffff;
+  --color-surface-2: #fafafa;
+  --color-ink: #0b0b0c;
+  --color-muted: #6b6b73;
+  --color-faint: #9a9aa2;
+  --color-line: #e8e8ec;
+  --color-line-strong: #d9d9df;
+  --color-sidebar: #0c0c0e;
+  --color-sidebar-ink: #ededf0;
+  --color-sidebar-muted: #8a8a92;
+  --color-ok: #15803d;
+  --color-ok-surface: #ecfdf3;
+  --color-warn: #b45309;
+  --color-warn-surface: #fef6e7;
 }
 
 :root {
@@ -12,7 +33,64 @@
   --uno-red: #ef233c;
   --uno-black: #000000;
   --uno-surface: #080808;
+  /* Neutral button skin — dark by default (landing, navbar). Overridden light
+     inside .app-shell so the shared Button adapts without touching callers. */
+  --btn-neutral-bg: rgba(255, 255, 255, .04);
+  --btn-neutral-border: rgba(255, 255, 255, .15);
+  --btn-neutral-text: #ffffff;
+  --btn-neutral-hover: rgba(255, 255, 255, .08);
+  --btn-ghost-text: #d4d4d8;
+  --focus-offset: #000000;
 }
+
+.app-shell {
+  --btn-neutral-bg: var(--color-surface);
+  --btn-neutral-border: var(--color-line-strong);
+  --btn-neutral-text: var(--color-ink);
+  --btn-neutral-hover: var(--color-surface-2);
+  --btn-ghost-text: var(--color-muted);
+  --focus-offset: var(--color-canvas);
+}
+
+/* Dashboard shell: establishes the light app theme independent of the body,
+   so the marketing landing keeps its dark styling. */
+.app-shell {
+  color-scheme: light;
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-heading);
+  --shadow-card: 0 1px 2px rgba(10, 10, 15, .05), 0 10px 26px -16px rgba(10, 10, 15, .18);
+  --hover-ink: rgba(10, 10, 15, .045);
+}
+
+html[data-theme="dark"] .app-shell {
+  color-scheme: dark;
+  --color-canvas: #09090b;
+  --color-surface: #141417;
+  --color-surface-2: #1a1a1e;
+  --color-ink: #fafafa;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+  --color-line: rgba(255, 255, 255, .09);
+  --color-line-strong: rgba(255, 255, 255, .16);
+  --color-sidebar: #0c0c0e;
+  --color-ok: #4ade80;
+  --color-ok-surface: rgba(74, 222, 128, .1);
+  --color-warn: #fbbf24;
+  --color-warn-surface: rgba(251, 191, 36, .1);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .4), 0 12px 30px -18px rgba(0, 0, 0, .7);
+  --hover-ink: rgba(255, 255, 255, .055);
+}
+
+/* Reusable app-shell primitives (kept tiny; most styling stays in Tailwind). */
+.card-soft { background: var(--color-surface); border: 1px solid var(--color-line); box-shadow: var(--shadow-card); }
+.nav-reveal > summary { list-style: none; cursor: pointer; }
+.nav-reveal > summary::-webkit-details-marker { display: none; }
+.nav-reveal > summary .nav-chevron { transition: transform .22s cubic-bezier(.22, 1, .36, 1); }
+.nav-reveal[open] > summary .nav-chevron { transform: rotate(90deg); }
+.nav-reveal > .nav-reveal-body { overflow: hidden; }
+.nav-reveal[open] > .nav-reveal-body { animation: nav-reveal .24s cubic-bezier(.22, 1, .36, 1); }
+@keyframes nav-reveal { from { opacity: 0; transform: translateY(-4px); } }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; background: #000; }
