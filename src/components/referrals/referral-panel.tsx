@@ -70,7 +70,7 @@ export function ReferralPanel() {
     return <section className="rounded-2xl border border-amber-300/20 p-6"><p role="alert" className="text-sm text-amber-200">{error}</p><Button className="mt-4" variant="secondary" onClick={() => void load()}>Tentar de novo</Button></section>;
   }
   if (!progress) {
-    return <section className="rounded-2xl border border-white/10 bg-[#080808] p-6"><p className="flex items-center gap-2 text-sm text-zinc-400"><LoaderCircle size={16} className="animate-spin text-uno-red motion-reduce:animate-none" />Carregando suas indicações…</p></section>;
+    return <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6"><p className="flex items-center gap-2 text-sm text-[var(--color-muted)]"><LoaderCircle size={16} className="animate-spin text-uno-red motion-reduce:animate-none" />Carregando suas indicações…</p></section>;
   }
 
   const remaining = Math.max(0, progress.goal - progress.active);
@@ -78,25 +78,25 @@ export function ReferralPanel() {
 
   return (
     <div className="space-y-6">
-      <section className="rounded-2xl border border-white/10 bg-[#080808] p-6">
+      <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6">
         <p className="flex items-center gap-2 text-sm font-semibold text-uno-red"><Gift size={16} />Seu link de indicação</p>
         <div className="mt-4 flex flex-wrap gap-2">
-          <input readOnly value={link} className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black px-3 py-2 text-sm text-zinc-300" />
+          <input readOnly value={link} className="min-w-0 flex-1 truncate rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-ink)]" />
           <Button variant="secondary" onClick={() => void copy()}>{copied ? <Check size={16} /> : <Copy size={16} />}{copied ? "Copiado" : "Copiar"}</Button>
-          <a href={whatsapp} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-white/10 px-4 py-2 text-sm text-zinc-200 transition hover:border-white/20 hover:bg-white/[.04]"><Share2 size={16} />WhatsApp</a>
+          <a href={whatsapp} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 rounded-lg border border-[var(--color-line)] px-4 py-2 text-sm text-[var(--color-ink)] transition hover:border-[var(--color-line-strong)] hover:bg-[var(--color-hover)]"><Share2 size={16} />WhatsApp</a>
         </div>
-        <p className="mt-3 text-xs leading-5 text-zinc-500">Conta como indicação ativa quem se cadastra pelo seu link <strong className="text-zinc-300">e</strong> converte pelo menos uma etiqueta. Só criar a conta não basta.</p>
+        <p className="mt-3 text-xs leading-5 text-[var(--color-muted)]">Conta como indicação ativa quem se cadastra pelo seu link <strong className="text-[var(--color-ink)]">e</strong> converte pelo menos uma etiqueta. Só criar a conta não basta.</p>
       </section>
 
-      <section className="rounded-2xl border border-white/10 bg-[#080808] p-6">
+      <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="flex gap-8">
-            <div><p className="font-heading text-3xl font-bold">{progress.signups}</p><p className="mt-1 text-xs text-zinc-500">cadastros pelo link</p></div>
-            <div><p className="font-heading text-3xl font-bold text-uno-red">{progress.active}</p><p className="mt-1 text-xs text-zinc-500">indicações ativas</p></div>
-            <div><p className="font-heading text-3xl font-bold">{progress.goal}</p><p className="mt-1 text-xs text-zinc-500">meta pro bônus</p></div>
+            <div><p className="font-heading text-3xl font-bold">{progress.signups}</p><p className="mt-1 text-xs text-[var(--color-muted)]">cadastros pelo link</p></div>
+            <div><p className="font-heading text-3xl font-bold text-uno-red">{progress.active}</p><p className="mt-1 text-xs text-[var(--color-muted)]">indicações ativas</p></div>
+            <div><p className="font-heading text-3xl font-bold">{progress.goal}</p><p className="mt-1 text-xs text-[var(--color-muted)]">meta pro bônus</p></div>
           </div>
         </div>
-        <div className="mt-5 h-2 overflow-hidden rounded-full bg-white/[.07]">
+        <div className="mt-5 h-2 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
           <div className="h-full rounded-full bg-uno-red transition-all" style={{ width: `${Math.min(100, Math.round((progress.active / progress.goal) * 100))}%` }} />
         </div>
         {progress.rewarded ? (
@@ -104,7 +104,7 @@ export function ReferralPanel() {
         ) : progress.eligible ? (
           <div className="mt-5"><Button onClick={() => void reward()} disabled={claiming}>{claiming ? <LoaderCircle size={17} className="animate-spin motion-reduce:animate-none" /> : <Gift size={17} />}Resgatar 5 dias grátis</Button></div>
         ) : (
-          <p className="mt-5 text-sm text-zinc-400">{remaining === 0 ? "Quase lá." : `Faltam ${remaining} indicaç${remaining === 1 ? "ão" : "ões"} ativa${remaining === 1 ? "" : "s"}`} para ganhar 5 dias de acesso completo, uma única vez.</p>
+          <p className="mt-5 text-sm text-[var(--color-muted)]">{remaining === 0 ? "Quase lá." : `Faltam ${remaining} indicaç${remaining === 1 ? "ão" : "ões"} ativa${remaining === 1 ? "" : "s"}`} para ganhar 5 dias de acesso completo, uma única vez.</p>
         )}
         {error ? <p role="alert" className="mt-4 text-sm text-red-300">{error}</p> : null}
       </section>

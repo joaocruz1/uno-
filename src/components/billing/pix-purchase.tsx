@@ -97,33 +97,33 @@ export function PixPurchase() {
   };
 
   return (
-    <section aria-label="Comprar com PIX" className="rounded-2xl border border-white/10 bg-[#080808] p-6">
+    <section aria-label="Comprar com PIX" className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6">
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div className="max-w-2xl">
           <p className="text-sm font-semibold text-uno-red">Pagamento avulso</p>
           <h2 className="mt-2 font-heading text-xl font-bold">Comprar com PIX</h2>
-          <p className="mt-3 text-sm text-zinc-400">Pague uma vez e use por 30 dias (mensal) ou 1 ano (anual), sem renovação automática. Os dias somam ao que você já tiver.</p>
+          <p className="mt-3 text-sm text-[var(--color-muted)]">Pague uma vez e use por 30 dias (mensal) ou 1 ano (anual), sem renovação automática. Os dias somam ao que você já tiver.</p>
         </div>
-        <p className="font-heading text-3xl font-bold">{formatBrlCents(priceCents(plan, period))}<span className="text-sm font-normal text-zinc-500"> {period === "annual" ? "/ano" : "/30 dias"}</span></p>
+        <p className="font-heading text-3xl font-bold">{formatBrlCents(priceCents(plan, period))}<span className="text-sm font-normal text-[var(--color-muted)]"> {period === "annual" ? "/ano" : "/30 dias"}</span></p>
       </div>
 
       {phase === "approved" ? (
         <div className="mt-6 rounded-xl border border-emerald-400/20 bg-emerald-400/[.04] p-5">
           <p className="flex items-center gap-2 font-heading font-semibold"><Check size={18} className="text-emerald-400" />Pagamento aprovado</p>
-          <p className="mt-2 text-sm text-zinc-400">Seus dias foram creditados. Atualize a página para ver o plano em vigor.</p>
+          <p className="mt-2 text-sm text-[var(--color-muted)]">Seus dias foram creditados. Atualize a página para ver o plano em vigor.</p>
           <Button className="mt-4" variant="secondary" onClick={() => location.reload()}>Atualizar</Button>
         </div>
       ) : phase === "pending" && purchase ? (
         <div className="mt-6 grid gap-6 sm:grid-cols-[180px_minmax(0,1fr)]">
-          <div className="grid place-items-center rounded-xl border border-white/10 bg-white p-3">
+          <div className="grid place-items-center rounded-xl border border-[var(--color-line)] bg-white p-3">
             {purchase.qrCodeBase64 ? <img src={`data:image/png;base64,${purchase.qrCodeBase64}`} alt="QR Code do PIX" width={160} height={160} /> : <QrCode size={120} className="text-black" />}
           </div>
           <div className="min-w-0">
             <p className="flex items-center gap-2 text-sm font-medium"><LoaderCircle size={15} className="animate-spin text-uno-red motion-reduce:animate-none" />Aguardando o pagamento…</p>
-            <p className="mt-3 text-xs text-zinc-500">Abra o app do seu banco, escaneie o QR ou use o copia-e-cola. A liberação é automática.</p>
-            <label className="mt-4 block text-xs text-zinc-500">Copia-e-cola
+            <p className="mt-3 text-xs text-[var(--color-muted)]">Abra o app do seu banco, escaneie o QR ou use o copia-e-cola. A liberação é automática.</p>
+            <label className="mt-4 block text-xs text-[var(--color-muted)]">Copia-e-cola
               <div className="mt-2 flex gap-2">
-                <input readOnly value={purchase.qrCode ?? ""} className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black px-3 py-2 text-xs text-zinc-300" />
+                <input readOnly value={purchase.qrCode ?? ""} className="min-w-0 flex-1 truncate rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 text-xs text-[var(--color-ink)]" />
                 <Button variant="secondary" size="sm" onClick={() => void copy()}>{copied ? <Check size={14} /> : <Copy size={14} />}{copied ? "Copiado" : "Copiar"}</Button>
               </div>
             </label>
@@ -134,10 +134,10 @@ export function PixPurchase() {
         <div className="mt-6 space-y-5">
           <div className="grid gap-4 sm:grid-cols-2">
             <fieldset>
-              <legend className="text-xs text-zinc-500">Plano</legend>
+              <legend className="text-xs text-[var(--color-muted)]">Plano</legend>
               <div className="mt-2 grid grid-cols-3 gap-2">
                 {(["STARTER", "PRO", "BUSINESS"] as const).map((value) => (
-                  <label key={value} className={`cursor-pointer rounded-lg border p-2.5 text-center text-sm transition-colors ${plan === value ? "border-uno-red/60 bg-uno-red/[.07] text-white" : "border-white/[.08] bg-black text-zinc-300 hover:border-white/20"}`}>
+                  <label key={value} className={`cursor-pointer rounded-lg border p-2.5 text-center text-sm transition-colors ${plan === value ? "border-uno-red/60 bg-uno-red/[.07] text-[var(--color-ink)]" : "border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)]"}`}>
                     <input type="radio" name="pix-plan" value={value} checked={plan === value} onChange={() => setPlan(value)} className="sr-only" />
                     {PLANS[value].name}
                   </label>
@@ -145,10 +145,10 @@ export function PixPurchase() {
               </div>
             </fieldset>
             <fieldset>
-              <legend className="text-xs text-zinc-500">Período</legend>
+              <legend className="text-xs text-[var(--color-muted)]">Período</legend>
               <div className="mt-2 grid grid-cols-2 gap-2">
                 {([["monthly", "30 dias"], ["annual", "1 ano"]] as const).map(([value, label]) => (
-                  <label key={value} className={`cursor-pointer rounded-lg border p-2.5 text-center text-sm transition-colors ${period === value ? "border-uno-red/60 bg-uno-red/[.07] text-white" : "border-white/[.08] bg-black text-zinc-300 hover:border-white/20"}`}>
+                  <label key={value} className={`cursor-pointer rounded-lg border p-2.5 text-center text-sm transition-colors ${period === value ? "border-uno-red/60 bg-uno-red/[.07] text-[var(--color-ink)]" : "border-[var(--color-line)] bg-[var(--color-surface-2)] text-[var(--color-ink)] hover:border-[var(--color-line-strong)]"}`}>
                     <input type="radio" name="pix-period" value={value} checked={period === value} onChange={() => setPeriod(value)} className="sr-only" />
                     {label}
                   </label>
@@ -156,13 +156,13 @@ export function PixPurchase() {
               </div>
             </fieldset>
           </div>
-          <label className="block max-w-xs text-xs text-zinc-500">CPF do pagador
+          <label className="block max-w-xs text-xs text-[var(--color-muted)]">CPF do pagador
             <input inputMode="numeric" value={cpf} onChange={(event) => setCpf(maskCpf(event.currentTarget.value))} placeholder="000.000.000-00"
-              className="mt-2 w-full rounded-lg border border-white/10 bg-black px-3 py-2 text-sm text-white outline-none focus:border-uno-red" />
+              className="mt-2 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 py-2 text-sm text-[var(--color-ink)] outline-none focus:border-uno-red" />
           </label>
           {error ? <p role="alert" className="text-sm text-red-300">{error}</p> : null}
           <Button onClick={() => void create()} disabled={phase === "creating"}>{phase === "creating" ? <LoaderCircle size={17} className="animate-spin motion-reduce:animate-none" /> : <QrCode size={17} />}Gerar cobrança PIX</Button>
-          <p className="text-xs leading-5 text-zinc-500">Processado pelo Mercado Pago. O cartão (assinatura recorrente) continua em “Escolher plano”, acima.</p>
+          <p className="text-xs leading-5 text-[var(--color-muted)]">Processado pelo Mercado Pago. O cartão (assinatura recorrente) continua em “Escolher plano”, acima.</p>
         </div>
       )}
     </section>

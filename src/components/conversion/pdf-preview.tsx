@@ -71,8 +71,8 @@ export function PdfCanvasPreview({ url, data, title, expectedPages, className }:
   }, [url, data, title, expectedPages]);
 
   return <div className={className ?? "relative h-[480px] overflow-auto bg-white sm:h-[560px]"}>
-    {phase === "loading" ? <div className="absolute inset-0 grid place-content-center text-center text-zinc-600" role="status"><LoaderCircle className="mx-auto mb-4 animate-spin motion-reduce:animate-none"/><p className="text-sm">Preparando a visualização</p></div> : null}
-    {phase === "unavailable" ? <div className="grid h-full place-content-center p-8 text-center text-zinc-700"><FileText className="mx-auto mb-4"/><p className="text-sm">A visualização está indisponível. Use “Abrir PDF” para conferir o arquivo.</p></div> : null}
+    {phase === "loading" ? <div className="absolute inset-0 grid place-content-center text-center text-[var(--color-faint)]" role="status"><LoaderCircle className="mx-auto mb-4 animate-spin motion-reduce:animate-none"/><p className="text-sm">Preparando a visualização</p></div> : null}
+    {phase === "unavailable" ? <div className="grid h-full place-content-center p-8 text-center text-[var(--color-faint)]"><FileText className="mx-auto mb-4"/><p className="text-sm">A visualização está indisponível. Use “Abrir PDF” para conferir o arquivo.</p></div> : null}
     <div ref={container} className="space-y-3"/>
   </div>;
 }

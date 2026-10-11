@@ -95,6 +95,26 @@ export function ChannelMark({ id, size = 28, muted = false }: { id: ChannelId; s
   );
 }
 
+/** Resolves an engine template key (e.g. "mercado-livre" / "mercado-livre@1.0.0")
+ * to a known channel id, or undefined when it is not a marketplace we map. */
+export function channelIdFromTemplate(template: string): ChannelId | undefined {
+  const id = template.split("@")[0] as ChannelId;
+  return CHANNEL_BY_ID[id] ? id : undefined;
+}
+
+/** Inline mark + name for a marketplace, from a template key or channel id.
+ * Used wherever a conversion/order shows which marketplace it belongs to. */
+export function ChannelTag({ template, size = 16, className }: { template: string; size?: number; className?: string }) {
+  const id = channelIdFromTemplate(template);
+  if (!id) return <span className={className}>{template}</span>;
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${className ?? ""}`}>
+      <ChannelMark id={id} size={size} />
+      {CHANNEL_BY_ID[id].name}
+    </span>
+  );
+}
+
 /** A compact row of channel marks with names and an "Em breve" tag on roadmap
  * ones — used to make the supported/coming channels legible at a glance. */
 export function ChannelStrip({ className }: { className?: string }) {

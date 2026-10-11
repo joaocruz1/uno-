@@ -7,8 +7,8 @@ import { invitationListSchema, ROLE_LABELS, type AssignableRole, type Invitation
 
 import { errorMessage, formatDate, requestJson } from "./request";
 
-const sectionClass = "rounded-2xl border border-white/10 bg-[#080808] p-6";
-const selectClass = "h-11 rounded-lg border border-white/10 bg-[#0d0d0d] px-3 text-sm text-white outline-none focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-50";
+const sectionClass = "rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6";
+const selectClass = "h-11 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface)] px-3 text-sm text-[var(--color-ink)] outline-none focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-50";
 const STATUS_LABELS: Record<Invitation["status"], string> = { PENDING: "Pendente", EXPIRED: "Expirado", ACCEPTED: "Aceito", REVOKED: "Revogado" };
 
 export function InvitationsSection({ organizationId, role }: { organizationId: string; role: MembershipRole }) {
@@ -72,12 +72,12 @@ export function InvitationsSection({ organizationId, role }: { organizationId: s
         <h2 id="invitations-title" className="font-heading text-xl font-semibold">Convites</h2>
         <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
       </div>
-      <p className="mt-2 max-w-2xl text-sm text-zinc-400">O link vai por e-mail, vale para aquele endereço e só pode ser usado uma vez.</p>
+      <p className="mt-2 max-w-2xl text-sm text-[var(--color-muted)]">O link vai por e-mail, vale para aquele endereço e só pode ser usado uma vez.</p>
       <form className="mt-6 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void send(); }}>
-        <label className="min-w-0 flex-1 text-sm text-zinc-400">E-mail
+        <label className="min-w-0 flex-1 text-sm text-[var(--color-muted)]">E-mail
           <Input className="mt-2" type="email" value={email} maxLength={320} required autoComplete="off" placeholder="pessoa@empresa.com" disabled={busy} onChange={(event) => setEmail(event.target.value)} />
         </label>
-        <label className="text-sm text-zinc-400">Papel
+        <label className="text-sm text-[var(--color-muted)]">Papel
           <select className={`${selectClass} mt-2 block`} value={inviteRole} disabled={busy || role !== "OWNER"} onChange={(event) => setInviteRole(event.target.value as AssignableRole)}>
             <option value="MEMBER">{ROLE_LABELS.MEMBER}</option>
             {role === "OWNER" ? <option value="ADMIN">{ROLE_LABELS.ADMIN}</option> : null}
@@ -89,14 +89,14 @@ export function InvitationsSection({ organizationId, role }: { organizationId: s
       {loadError ? <p role="alert" className="mt-5 text-sm text-red-300">{loadError}</p> : !invitations ? <LoadingState label="Consultando convites" /> : !invitations.items.length ? (
         <div className="mt-5"><EmptyState title="Nenhum convite enviado" description="Convide quem opera a expedição com você." /></div>
       ) : (
-        <ul className="mt-5 divide-y divide-white/10 rounded-xl border border-white/10">
+        <ul className="mt-5 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
           {invitations.items.map((item) => {
             const revocable = item.status === "PENDING" && (role === "OWNER" || item.role === "MEMBER");
             return (
               <li key={item.id} className="flex flex-wrap items-center justify-between gap-4 p-4">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{item.email}</p>
-                  <p className="mt-1 text-xs text-zinc-500">{ROLE_LABELS[item.role]} · {STATUS_LABELS[item.status]} · Enviado em {formatDate(item.createdAt)}{item.status === "PENDING" ? ` · Expira em ${formatDate(item.expiresAt)}` : ""}</p>
+                  <p className="mt-1 text-xs text-[var(--color-muted)]">{ROLE_LABELS[item.role]} · {STATUS_LABELS[item.status]} · Enviado em {formatDate(item.createdAt)}{item.status === "PENDING" ? ` · Expira em ${formatDate(item.expiresAt)}` : ""}</p>
                 </div>
                 {revocable ? <Button variant="ghost" size="sm" disabled={busy} aria-label={`Revogar convite de ${item.email}`} onClick={() => setRevoke(item)}>Revogar</Button> : null}
               </li>

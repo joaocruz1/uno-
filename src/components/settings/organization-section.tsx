@@ -8,7 +8,7 @@ import { organizationListSchema, ROLE_LABELS, type MembershipRole, type Organiza
 
 import { errorMessage, requestJson } from "./request";
 
-const sectionClass = "rounded-2xl border border-white/10 bg-[#080808] p-6";
+const sectionClass = "rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6";
 
 export function OrganizationSection({ organizationId, organizationName, role }: { organizationId: string; organizationName: string; role: MembershipRole }) {
   const router = useRouter();
@@ -75,9 +75,9 @@ export function OrganizationSection({ organizationId, organizationName, role }: 
     <>
       <section className={sectionClass} aria-labelledby="organization-name-title">
         <h2 id="organization-name-title" className="font-heading text-xl font-semibold">Organização</h2>
-        <p className="mt-2 text-sm text-zinc-400">Seu papel aqui: {ROLE_LABELS[role]}.{canRename ? "" : " Apenas o proprietário ou um administrador altera o nome."}</p>
+        <p className="mt-2 text-sm text-[var(--color-muted)]">Seu papel aqui: {ROLE_LABELS[role]}.{canRename ? "" : " Apenas o proprietário ou um administrador altera o nome."}</p>
         <form className="mt-6 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void rename(); }}>
-          <label className="min-w-0 flex-1 text-sm text-zinc-400">Nome da organização
+          <label className="min-w-0 flex-1 text-sm text-[var(--color-muted)]">Nome da organização
             <Input className="mt-2" value={name} minLength={2} maxLength={80} required disabled={busy || !canRename} onChange={(event) => setName(event.target.value)} />
           </label>
           {canRename ? <Button type="submit" disabled={busy || name.trim().length < 2 || name.trim() === organizationName}>{busy ? "Aguarde…" : "Salvar nome"}</Button> : null}
@@ -90,16 +90,16 @@ export function OrganizationSection({ organizationId, organizationName, role }: 
           <h2 id="organization-switch-title" className="font-heading text-xl font-semibold">Suas organizações</h2>
           <Button variant="ghost" size="sm" disabled={busy} onClick={() => setRefresh((value) => value + 1)}>Atualizar</Button>
         </div>
-        <p className="mt-2 text-sm text-zinc-400">Histórico, cota, chaves e assinatura pertencem à organização selecionada.</p>
+        <p className="mt-2 text-sm text-[var(--color-muted)]">Histórico, cota, chaves e assinatura pertencem à organização selecionada.</p>
         {loadError ? <p role="alert" className="mt-5 text-sm text-red-300">{loadError}</p> : !organizations ? <LoadingState label="Consultando organizações" /> : (
-          <ul className="mt-5 divide-y divide-white/10 rounded-xl border border-white/10">
+          <ul className="mt-5 divide-y divide-[var(--color-line)] rounded-xl border border-[var(--color-line)]">
             {organizations.items.map((item) => {
               const current = item.id === organizationId;
               return (
                 <li key={item.id} className="flex flex-wrap items-center justify-between gap-4 p-4">
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{item.name}</p>
-                    <p className="mt-1 text-xs text-zinc-500">{ROLE_LABELS[item.role]} · Plano {item.planId.charAt(0) + item.planId.slice(1).toLowerCase()}</p>
+                    <p className="mt-1 text-xs text-[var(--color-muted)]">{ROLE_LABELS[item.role]} · Plano {item.planId.charAt(0) + item.planId.slice(1).toLowerCase()}</p>
                   </div>
                   {current ? <span className="rounded-full border border-uno-red/30 bg-uno-red/10 px-3 py-1 text-xs font-semibold text-[#ff6b7e]">Selecionada</span>
                     : <Button variant="secondary" size="sm" disabled={busy} aria-label={`Usar a organização ${item.name}`} onClick={() => void select(item.id)}>Usar esta</Button>}
@@ -109,12 +109,12 @@ export function OrganizationSection({ organizationId, organizationName, role }: 
           </ul>
         )}
         <form className="mt-6 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void create(); }}>
-          <label className="min-w-0 flex-1 text-sm text-zinc-400">Nova organização
+          <label className="min-w-0 flex-1 text-sm text-[var(--color-muted)]">Nova organização
             <Input className="mt-2" value={newName} minLength={2} maxLength={80} placeholder="Filial, marca ou operação" disabled={busy} onChange={(event) => setNewName(event.target.value)} />
           </label>
           <Button type="submit" variant="secondary" disabled={busy || newName.trim().length < 2}>Criar organização</Button>
         </form>
-        <p className="mt-3 text-xs text-zinc-500">A nova organização começa no plano Free, com você como proprietário.</p>
+        <p className="mt-3 text-xs text-[var(--color-muted)]">A nova organização começa no plano Free, com você como proprietário.</p>
       </section>
     </>
   );

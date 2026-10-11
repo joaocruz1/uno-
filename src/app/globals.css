@@ -295,3 +295,27 @@ button, a, input { -webkit-tap-highlight-color: transparent; }
   html { scroll-behavior: auto; }
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* Shared ui/* component tokens — dark by default (for the dark public areas
+   /api and /admin that reuse these components), remapped to the light app
+   palette inside the dashboard and landing shells. One source, both themes. */
+:root {
+  --c-surface: #111114;
+  --c-surface-2: #0a0a0b;
+  --c-ink: #fafafa;
+  --c-muted: #a1a1aa;
+  --c-faint: #71717a;
+  --c-line: rgba(255, 255, 255, .1);
+  --c-line-strong: rgba(255, 255, 255, .18);
+  --c-hover: rgba(255, 255, 255, .06);
+}
+.app-shell, .site-shell {
+  --c-surface: var(--color-surface);
+  --c-surface-2: var(--color-surface-2);
+  --c-ink: var(--color-ink);
+  --c-muted: var(--color-muted);
+  --c-faint: var(--color-faint);
+  --c-line: var(--color-line);
+  --c-line-strong: var(--color-line-strong);
+  --c-hover: var(--hover-ink);
+}

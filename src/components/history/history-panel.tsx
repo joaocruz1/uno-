@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Search, RefreshCw } from "lucide-react";
 import { Button, EmptyState, Input, Table, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui";
+import { ChannelTag } from "@/components/marketplace-logos";
 import { historyListSchema } from "@/lib/history-model";
 import { z } from "zod";
 
 type HistoryList = z.infer<typeof historyListSchema>;
 const labels: Record<string, string> = { queued: "Na fila", processing: "Processando", completed: "Concluída", failed: "Falhou" };
-const selectClass = "h-11 rounded-lg border border-white/10 bg-[#101010] px-3 text-sm text-zinc-300";
+const selectClass = "h-11 rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 text-sm text-[var(--color-ink)]";
 
 export function HistoryPanel() {
   const [query, setQuery] = useState("");
@@ -62,7 +63,7 @@ export function HistoryPanel() {
       <Button variant="secondary" aria-label="Atualizar histórico" onClick={() => setRefresh(value => value + 1)} disabled={loading}><RefreshCw size={16}/></Button>
     </form>
     {error ? <p role="alert" className="rounded-xl border border-red-400/20 p-5 text-sm text-red-300">{error}</p> : null}
-    {loading ? <p role="status" className="py-8 text-sm text-zinc-400">Consultando suas conversões…</p> : !error && data?.items.length ? <div className="overflow-hidden rounded-xl border border-white/10"><Table><TableHeader><TableRow><TableHead>Arquivo</TableHead><TableHead>Estado</TableHead><TableHead>Formato</TableHead><TableHead>Criada em</TableHead><TableHead><span className="sr-only">Ações</span></TableHead></TableRow></TableHeader><tbody>{data.items.map(item => <TableRow key={item.id}><TableCell><p className="max-w-56 truncate font-medium text-white">{item.originalFileName ?? "Arquivo PDF"}</p><p className="mt-1 text-xs text-zinc-500">{item.template}</p></TableCell><TableCell><span className={item.status === "completed" ? "text-emerald-300" : item.status === "failed" ? "text-red-300" : "text-zinc-300"}>{labels[item.status]}{item.status === "processing" ? ` · ${item.progress}%` : ""}</span></TableCell><TableCell>{item.size.widthMm} × {item.size.heightMm} mm</TableCell><TableCell>{new Date(item.createdAt).toLocaleString("pt-BR")}</TableCell><TableCell><Link className="font-medium text-uno-red underline underline-offset-4" href={`/dashboard/history/${item.id}`}>Ver detalhes</Link></TableCell></TableRow>)}</tbody></Table></div> : !error ? <EmptyState title="Nenhuma conversão encontrada" description="Ajuste os filtros ou envie seu primeiro PDF."/> : null}
+    {loading ? <p role="status" className="py-8 text-sm text-[var(--color-muted)]">Consultando suas conversões…</p> : !error && data?.items.length ? <div className="overflow-hidden rounded-xl border border-[var(--color-line)]"><Table><TableHeader><TableRow><TableHead>Arquivo</TableHead><TableHead>Estado</TableHead><TableHead>Formato</TableHead><TableHead>Criada em</TableHead><TableHead><span className="sr-only">Ações</span></TableHead></TableRow></TableHeader><tbody>{data.items.map(item => <TableRow key={item.id}><TableCell><p className="max-w-56 truncate font-medium text-[var(--color-ink)]">{item.originalFileName ?? "Arquivo PDF"}</p><ChannelTag template={item.template} className="mt-1 text-xs text-[var(--color-muted)]" /></TableCell><TableCell><span className={item.status === "completed" ? "text-emerald-300" : item.status === "failed" ? "text-red-300" : "text-[var(--color-ink)]"}>{labels[item.status]}{item.status === "processing" ? ` · ${item.progress}%` : ""}</span></TableCell><TableCell>{item.size.widthMm} × {item.size.heightMm} mm</TableCell><TableCell>{new Date(item.createdAt).toLocaleString("pt-BR")}</TableCell><TableCell><Link className="font-medium text-uno-red underline underline-offset-4" href={`/dashboard/history/${item.id}`}>Ver detalhes</Link></TableCell></TableRow>)}</tbody></Table></div> : !error ? <EmptyState title="Nenhuma conversão encontrada" description="Ajuste os filtros ou envie seu primeiro PDF."/> : null}
     {!loading && data ? <div className="flex justify-between gap-4"><Button variant="ghost" disabled={!cursor} onClick={() => setCursor(undefined)}>Voltar ao início</Button><Button variant="secondary" disabled={!data.nextCursor} onClick={() => setCursor(data.nextCursor ?? undefined)}>Próxima página</Button></div> : null}
   </div>;
 }
