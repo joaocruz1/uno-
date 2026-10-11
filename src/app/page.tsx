@@ -1,136 +1,164 @@
 import Link from "next/link";
-import { ArrowRight, Boxes, Braces, FileCheck2, Files, Fingerprint, History, Layers3, LockKeyhole, Package, ScanLine, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowRight, BadgeCheck, Braces, Lock, Package, Printer, ScanLine, UploadCloud } from "lucide-react";
+
 import { Footer, Navbar } from "@/components";
-import { ApiTerminal, BeforeAfter, MergeDemo, PricingGrid, Reveal, TemplateMarquee, TrialDrop } from "@/components/marketing";
-import { Badge, ButtonLink, Card } from "@/components/ui";
-import { formatBrlCents, getApiAddon } from "@/lib/plans";
+import { ButtonLink } from "@/components/ui";
+import { ChannelMark, ChannelStrip } from "@/components/marketplace-logos";
+import { formatBrlCents, getApiAddon, getPlanCatalog } from "@/lib/plans";
 
 const steps = [
-  { number: "01", title: "Envie", description: "Faça upload do PDF original com a etiqueta e a DANFE." },
-  { number: "02", title: "Processamos", description: "A engine identifica o template e reorganiza as duas páginas." },
-  { number: "03", title: "Imprima", description: "Baixe uma única página no formato escolhido para impressão." },
+  { icon: UploadCloud, title: "Envie o PDF", text: "A etiqueta do marketplace, do jeito que o pedido baixou." },
+  { icon: ScanLine, title: "Validamos os códigos", text: "Decodificamos cada código e conferimos com a chave. Não bateu, não sai." },
+  { icon: Printer, title: "Imprima a 10×15", text: "Uma página pronta pra térmica, sem espaço em branco." },
 ];
 
-const features = [
-  { icon: Layers3, title: "Unificação automática", text: "Transforma a etiqueta logística e a DANFE em uma composição única.", className: "md:col-span-2" },
-  { icon: Files, title: "Processamento em lote", text: "Envie vários PDFs e baixe os resultados concluídos em ZIP.", className: "" },
-  { icon: Braces, title: "API para integrações", text: "Conecte ERP, e-commerce ou sistema logístico com uma API assíncrona.", className: "" },
-  { icon: ScanLine, title: "Códigos preservados", text: "O fluxo mantém proporções, áreas de silêncio e conteúdo original dos códigos.", className: "md:col-span-2" },
-  { icon: History, title: "Histórico", text: "Localize e baixe resultados durante a retenção do seu plano.", className: "" },
-  { icon: Boxes, title: "Templates versionados", text: "Mercado Livre é o primeiro template. Novos layouts passam por validação antes da liberação.", className: "" },
-  { icon: Package, title: "Lote de marketplace", text: "Um PDF do Mercado Livre com vários pedidos vira um PDF único: uma etiqueta 10×15 por pedido, com numeração.", className: "" },
+const differentials = [
+  { icon: BadgeCheck, title: "Valida de verdade", text: "Decodifica os códigos na saída a 203 e 300 dpi e compara com a entrada. Recusa em vez de arriscar." },
+  { icon: Package, title: "Lote de marketplace", text: "Vários pedidos num PDF só — uma etiqueta por pedido, numerada." },
+  { icon: Braces, title: "API e webhooks", text: "Converta direto do seu ERP, de forma assíncrona, com webhook assinado." },
+  { icon: Lock, title: "Seus dados, privados", text: "Arquivos com link assinado e expiração. Nada entra na telemetria." },
 ];
 
-const faqs = [
-  ["Quais arquivos são aceitos?", "A primeira versão recebe um PDF com duas páginas: uma etiqueta logística e uma DANFE simplificada. PDFs corrompidos, protegidos por senha, ambíguos ou de template ainda não liberado são recusados com uma mensagem específica."],
-  ["Quais formatos de saída existem?", "O formato padrão é 100 × 150 mm. Também estão previstos 100 × 100 mm, A6 e tamanhos personalizados entre 50–210 mm de largura e 50–300 mm de altura."],
-  ["Como a DANFE aparece na etiqueta?", "Em PDFs digitais, a DANFE vira uma faixa com tipo, NF, série, emissão e o código de barras original da chave de acesso. Os dados são lidos do próprio PDF e conferidos com a chave. Em documentos escaneados, nada é reescrito: as regiões originais são mantidas."],
-  ["A API está disponível em todos os planos?", `A API e os webhooks são um adicional opcional (+ API, ${formatBrlCents(getApiAddon().priceBrlCents)}/mês) que pode ser contratado em qualquer plano pago: Starter, Pro ou Business. As chaves são exibidas uma única vez e usadas como credenciais Bearer.`],
-  ["Posso testar sem criar conta?", "Sim, uma vez: solte o PDF no topo desta página e baixe a etiqueta unificada. O arquivo é processado em memória e não fica armazenado. Para continuar, o plano Free inclui 10 etiquetas por mês."],
-  ["Dá para converter vários pedidos de uma vez?", "Sim. No lote de marketplace, você envia o PDF de etiquetas do Mercado Livre com o lote inteiro e recebe um PDF único, uma etiqueta por pedido, com numeração opcional. Cada pedido passa pela mesma validação de códigos."],
-  ["Como posso pagar?", "No cartão, como assinatura mensal recorrente, ou avulso por PIX — pague uma vez e use por 30 dias ou 1 ano, sem renovação automática, com os dias somando ao que você já tiver. O PIX é processado pelo Mercado Pago."],
-  ["O que acontece se a etiqueta não couber?", "A conversão é bloqueada para evitar perda de legibilidade e indica um formato maior quando houver uma alternativa compatível."],
-];
+function LabelPreview() {
+  return (
+    <div className="card-soft w-full max-w-[320px] rounded-2xl p-4">
+      <div className="flex items-center justify-between">
+        <span className="flex items-center gap-2 text-xs font-semibold text-[var(--color-muted)]"><ChannelMark id="mercado-livre" size={22} />Etiqueta de envio</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-ok-surface)] px-2 py-1 text-[10px] font-semibold text-[var(--color-ok)]"><BadgeCheck size={12} />Conferido</span>
+      </div>
+
+      <div className="mt-3 h-12 w-full rounded-sm bg-[repeating-linear-gradient(90deg,#0b0b0c_0_2px,transparent_2px_4px,#0b0b0c_4px_5px,transparent_5px_8px)]" aria-hidden />
+      <p className="mt-1 text-center text-[9px] tracking-[.3em] text-[var(--color-faint)]">7 8 9 1 2 3 4 5 6 7 8 9 0</p>
+
+      <div className="mt-3 flex items-start justify-between gap-3">
+        <div className="text-[10px] leading-4 text-[var(--color-muted)]">
+          <p className="font-semibold text-[var(--color-ink)]">Destinatário</p>
+          <p>Rua Exemplo, 123</p>
+          <p>Bairro · Cidade/UF</p>
+          <p>CEP 00000-000</p>
+        </div>
+        <svg width="46" height="46" viewBox="0 0 10 10" className="shrink-0" aria-hidden>
+          <path fill="#0b0b0c" d="M0 0h3v3H0zM4 0h1v1H4zM6 0h1v2H6zM8 0h2v1H8zM0 4h1v1H0zM2 4h2v1H2zM5 4h1v2H5zM7 4h1v1H7zM9 4h1v2H9zM4 6h1v1H4zM6 7h2v1H6zM0 7h3v3H0zM4 8h1v2H4zM7 9h3v1H7z" />
+        </svg>
+      </div>
+
+      <div className="mt-3 rounded-md bg-[var(--color-surface-2)] p-2.5 ring-1 ring-inset ring-[var(--color-line)]">
+        <p className="text-[9px] font-bold tracking-wide text-[var(--color-ink)]">DANFE SIMPLIFICADA</p>
+        <p className="mt-1 text-[9px] text-[var(--color-muted)]">NF 000.123 · Série 1 · 10/2026</p>
+        <div className="mt-1.5 h-5 w-full rounded-sm bg-[repeating-linear-gradient(90deg,#0b0b0c_0_1px,transparent_1px_3px,#0b0b0c_3px_4px,transparent_4px_7px)]" aria-hidden />
+      </div>
+    </div>
+  );
+}
 
 export default function Home() {
+  const plans = getPlanCatalog();
+  const order = ["FREE", "STARTER", "PRO", "BUSINESS"] as const;
+  const addon = getApiAddon();
+
   return (
-    <main>
+    <main className="site-shell">
       <Navbar />
-      <section className="hero-grid overflow-hidden pb-20 pt-36 sm:pt-44">
-        <div className="hero-orb left-[-8rem] top-24 size-80 bg-uno-red/25" aria-hidden="true" />
-        <div className="hero-orb bottom-[-6rem] right-[8%] size-96 bg-[#7a0b18]/40 [animation-delay:-8s]" aria-hidden="true" />
-        <div className="barcode-rain" aria-hidden="true">
-          {[["6%", "11s", "-2s"], ["19%", "15s", "-9s"], ["34%", "12s", "-5s"], ["52%", "17s", "-12s"], ["71%", "13s", "-1s"], ["88%", "16s", "-7s"]].map(([left, duration, delay]) => <span key={left} style={{ left, animationDuration: duration, animationDelay: delay }} />)}
-        </div>
-        <div className="page-shell relative z-10 grid items-center gap-14 lg:grid-cols-[.9fr_1.1fr]">
-          <div className="relative z-10">
-            <Badge><Sparkles size={13} />Automatize suas etiquetas</Badge>
-            <h1 className="mt-7 font-heading text-[clamp(2.65rem,11.5vw,5.5rem)] font-extrabold uppercase leading-[.9] tracking-[-.045em] [word-spacing:.04em] sm:text-[clamp(3rem,5vw,5.5rem)]">
-              <span className="block whitespace-nowrap">Duas páginas.</span>
-              <span className="headline-sweep mt-2 block whitespace-nowrap">Uma etiqueta.</span>
+
+      <section className="site-hero overflow-hidden px-4 pb-16 pt-32 sm:pt-40">
+        <div className="mx-auto grid max-w-5xl items-center gap-12 lg:grid-cols-[1.05fr_.95fr]">
+          <div>
+            <h1 className="font-heading text-[clamp(2.6rem,7vw,4.4rem)] font-extrabold leading-[.98] tracking-[-.045em] text-[var(--color-ink)]">
+              Duas páginas.<br />Uma etiqueta.
             </h1>
-            <p className="mt-8 max-w-xl text-base leading-7 text-zinc-400 sm:text-lg">Transforme etiquetas e DANFEs de duas páginas em uma única composição pronta para o seu fluxo de impressão.</p>
-            <div className="mt-9 flex flex-col gap-3 sm:flex-row"><ButtonLink href="/register" size="lg">Unir minha etiqueta <ArrowRight size={17} /></ButtonLink><ButtonLink href="#como-funciona" variant="secondary" size="lg">Ver como funciona</ButtonLink></div>
-            <p className="mt-5 text-xs text-zinc-600">Teste agora sem cadastro: solte seu PDF ao lado. Depois, 10 etiquetas por mês no plano Free.</p>
-            <div className="mt-10 hidden max-w-sm items-center gap-3 text-[10px] font-medium text-zinc-600 sm:flex" aria-hidden="true"><span>0</span><span className="ruler flex-1" /><span>100 mm</span><span className="text-uno-red">×</span><span>150 mm</span></div>
-          </div>
-          <TrialDrop />
-        </div>
-      </section>
-      <TemplateMarquee />
-
-      <section id="produto" className="section-space border-y border-white/[.06] bg-[#030303]">
-        <div className="page-shell grid gap-12 lg:grid-cols-[.72fr_1.28fr] lg:items-center">
-          <Reveal><p className="section-kicker">Veja a mudança</p><h2 className="section-title mt-4">O que ocupava duas folhas passa a caber em uma etiqueta.</h2><p className="section-copy mt-5">Compare a entrada e a saída com um exemplo inteiramente sintético. O layout remove espaço interno desnecessário e resume a DANFE em uma faixa com NF, série, emissão e o código de barras da chave.</p></Reveal>
-          <Reveal delay={120}><BeforeAfter /></Reveal>
-        </div>
-      </section>
-
-      <section id="como-funciona" className="section-space">
-        <div className="page-shell"><div className="grid items-end gap-10 lg:grid-cols-[1fr_1.1fr]"><Reveal className="max-w-2xl"><p className="section-kicker">Como funciona</p><h2 className="section-title mt-4">Do arquivo à impressão em três movimentos.</h2></Reveal><Reveal delay={120}><MergeDemo /></Reveal></div><div className="mt-14 grid border-y border-white/10 md:grid-cols-3">{steps.map((step, index) => <div key={step.number} className={`relative px-1 py-9 md:px-8 ${index > 0 ? "border-t border-white/10 md:border-l md:border-t-0" : ""}`}><span className="step-line" style={{ animationDelay: `${index * 1.5}s` }} aria-hidden="true" /><span className="font-heading text-sm font-bold text-uno-red">{step.number}</span><h3 className="mt-10 font-heading text-2xl font-bold">{step.title}</h3><p className="mt-3 max-w-xs text-sm leading-6 text-zinc-500">{step.description}</p></div>)}</div></div>
-      </section>
-
-      <section className="section-space border-y border-white/[.06] bg-[#030303]">
-        <div className="page-shell grid gap-10 lg:grid-cols-3">
-          <div className="lg:col-span-1"><p className="section-kicker">Feito para a operação</p><h2 className="section-title mt-4">Menos etapas entre receber o pedido e colar a etiqueta.</h2></div>
-          <div className="grid gap-px bg-white/10 lg:col-span-2 sm:grid-cols-2">
-            {[[FileCheck2, "Composição fiel", "O conteúdo original continua sendo a fonte da etiqueta final."], [ScanLine, "Tamanhos controlados", "Saídas em dimensões físicas explícitas, sem distorcer o conteúdo."], [ShieldCheck, "Falhas visíveis", "Arquivos incompatíveis param com um motivo claro, sem composição por tentativa."], [Fingerprint, "Rastreabilidade", "Versões do template e da engine acompanham cada conversão."]].map(([Icon, title, text]) => { const ItemIcon = Icon as typeof FileCheck2; return <div key={String(title)} className="glow-card bg-[#030303] p-7"><ItemIcon className="text-uno-red" size={22} /><h3 className="mt-7 font-heading text-lg font-bold">{String(title)}</h3><p className="mt-2 text-sm leading-6 text-zinc-500">{String(text)}</p></div>; })}
-          </div>
-        </div>
-      </section>
-
-      <section className="section-space">
-        <div className="page-shell"><Reveal className="max-w-2xl"><p className="section-kicker">Recursos</p><h2 className="section-title mt-4">Uma camada de impressão para todo o fluxo de etiquetas.</h2></Reveal><div className="mt-12 grid gap-4 md:grid-cols-3">{features.map(({ icon: Icon, title, text, className }) => <Card key={title} className={`glow-card group min-h-60 overflow-hidden p-7 ${className}`}><Icon className="text-uno-red" size={23} /><h3 className="mt-16 font-heading text-xl font-bold">{title}</h3><p className="mt-3 max-w-md text-sm leading-6 text-zinc-500">{text}</p></Card>)}</div></div>
-      </section>
-
-      <section className="section-space border-y border-white/[.06] bg-[#030303]">
-        <div className="page-shell grid items-center gap-12 lg:grid-cols-2">
-          <div><p className="section-kicker">Integração</p><h2 className="section-title mt-4">Envie a etiqueta direto do seu sistema.</h2><p className="section-copy mt-5">A API recebe a conversão de forma assíncrona. Consulte o estado ou receba um webhook assinado quando o processamento terminar.</p><ButtonLink href="/docs" variant="secondary" className="mt-8">Abrir documentação <ArrowRight size={16} /></ButtonLink></div>
-          <Reveal delay={120}><ApiTerminal /></Reveal>
-        </div>
-      </section>
-
-      <section className="section-space overflow-hidden">
-        <div className="page-shell grid items-center gap-14 lg:grid-cols-2">
-          <div className="relative min-h-96">
-            <div className="absolute left-0 top-10 w-[72%] border border-white/10 bg-[#080808] p-5 shadow-2xl">
-              <div className="flex justify-between text-xs">
-                <span>LOTE DE EXEMPLO</span>
-                <span className="text-zinc-500">37 / 50</span>
-              </div>
-              <div className="mt-4 h-1 overflow-hidden bg-white/10"><div className="batch-bar h-full w-[74%] bg-uno-red" /></div>
-              <div className="mt-8 space-y-3">
-                {["pedido-demo-001.pdf", "pedido-demo-002.pdf", "pedido-demo-003.pdf"].map((name, index) => (
-                  <div key={name} className="batch-row flex items-center justify-between border-t border-white/[.07] py-3 text-xs" style={{ animationDelay: `${index * 0.9}s` }}>
-                    <span className="text-zinc-300">{name}</span>
-                    <span className={index < 2 ? "text-red-300" : "text-zinc-600"}>{index < 2 ? "Concluído" : "Processando"}</span>
-                  </div>
-                ))}
-              </div>
+            <p className="mt-6 max-w-md text-lg leading-7 text-[var(--color-muted)]">
+              Solte o PDF do marketplace e receba uma etiqueta 10×15 pronta pra térmica — com os códigos conferidos.
+            </p>
+            <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+              <ButtonLink href="/register" size="lg">Criar conta grátis <ArrowRight size={17} /></ButtonLink>
+              <ButtonLink href="/pricing" variant="secondary" size="lg">Ver planos</ButtonLink>
             </div>
-            <div className="zip-bob absolute bottom-0 right-0 w-48 border border-uno-red/40 bg-[#0b0506] p-5 shadow-[0_20px_70px_rgba(239,35,60,.18)]">
-              <p className="text-xs text-red-300">Saída do lote</p>
-              <p className="mt-6 font-heading text-3xl font-extrabold">ZIP</p>
-              <p className="mt-2 text-xs leading-5 text-zinc-500">Resultados concluídos reunidos para download.</p>
-            </div>
+            <p className="mt-4 text-sm text-[var(--color-faint)]">Grátis até {plans.FREE.monthlyLimit} etiquetas por mês. Sem cartão.</p>
           </div>
-          <div><p className="section-kicker">Processamento em lote</p><h2 className="section-title mt-4">Muitos pedidos entram. Um fluxo organizado sai.</h2><p className="section-copy mt-5">Envie um conjunto de PDFs, acompanhe o progresso persistido de cada item e reúna as saídas concluídas em um arquivo ZIP.</p></div>
+          <div className="flex justify-center lg:justify-end">
+            <LabelPreview />
+          </div>
         </div>
       </section>
 
-      <section id="seguranca" className="section-space border-y border-white/[.06] bg-[#030303]">
-        <div className="page-shell grid gap-10 lg:grid-cols-[.8fr_1.2fr]"><div><LockKeyhole className="text-uno-red" size={30} /><h2 className="section-title mt-6">Seus documentos ficam privados.</h2></div><div className="grid gap-8 sm:grid-cols-2"><div><h3 className="font-heading font-bold">Acesso temporário</h3><p className="mt-3 text-sm leading-6 text-zinc-500">Arquivos de entrada e saída ficam privados. Downloads usam links assinados com expiração.</p></div><div><h3 className="font-heading font-bold">Retenção por plano</h3><p className="mt-3 text-sm leading-6 text-zinc-500">Os artefatos são removidos de acordo com o período de retenção da organização.</p></div><div><h3 className="font-heading font-bold">Conteúdo fora da telemetria</h3><p className="mt-3 text-sm leading-6 text-zinc-500">Bytes dos documentos e dados fiscais extraídos não entram em logs ou eventos de produto.</p></div><div><h3 className="font-heading font-bold">Organizações isoladas</h3><p className="mt-3 text-sm leading-6 text-zinc-500">Registros, objetos, chaves e uso são sempre limitados à organização autorizada.</p></div></div></div>
+      <section className="px-4 py-12">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="font-heading text-xl font-bold text-[var(--color-ink)]">Comece pelo Mercado Livre</h2>
+          <p className="mt-1 text-sm text-[var(--color-muted)]">Os outros canais entram em seguida.</p>
+          <ChannelStrip className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" />
+        </div>
       </section>
 
-      <section id="precos" className="section-space">
-        <div className="page-shell"><div className="mx-auto max-w-2xl text-center"><p className="section-kicker">Planos</p><h2 className="section-title mt-4">Comece pequeno. Aumente quando a operação pedir.</h2><p className="section-copy mx-auto mt-5">Sem cobrança automática por excedente e sem marca d&apos;água. Pague no cartão (assinatura mensal) ou avulso por PIX.</p></div><Reveal className="mt-12"><PricingGrid compact /></Reveal><div className="mt-8 text-center"><Link href="/pricing" className="inline-flex items-center gap-2 text-sm font-semibold text-zinc-300 hover:text-white">Comparar todos os recursos <ArrowRight size={15} /></Link></div></div>
+      <section className="px-4 py-12">
+        <div className="mx-auto grid max-w-5xl gap-5 sm:grid-cols-3">
+          {steps.map((step) => (
+            <div key={step.title} className="card-soft rounded-2xl p-6">
+              <span className="grid size-11 place-items-center rounded-xl bg-uno-red/10 text-uno-red"><step.icon size={22} /></span>
+              <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{step.title}</h3>
+              <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{step.text}</p>
+            </div>
+          ))}
+        </div>
       </section>
 
-      <section className="section-space border-y border-white/[.06] bg-[#030303]">
-        <div className="page-shell grid gap-12 lg:grid-cols-[.72fr_1.28fr]"><div><p className="section-kicker">Perguntas frequentes</p><h2 className="section-title mt-4">O que você precisa saber antes do primeiro envio.</h2></div><div className="divide-y divide-white/10 border-y border-white/10">{faqs.map(([question, answer]) => <details key={question} className="group py-5"><summary className="flex cursor-pointer list-none items-center justify-between gap-6 font-heading font-semibold"><span>{question}</span><span className="text-xl text-uno-red transition-transform group-open:rotate-45">+</span></summary><p className="max-w-2xl pt-4 text-sm leading-6 text-zinc-500">{answer}</p></details>)}</div></div>
+      <section className="px-4 py-12">
+        <div className="mx-auto max-w-5xl">
+          <h2 className="max-w-xl font-heading text-3xl font-extrabold tracking-tight text-[var(--color-ink)]">Por que a UNO, e não só um conversor.</h2>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2">
+            {differentials.map((item) => (
+              <div key={item.title} className="card-soft rounded-2xl p-6">
+                <item.icon className="text-uno-red" size={22} />
+                <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{item.title}</h3>
+                <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{item.text}</p>
+              </div>
+            ))}
+          </div>
+        </div>
       </section>
 
-      <section className="overflow-hidden py-24"><div className="page-shell"><div className="relative border border-uno-red/30 bg-[#0b0304] px-6 py-16 text-center sm:px-12"><div className="cta-pulse absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(239,35,60,.34),transparent_55%)]" /><div className="grid-pan absolute inset-0 opacity-60" aria-hidden="true" /><div className="relative"><h2 className="font-heading text-4xl font-extrabold tracking-[-.05em] sm:text-6xl">Duas páginas esperando para virar uma?</h2><p className="mx-auto mt-5 max-w-xl text-zinc-400">Crie sua conta e processe as primeiras etiquetas no plano Free.</p><ButtonLink href="/register" size="lg" className="mt-8">Começar agora <ArrowRight size={17} /></ButtonLink></div></div></div></section>
+      <section id="precos" className="px-4 py-12">
+        <div className="mx-auto max-w-5xl">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <h2 className="font-heading text-3xl font-extrabold tracking-tight text-[var(--color-ink)]">Planos</h2>
+            <p className="text-sm text-[var(--color-muted)]">No cartão ou avulso por PIX. Sem excedente automático.</p>
+          </div>
+          <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {order.map((id) => {
+              const plan = plans[id];
+              const highlight = id === "PRO";
+              return (
+                <div
+                  key={id}
+                  className={`card-soft rounded-2xl p-5 ${highlight ? "ring-2 ring-uno-red" : ""}`}
+                >
+                  <p className="font-heading text-base font-bold text-[var(--color-ink)]">{plan.name}</p>
+                  <p className="mt-2 font-heading text-2xl font-extrabold tabular-nums text-[var(--color-ink)]">
+                    {plan.priceBrlCents === 0 ? "R$ 0" : formatBrlCents(plan.priceBrlCents)}
+                    <span className="ml-1 text-xs font-semibold text-[var(--color-faint)]">/mês</span>
+                  </p>
+                  <p className="mt-3 text-sm text-[var(--color-muted)]">{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas/mês</p>
+                  <ButtonLink href="/register" variant={highlight ? "primary" : "secondary"} size="sm" className="mt-5 w-full">
+                    Começar
+                  </ButtonLink>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-4 text-sm text-[var(--color-muted)]">
+            API, chaves e webhooks são o adicional <span className="font-semibold text-[var(--color-ink)]">+ API, {formatBrlCents(addon.priceBrlCents)}/mês</span>, sobre qualquer plano pago.{" "}
+            <Link href="/pricing" className="inline-flex items-center gap-1 font-semibold text-uno-red hover:underline">Comparar planos <ArrowRight size={14} /></Link>
+          </p>
+        </div>
+      </section>
+
+      <section className="px-4 py-16">
+        <div className="mx-auto max-w-5xl overflow-hidden rounded-3xl bg-[var(--color-sidebar)] px-6 py-14 text-center sm:px-12">
+          <h2 className="font-heading text-3xl font-extrabold tracking-tight text-white sm:text-4xl">Duas páginas esperando pra virar uma?</h2>
+          <p className="mx-auto mt-3 max-w-md text-[#b5b5bd]">Crie sua conta e gere as primeiras etiquetas no plano Free.</p>
+          <ButtonLink href="/register" size="lg" className="mt-7">Criar conta grátis <ArrowRight size={17} /></ButtonLink>
+        </div>
+      </section>
+
       <Footer />
     </main>
   );
