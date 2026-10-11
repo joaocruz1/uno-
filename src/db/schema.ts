@@ -69,6 +69,9 @@ export const deliveryStatusEnum = pgEnum("delivery_status", ["PENDING", "PROCESS
 export const invitationStatusEnum = pgEnum("invitation_status", ["PENDING", "ACCEPTED", "REVOKED"]);
 export const stripeEventStatusEnum = pgEnum("stripe_event_status", ["PROCESSING", "PROCESSED", "FAILED"]);
 export const billingCheckoutStatusEnum = pgEnum("billing_checkout_status", ["CREATING", "OPEN", "COMPLETED", "EXPIRED", "FAILED"]);
+/** Where a prepaid grant of plan days came from. */
+export const billingGrantSourceEnum = pgEnum("billing_grant_source", ["PIX", "REFERRAL"]);
+export const billingGrantStatusEnum = pgEnum("billing_grant_status", ["APPLIED", "REVOKED"]);
 
 // Better Auth 1.7.7 core tables. Property names stay canonical for the adapter;
 // physical names are snake_case for PostgreSQL tooling and raw SQL.
@@ -197,6 +200,10 @@ export const subscriptions = pgTable(
     apiAddonSubscriptionId: text("api_addon_subscription_id"),
     apiAddonStatus: subscriptionStatusEnum("api_addon_status"),
     apiAddonCurrentPeriodEnd: timestamp("api_addon_current_period_end", { withTimezone: true }),
+    // Prepaid plan days bought by PIX or earned by referral, independent of Stripe.
+    // Reconciliation never writes these, so an active Stripe sub cannot clear them.
+    prepaidPlanId: planIdEnum("prepaid_plan_id"),
+    prepaidPeriodEnd: timestamp("prepaid_period_end", { withTimezone: true }),
     reconciliationVersion: integer("reconciliation_version").notNull().default(0),
     lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
@@ -207,6 +214,38 @@ export const subscriptions = pgTable(
     uniqueIndex("subscriptions_stripe_customer_id_uq").on(table.stripeCustomerId).where(sql`${table.stripeCustomerId} is not null`),
     uniqueIndex("subscriptions_stripe_subscription_id_uq").on(table.stripeSubscriptionId).where(sql`${table.stripeSubscriptionId} is not null`),
     check("subscriptions_reconciliation_version_ck", sql`${table.reconciliationVersion} >= 0`),
+    check("subscriptions_prepaid_ck", sql`(${table.prepaidPlanId} is null and ${table.prepaidPeriodEnd} is null) or (${table.prepaidPlanId} is not null and ${table.prepaidPlanId} <> 'FREE' and ${table.prepaidPeriodEnd} is not null)`),
+  ],
+);
+
+/**
+ * Idempotent ledger of prepaid plan days granted to an organization. `externalRef`
+ * (the PIX payment id or the referral cycle key) is unique, so replaying a webhook
+ * or a referral reward never grants twice. The effective prepaid state lives on
+ * `subscriptions.prepaid_*`; this table is the audit trail and the dedup key.
+ */
+export const billingGrants = pgTable(
+  "billing_grants",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    planId: planIdEnum("plan_id").notNull(),
+    days: integer("days").notNull(),
+    source: billingGrantSourceEnum("source").notNull(),
+    externalRef: text("external_ref").notNull(),
+    amountBrlCents: integer("amount_brl_cents"),
+    status: billingGrantStatusEnum("status").notNull().default("APPLIED"),
+    appliedAt: timestamp("applied_at", { withTimezone: true }).notNull().default(now),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("billing_grants_external_ref_uq").on(table.externalRef),
+    index("billing_grants_org_idx").on(table.organizationId, table.appliedAt),
+    check("billing_grants_days_ck", sql`${table.days} > 0`),
+    check("billing_grants_plan_ck", sql`${table.planId} <> 'FREE'`),
+    check("billing_grants_amount_ck", sql`${table.amountBrlCents} is null or ${table.amountBrlCents} >= 0`),
   ],
 );
 

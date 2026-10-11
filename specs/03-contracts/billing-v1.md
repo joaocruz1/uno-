@@ -7,10 +7,21 @@ spec: SPEC-UNO-001
 # Assinatura e direitos de uso
 
 Plano efetivo vem do banco e estado vigente, nunca da confirmação no navegador.
-Somente ACTIVE/TRIALING com início <= agora < fim permitem plano contratado;
+É o maior entre a assinatura Stripe e um crédito pré-pago. Pela Stripe, somente
+ACTIVE/TRIALING com início <= agora < fim permitem plano contratado;
 sem período vigente usam FREE. Cancelamento
 no fim mantém direitos até esse momento. INCOMPLETE/PAST_DUE/UNPAID/PAUSED/
 CANCELED usam FREE mesmo com data futura. Não conceder excedentes automáticos.
+
+Crédito pré-pago: dias de plano pago (compra avulsa por PIX ou recompensa de
+indicação) gravados em subscriptions.prepaid_plan_id/prepaid_period_end, fonte
+de direito ao lado da Stripe. Vale enquanto agora < prepaid_period_end. A
+reconciliação da Stripe NÃO escreve essas colunas (coexiste com assinatura no
+cartão). A cota usa o mês civil UTC quando o direito vem do pré-pago. Concessões
+ficam em billing_grants, idempotentes por external_ref (id do pagamento PIX ou
+chave do ciclo de indicação): somam dias sobre período vigente (max(agora, fim)
++ dias) e nunca rebaixam o plano no período. O "+ API" continua exigindo plano
+pago cobrado pela Stripe; pré-pago não contrata o adicional nesta fase.
 Limites e preços padrão seguem SPEC001 e podem ser configurados por ambiente;
 valores inválidos falham explicitamente. Configuração pública contém apenas
 preços e limites, nunca IDs privados ou credenciais.

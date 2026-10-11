@@ -14,7 +14,12 @@ export type PlanSubscription = {
   status: SubscriptionStatus;
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
+  /** Prepaid plan days (PIX/referral), in force independently of Stripe. */
+  prepaidPlanId?: PlanId | null;
+  prepaidPeriodEnd?: Date | null;
 };
+
+const PLAN_RANK: Record<PlanId, number> = { FREE: 0, STARTER: 1, PRO: 2, BUSINESS: 3 };
 
 export type SubscriptionEntitlement = PlanSubscription & {
   /** API add-on state, reconciled from its own Stripe subscription. */
@@ -37,6 +42,8 @@ export const subscriptionEntitlementColumns = {
   currentPeriodEnd: subscriptions.currentPeriodEnd,
   apiAddonStatus: subscriptions.apiAddonStatus,
   apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
+  prepaidPlanId: subscriptions.prepaidPlanId,
+  prepaidPeriodEnd: subscriptions.prepaidPeriodEnd,
 };
 
 export const FREE_ENTITLEMENT: SubscriptionEntitlement = Object.freeze({
@@ -46,15 +53,32 @@ export const FREE_ENTITLEMENT: SubscriptionEntitlement = Object.freeze({
   currentPeriodEnd: null,
   apiAddonStatus: null,
   apiAddonCurrentPeriodEnd: null,
+  prepaidPlanId: null,
+  prepaidPeriodEnd: null,
 });
 
-export function effectivePlanId(subscription: PlanSubscription | undefined, now = new Date()): PlanId {
-  if (!subscription) return "FREE";
+/** The Stripe subscription's plan, in force only while ACTIVE/TRIALING within its period. */
+function stripePlanInForce(subscription: PlanSubscription, now: Date): PlanId {
   if (subscription.planId === "FREE") return "FREE";
   if (subscription.status !== "ACTIVE" && subscription.status !== "TRIALING") return "FREE";
   if (!subscription.currentPeriodStart || !subscription.currentPeriodEnd) return "FREE";
   if (subscription.currentPeriodStart > now || subscription.currentPeriodEnd <= now) return "FREE";
   return subscription.planId;
+}
+
+/** A prepaid grant's plan, in force only while its period has not ended. */
+function prepaidPlanInForce(subscription: PlanSubscription, now: Date): PlanId {
+  if (!subscription.prepaidPlanId || subscription.prepaidPlanId === "FREE") return "FREE";
+  if (!subscription.prepaidPeriodEnd || subscription.prepaidPeriodEnd <= now) return "FREE";
+  return subscription.prepaidPlanId;
+}
+
+/** The plan in force is the highest of the Stripe subscription and any prepaid grant. */
+export function effectivePlanId(subscription: PlanSubscription | undefined, now = new Date()): PlanId {
+  if (!subscription) return "FREE";
+  const stripe = stripePlanInForce(subscription, now);
+  const prepaid = prepaidPlanInForce(subscription, now);
+  return PLAN_RANK[prepaid] > PLAN_RANK[stripe] ? prepaid : stripe;
 }
 
 /** The add-on subscription itself is paid up, regardless of the plan. */
