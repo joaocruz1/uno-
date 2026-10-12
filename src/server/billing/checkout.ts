@@ -8,7 +8,7 @@ import { AppError } from "@/lib/errors";
 import { getApiAddon, getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
 
-import { apiAddonConfigured, apiAddonPriceId, billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripePriceId } from "./config";
+import { apiAddonConfigured, apiAddonPriceId, billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripeCouponId, stripePriceId } from "./config";
 import { effectivePlanId, lockOrganizationBilling } from "./entitlements";
 import { checkoutIntegrationIdentifier, getBillingProvider, type BillingProvider } from "./stripe";
 
@@ -214,6 +214,8 @@ export async function createBillingCheckout(
     const urls = billingUrls();
     const checkout = await dependencies.provider.createCheckout({
       customerId, priceId, organizationId: actor.organizationId,
+      // First-month promo: a one-time coupon on the first invoice, if the plan has one.
+      couponId: stripeCouponId(planId),
       successUrl: urls.success, cancelUrl: urls.cancel,
       integrationIdentifier: checkoutIntegrationIdentifier(`${prepared.intentId}:${prepared.providerAttempt}`),
     }, `uno-checkout-${prepared.intentId}-${prepared.providerAttempt}`);

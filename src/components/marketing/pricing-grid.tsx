@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { formatBrlCents, getApiAddon, getPlanCatalog, type PlanId } from "@/lib/plans";
+import { formatBrlCents, getApiAddon, getPlanCatalog, hasFirstMonthPromo, type PlanId } from "@/lib/plans";
 import { ButtonLink } from "../ui/button";
 import { Card } from "../ui/card";
 
@@ -18,7 +18,14 @@ export function PricingGrid({ compact = false }: { compact?: boolean }) {
           <Card key={id} className={`relative flex flex-col rounded-2xl p-6 ${featured ? "border-uno-red shadow-[0_0_45px_rgba(239,35,60,.1)]" : ""}`}>
             {featured ? <span className="absolute right-4 top-4 rounded-full bg-uno-red px-2.5 py-1 text-[10px] font-bold text-white">Mais escolhido</span> : null}
             <h3 className="font-heading text-xl font-bold">{plan.name}</h3>
-            <div className="mt-5 flex items-end gap-1"><span className="font-heading text-4xl font-extrabold tracking-tight">{plan.priceBrlCents === 0 ? "R$ 0" : formatBrlCents(plan.priceBrlCents)}</span><span className="mb-1 text-sm text-zinc-500">/mês</span></div>
+            {hasFirstMonthPromo(plan) ? (
+              <>
+                <div className="mt-5 flex items-end gap-1"><span className="font-heading text-4xl font-extrabold tracking-tight">{formatBrlCents(plan.firstMonthPriceBrlCents)}</span><span className="mb-1 text-sm font-semibold text-uno-red">no 1º mês</span></div>
+                <p className="mt-1 text-sm text-zinc-500">depois {formatBrlCents(plan.priceBrlCents)}/mês</p>
+              </>
+            ) : (
+              <div className="mt-5 flex items-end gap-1"><span className="font-heading text-4xl font-extrabold tracking-tight">{plan.priceBrlCents === 0 ? "R$ 0" : formatBrlCents(plan.priceBrlCents)}</span><span className="mb-1 text-sm text-zinc-500">/mês</span></div>
+            )}
             <p className="mt-5 border-y border-white/[.07] py-4 text-sm text-zinc-300"><b className="text-white">{plan.monthlyLimit.toLocaleString("pt-BR")}</b> etiquetas por mês</p>
             <ul className="mt-5 flex-1 space-y-3 text-sm text-zinc-400">
               <li className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-uno-red" />Arquivos de até {plan.maxFileMB} MB</li>

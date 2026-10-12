@@ -34,6 +34,8 @@ export interface BillingProvider {
     organizationId: string;
     /** Marks the resulting subscription as the API add-on instead of a plan. */
     addon?: "API";
+    /** One-time coupon for the first invoice (the first-month promo); recurring invoices stay full price. */
+    couponId?: string | null;
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
@@ -84,6 +86,7 @@ class StripeGateway implements BillingProvider {
     priceId: string;
     organizationId: string;
     addon?: "API";
+    couponId?: string | null;
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
@@ -96,6 +99,8 @@ class StripeGateway implements BillingProvider {
       client_reference_id: input.organizationId,
       metadata,
       subscription_data: { metadata },
+      // A one-time coupon only touches the first invoice; renewals stay at the recurring price.
+      ...(input.couponId ? { discounts: [{ coupon: input.couponId }] } : {}),
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       integration_identifier: input.integrationIdentifier,

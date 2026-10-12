@@ -65,12 +65,16 @@ template is rejected; there is no generic or best-effort fallback.
 
 ## Plans and quotas
 
-| Plan | Monthly price | Labels/month | Max file | Max batch | Retention |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Free | R$ 0 | 10 | 5 MB | 1 | 7 days |
-| Starter | R$ 9,99 | 300 | 20 MB | 50 | 30 days |
-| Pro | R$ 15,99 | 2,000 | 50 MB | 100 | 90 days |
-| Business | R$ 29,90 | 10,000 | 100 MB | 500 | 180 days |
+Monthly price is the recurring amount, charged from the second month; the first
+month is promotional (a one-time Stripe coupon at Checkout; renewals are full
+price). PIX one-off purchases charge the recurring price.
+
+| Plan | 1st month | Monthly price | Labels/month | Max file | Max batch | Retention |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Free | R$ 0 | R$ 0 | 10 | 5 MB | 1 | 7 days |
+| Starter | R$ 9,99 | R$ 19 | 300 | 20 MB | 50 | 30 days |
+| Pro | R$ 15,99 | R$ 49 | 2,000 | 50 MB | 100 | 90 days |
+| Business | R$ 29,90 | R$ 139 | 10,000 | 100 MB | 500 | 180 days |
 
 - Values and limits are configuration, with the table above as the initial
   production defaults.

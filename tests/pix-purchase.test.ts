@@ -74,7 +74,7 @@ describe("PIX purchase", () => {
   it("creates a pending charge with the QR and the right amount", async () => {
     const purchase = await createPixPurchase(actor, { planId: "STARTER", period: "monthly", cpf: "39053344705" }, deps());
     expect(purchase.status).toBe("PENDING");
-    expect(purchase.amountBrlCents).toBe(999);
+    expect(purchase.amountBrlCents).toBe(1_900);
     expect(purchase.qrCode).toBe("QR-COPIA-E-COLA");
     expect(provider.lastRequest?.externalReference).toBe(purchase.id);
     const row = (await database.select().from(pixCharges).where(eq(pixCharges.id, purchase.id)))[0]!;
@@ -83,7 +83,7 @@ describe("PIX purchase", () => {
 
   it("grants prepaid days once the payment is approved, idempotently", async () => {
     const purchase = await createPixPurchase(actor, { planId: "STARTER", period: "monthly", cpf: "39053344705" }, deps());
-    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 999, externalReference: purchase.id };
+    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 1_900, externalReference: purchase.id };
 
     await confirmPixPayment("mp-1", deps());
     const sub = (await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!;
@@ -97,8 +97,8 @@ describe("PIX purchase", () => {
 
   it("annual period buys 365 days at 12x the monthly price", async () => {
     const purchase = await createPixPurchase(actor, { planId: "PRO", period: "annual", cpf: "39053344705" }, deps());
-    expect(purchase.amountBrlCents).toBe(1_599 * 12);
-    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 1_599 * 12, externalReference: purchase.id };
+    expect(purchase.amountBrlCents).toBe(4_900 * 12);
+    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 4_900 * 12, externalReference: purchase.id };
     await confirmPixPayment("mp-1", deps());
     const sub = (await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!;
     expect(sub.prepaidPlanId).toBe("PRO");

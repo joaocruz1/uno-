@@ -8,6 +8,15 @@ export function stripePriceId(planId: PaidPlanId): string {
   return requiredEnv(`STRIPE_PRICE_${planId}`);
 }
 
+/**
+ * The optional first-month discount coupon for a plan, created by
+ * `pnpm stripe:setup` when the plan has a promo. Absent means no discount is
+ * applied at checkout, so billing keeps working before the coupons exist.
+ */
+export function stripeCouponId(planId: PaidPlanId): string | null {
+  return process.env[`STRIPE_COUPON_${planId}`]?.trim() || null;
+}
+
 /** The add-on is optional: billing works without it and the add-on is simply not offered. */
 export function apiAddonConfigured(): boolean {
   return billingProviderConfigured() && Boolean(process.env.STRIPE_PRICE_API_ADDON?.trim());
@@ -26,6 +35,7 @@ export function publicBillingPlans(): PublicBillingPlan[] {
       id,
       name: plan.name,
       priceBrlCents: plan.priceBrlCents,
+      firstMonthPriceBrlCents: plan.firstMonthPriceBrlCents,
       monthlyLimit: plan.monthlyLimit,
       maxFileMB: plan.maxFileMB,
       batchLimit: plan.batchLimit,
