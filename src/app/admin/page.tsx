@@ -1,3 +1,4 @@
+import { GrantForm } from "@/components/admin/grant-form";
 import { adminOverview } from "@/server/admin";
 import { requireAdminPage } from "@/server/admin/page";
 
@@ -52,6 +53,7 @@ export default async function AdminOverviewPage() {
         <Breakdown title="Jobs do outbox" values={entries(overview.outboxByStatus)} empty="Nenhum job registrado." />
         <Breakdown title="Entregas de webhook" values={entries(overview.webhookDeliveriesByStatus)} empty="Nenhuma entrega registrada." />
       </div>
+      <div className="mt-8"><GrantForm /></div>
       <p className="mt-6 text-xs text-zinc-500">Gerado em {new Date(overview.generatedAt).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })}.</p>
     </div>
   );
