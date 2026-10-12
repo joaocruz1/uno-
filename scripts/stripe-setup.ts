@@ -49,8 +49,9 @@ async function main(): Promise<void> {
       if (product.description !== planDescription) await stripe.products.update(product.id, { description: planDescription });
       price = await stripe.prices.create({
         product: product.id, currency: "brl", unit_amount: amount, recurring: { interval: "month", interval_count: 1 },
-        lookup_key: lookupKey, metadata: { uno_plan: plan },
-      }, { idempotencyKey: `uno-price-${lookupKey}-v1` });
+        // A superseded (archived) price may still hold this lookup_key; move it to the new active price.
+        lookup_key: lookupKey, transfer_lookup_key: true, metadata: { uno_plan: plan },
+      }, { idempotencyKey: `uno-price-${lookupKey}-v2` });
     }
     prices[plan] = price.id;
     products[plan] = typeof price.product === "string" ? price.product : price.product.id;
@@ -88,8 +89,8 @@ async function main(): Promise<void> {
     }, { idempotencyKey: "uno-product-addon-API-v1" });
     addonPrice = await stripe.prices.create({
       product: product.id, currency: "brl", unit_amount: addon.priceBrlCents, recurring: { interval: "month", interval_count: 1 },
-      lookup_key: addonLookupKey, metadata: { uno_addon: "API" },
-    }, { idempotencyKey: `uno-price-${addonLookupKey}-v1` });
+      lookup_key: addonLookupKey, transfer_lookup_key: true, metadata: { uno_addon: "API" },
+    }, { idempotencyKey: `uno-price-${addonLookupKey}-v2` });
   }
   const addonProductId = typeof addonPrice.product === "string" ? addonPrice.product : addonPrice.product.id;
   console.info(`Adicional API: ${formatBrlCents(addon.priceBrlCents)}/mês`);
