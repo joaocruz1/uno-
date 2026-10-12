@@ -18,6 +18,7 @@ export const publicPlanSchema = z.object({
   id: planIdSchema,
   name: z.string().min(1),
   priceBrlCents: z.number().int().nonnegative(),
+  firstMonthPriceBrlCents: z.number().int().nonnegative(),
   monthlyLimit: z.number().int().nonnegative(),
   maxFileMB: z.number().int().positive(),
   batchLimit: z.number().int().positive(),

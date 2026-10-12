@@ -15,8 +15,13 @@ pré-pago. As concessões ficam na tabela `billing_grants`, idempotentes por
 `external_ref` (o id do pagamento PIX ou a chave do ciclo de indicação), somando
 dias sobre um período ainda vigente e nunca rebaixando o plano no período.
 
-Preços mensais padrão: Starter R$ 9,99, Pro R$ 15,99 e Business R$ 29,90.
-Nenhum plano inclui API. Chaves de API, API pública e webhooks são o adicional
+Preços recorrentes padrão: Starter R$ 19, Pro R$ 49 e Business R$ 139, com um
+primeiro mês promocional (Starter R$ 9,99, Pro R$ 15,99, Business R$ 29,90) no
+estilo do concorrente: a landing mostra o 1º mês e, abaixo, o preço normal. O
+desconto do 1º mês é um cupom de uso único (`amount_off`, `duration: once`) por
+plano, criado por `pnpm stripe:setup` (grava `STRIPE_COUPON_<PLANO>`) e aplicado
+no Checkout da assinatura; as renovações voltam ao preço normal. O PIX avulso
+cobra o preço normal. Nenhum plano inclui API. Chaves de API, API pública e webhooks são o adicional
 "+ API" (R$ 50,00/mês), que qualquer plano pago pode contratar e o Free não.
 O direito existe apenas com plano pago vigente E adicional ACTIVE/TRIALING
 dentro do período; adicional pago sem plano pago não libera nada. O limite de

@@ -5,7 +5,7 @@ import { Footer, Navbar } from "@/components";
 import { ButtonLink } from "@/components/ui";
 import { LabelScanner } from "@/components/marketing/label-scanner";
 import { TrialStudio } from "@/components/marketing/trial-studio";
-import { formatBrlCents, getApiAddon, getPlanCatalog } from "@/lib/plans";
+import { formatBrlCents, getApiAddon, getPlanCatalog, hasFirstMonthPromo } from "@/lib/plans";
 
 const GUTTER = "px-[clamp(1.25rem,5vw,6rem)]";
 
@@ -111,10 +111,20 @@ export default function Home() {
               return (
                 <div key={id} className={`card-soft rounded-2xl p-5 ${highlight ? "ring-2 ring-uno-red" : ""}`}>
                   <p className="font-heading text-base font-bold text-[var(--color-ink)]">{plan.name}</p>
-                  <p className="mt-2 font-heading text-2xl font-extrabold tabular-nums text-[var(--color-ink)]">
-                    {plan.priceBrlCents === 0 ? "R$ 0" : formatBrlCents(plan.priceBrlCents)}
-                    <span className="ml-1 text-xs font-semibold text-[var(--color-faint)]">/mês</span>
-                  </p>
+                  {hasFirstMonthPromo(plan) ? (
+                    <>
+                      <p className="mt-2 font-heading text-2xl font-extrabold tabular-nums text-[var(--color-ink)]">
+                        {formatBrlCents(plan.firstMonthPriceBrlCents)}
+                        <span className="ml-1 text-xs font-semibold text-uno-red">no 1º mês</span>
+                      </p>
+                      <p className="mt-1 text-xs text-[var(--color-faint)]">depois {formatBrlCents(plan.priceBrlCents)}/mês</p>
+                    </>
+                  ) : (
+                    <p className="mt-2 font-heading text-2xl font-extrabold tabular-nums text-[var(--color-ink)]">
+                      {plan.priceBrlCents === 0 ? "R$ 0" : formatBrlCents(plan.priceBrlCents)}
+                      <span className="ml-1 text-xs font-semibold text-[var(--color-faint)]">/mês</span>
+                    </p>
+                  )}
                   <p className="mt-3 text-sm text-[var(--color-muted)]">{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas/mês</p>
                   <ButtonLink href="/register" variant={highlight ? "primary" : "secondary"} size="sm" className="mt-5 w-full">Começar</ButtonLink>
                 </div>

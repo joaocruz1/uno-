@@ -41,7 +41,7 @@ class FakeProvider implements BillingProvider {
   event: Stripe.Event = { id: "evt_default", type: "ping", created: Math.floor(NOW.getTime() / 1000), data: { object: {} } } as unknown as Stripe.Event;
 
   async createCustomer() { return { id: "cus_org" }; }
-  prices: Record<string, number> = { price_starter: 999, price_pro: 1_599, price_business: 2_990, price_addon: 5_000 };
+  prices: Record<string, number> = { price_starter: 1_900, price_pro: 4_900, price_business: 13_900, price_addon: 5_000 };
   priceActive = true;
   async retrievePrice(priceId: string) {
     return { id: priceId, active: this.priceActive, currency: "brl", unitAmount: this.prices[priceId] ?? null, recurringInterval: "month", recurringIntervalCount: 1 };
@@ -109,7 +109,8 @@ describe("billing entitlements and configuration", () => {
 
   it("charges the new monthly prices and includes the API in no plan", () => {
     const catalog = getPlanCatalog({ NODE_ENV: "test" });
-    expect([catalog.FREE, catalog.STARTER, catalog.PRO, catalog.BUSINESS].map((plan) => plan.priceBrlCents)).toEqual([0, 999, 1_599, 2_990]);
+    expect([catalog.FREE, catalog.STARTER, catalog.PRO, catalog.BUSINESS].map((plan) => plan.priceBrlCents)).toEqual([0, 1_900, 4_900, 13_900]);
+    expect([catalog.FREE, catalog.STARTER, catalog.PRO, catalog.BUSINESS].map((plan) => plan.firstMonthPriceBrlCents)).toEqual([0, 999, 1_599, 2_990]);
     expect(Object.values(catalog).every((plan) => plan.api === false)).toBe(true);
     expect(getApiAddon({ NODE_ENV: "test" })).toMatchObject({ id: "API", name: "API", priceBrlCents: 5_000 });
     expect(getApiAddon({ NODE_ENV: "test", UNO_API_ADDON_PRICE_BRL_CENTS: "6500" }).priceBrlCents).toBe(6_500);

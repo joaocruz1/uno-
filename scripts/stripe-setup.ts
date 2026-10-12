@@ -32,6 +32,7 @@ async function main(): Promise<void> {
   const description = "etiquetas por mês";
   const prices: Record<string, string> = {};
   const products: Record<string, string> = {};
+  const coupons: Record<string, string> = {};
   for (const plan of ["STARTER", "PRO", "BUSINESS"] as const) {
     const amount = catalog[plan].priceBrlCents;
     const lookupKey = `uno_${plan.toLowerCase()}_monthly_brl_${amount}`;
@@ -53,7 +54,25 @@ async function main(): Promise<void> {
     }
     prices[plan] = price.id;
     products[plan] = typeof price.product === "string" ? price.product : price.product.id;
-    console.info(`${plan}: ${formatBrlCents(amount)}/mês`);
+
+    // First-month promo: a one-time BRL coupon for the difference between the
+    // recurring price and the first month. The coupon id encodes the amount, so
+    // changing the promo creates a new coupon and the old one simply lingers.
+    const discount = amount - catalog[plan].firstMonthPriceBrlCents;
+    if (discount > 0) {
+      const couponId = `uno_${plan.toLowerCase()}_first_month_off_${discount}`;
+      let coupon = await stripe.coupons.retrieve(couponId).catch(() => null);
+      if (!coupon || !coupon.valid || coupon.amount_off !== discount || coupon.currency !== "brl" || coupon.duration !== "once") {
+        coupon = await stripe.coupons.create({
+          id: couponId, amount_off: discount, currency: "brl", duration: "once",
+          name: `UNO ${catalog[plan].name} — 1º mês`, metadata: { uno_plan: plan, uno_first_month: "true" },
+        }, { idempotencyKey: `uno-coupon-${couponId}` });
+      }
+      coupons[plan] = coupon.id;
+      console.info(`${plan}: ${formatBrlCents(catalog[plan].firstMonthPriceBrlCents)} no 1º mês, depois ${formatBrlCents(amount)}/mês`);
+    } else {
+      console.info(`${plan}: ${formatBrlCents(amount)}/mês`);
+    }
   }
 
   // The API add-on: its own product and price, sold as a separate subscription.
@@ -117,6 +136,7 @@ async function main(): Promise<void> {
   };
   for (const plan of Object.keys(prices)) set(`STRIPE_PRICE_${plan}`, prices[plan]!);
   set("STRIPE_PRICE_API_ADDON", addonPrice.id);
+  for (const plan of ["STARTER", "PRO", "BUSINESS"] as const) if (coupons[plan]) set(`STRIPE_COUPON_${plan}`, coupons[plan]!);
   await writeFile(envPath, env);
   console.info(`IDs de preço gravados em ${envPath}.`);
 }
