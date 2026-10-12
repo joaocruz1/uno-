@@ -1,0 +1,158 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "UNO API",
+    "version": "1.0.0",
+    "description": "API da UNO para converter o PDF de duas páginas (etiqueta logística + DANFE) em uma etiqueta 100×150 mm. Assíncrona, autenticada por Bearer, com idempotência e webhooks assinados. Exige o adicional + API sobre um plano pago."
+  },
+  "servers": [
+    { "url": "https://api-nextpy-uno.1nwz76.easypanel.host", "description": "Produção" }
+  ],
+  "security": [{ "bearerAuth": [] }],
+  "tags": [
+    { "name": "Conversões", "description": "Converte um PDF em uma etiqueta 10×15." },
+    { "name": "Lotes", "description": "Converte vários PDFs numa admissão única, com saída em ZIP." },
+    { "name": "Uso", "description": "Consumo da cota no período vigente." }
+  ],
+  "paths": {
+    "/api/v1/conversions": {
+      "post": {
+        "tags": ["Conversões"],
+        "summary": "Criar uma conversão",
+        "description": "Envia um PDF multipart (etiqueta + DANFE). Reserva a cota e responde 202 sem esperar o processamento. Envie Idempotency-Key para repetir com segurança.",
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" }, "description": "Chave única da operação. Repetir a mesma chave retorna o mesmo resultado; nova chave inicia nova operação." }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file", "size"],
+                "properties": {
+                  "file": { "type": "string", "format": "binary", "description": "PDF de duas páginas." },
+                  "size": { "type": "string", "enum": ["100x150", "100x100", "a6", "custom"], "description": "Tamanho de saída." },
+                  "widthMm": { "type": "number", "description": "Largura (50–210), quando size=custom." },
+                  "heightMm": { "type": "number", "description": "Altura (50–300), quando size=custom." }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Aceita; processamento assíncrono.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversion" } } } },
+          "403": { "description": "Sem plano pago vigente ou sem o adicional + API.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "422": { "description": "PDF inválido, cifrado ou template não reconhecido.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } },
+          "429": { "description": "Limite de requisições por minuto atingido." }
+        }
+      }
+    },
+    "/api/v1/conversions/{id}": {
+      "get": {
+        "tags": ["Conversões"],
+        "summary": "Consultar uma conversão",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": {
+          "200": { "description": "Estado atual.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Conversion" } } } },
+          "404": { "description": "Não encontrada.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Error" } } } }
+        }
+      }
+    },
+    "/api/v1/batches": {
+      "post": {
+        "tags": ["Lotes"],
+        "summary": "Criar um lote",
+        "description": "Envia o campo files repetido. Reserva a cota inteira ou rejeita a operação; a saída é um ZIP só com as etiquetas aprovadas.",
+        "parameters": [{ "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string" } }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["files", "size"],
+                "properties": {
+                  "files": { "type": "array", "items": { "type": "string", "format": "binary" } },
+                  "size": { "type": "string", "enum": ["100x150", "100x100", "a6", "custom"] },
+                  "widthMm": { "type": "number" },
+                  "heightMm": { "type": "number" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Aceita.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Batch" } } } }
+        }
+      }
+    },
+    "/api/v1/batches/{id}": {
+      "get": {
+        "tags": ["Lotes"],
+        "summary": "Consultar um lote",
+        "parameters": [{ "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }],
+        "responses": { "200": { "description": "Estado atual.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Batch" } } } } }
+      }
+    },
+    "/api/v1/usage": {
+      "get": {
+        "tags": ["Uso"],
+        "summary": "Consultar o uso",
+        "responses": { "200": { "description": "Uso do período.", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Usage" } } } } }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": { "type": "http", "scheme": "bearer", "description": "Chave de API: Authorization: Bearer uno_live_…" }
+    },
+    "schemas": {
+      "Conversion": {
+        "type": "object",
+        "properties": {
+          "requestId": { "type": "string" },
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed"] },
+          "progress": { "type": "integer" },
+          "downloadUrl": { "type": "string", "description": "URL assinada (apenas quando completed)." },
+          "expiresAt": { "type": "string", "format": "date-time" },
+          "createdAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "Batch": {
+        "type": "object",
+        "properties": {
+          "requestId": { "type": "string" },
+          "id": { "type": "string" },
+          "status": { "type": "string", "enum": ["queued", "processing", "completed", "failed"] },
+          "itemCount": { "type": "integer" },
+          "completedCount": { "type": "integer" },
+          "failedCount": { "type": "integer" },
+          "downloadUrl": { "type": "string" }
+        }
+      },
+      "Usage": {
+        "type": "object",
+        "properties": {
+          "periodStart": { "type": "string", "format": "date-time" },
+          "periodEnd": { "type": "string", "format": "date-time" },
+          "limit": { "type": "integer" },
+          "reserved": { "type": "integer" },
+          "confirmed": { "type": "integer" },
+          "remaining": { "type": "integer" }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "requestId": { "type": "string" },
+          "error": {
+            "type": "object",
+            "properties": { "code": { "type": "string" }, "message": { "type": "string" } }
+          }
+        }
+      }
+    }
+  }
+}
