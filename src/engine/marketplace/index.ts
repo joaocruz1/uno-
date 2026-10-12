@@ -47,6 +47,7 @@ export {
 } from "./tiktok";
 export { convertMercadoLivreBatch } from "./mercado-livre";
 export { convertShopeeBatch, readShopeeBarcode, type ShopeeBatchOptions, type ShopeeOrderValidator } from "./shopee";
+export { convertFullMlBatch, type FullMlBatchOptions } from "./full-ml";
 
 /**
  * Converts a marketplace export (N orders in one file) into a single

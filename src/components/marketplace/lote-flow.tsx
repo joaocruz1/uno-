@@ -8,6 +8,7 @@ import { Button, Progress } from "@/components/ui";
 import { ChannelMark } from "@/components/marketplace-logos";
 import { ShopeeLoteFlow } from "@/components/marketplace/shopee-lote-flow";
 import { TikTokLoteFlow } from "@/components/marketplace/tiktok-lote-flow";
+import { FullMlFlow } from "@/components/marketplace/full-ml-flow";
 import { startPollingClock } from "@/components/conversion/use-polling-delay";
 import { acceptedLoteSchema, loteDownloadSchema, loteViewSchema, type LoteView } from "@/lib/marketplace-model";
 import { inspectPdf, putFile, requestUploadIntent, PDF_CONTENT_TYPE } from "@/lib/upload-client";
@@ -17,9 +18,10 @@ const MAX_FILES = 10;
 // Marketplaces shown in the converter: Mercado Livre is live; the others are
 // on the roadmap and appear disabled so the multi-channel direction is visible.
 const MARKETPLACES = [
-  { id: "mercado-livre" as const, name: "Mercado Livre", available: true },
-  { id: "shopee" as const, name: "Shopee", available: true },
-  { id: "tiktok" as const, name: "TikTok Shop", available: true },
+  { id: "mercado-livre" as const, name: "Mercado Livre", mark: "mercado-livre" as const, available: true },
+  { id: "shopee" as const, name: "Shopee", mark: "shopee" as const, available: true },
+  { id: "tiktok" as const, name: "TikTok Shop", mark: "tiktok" as const, available: true },
+  { id: "full-ml" as const, name: "Full ML (ZPL)", mark: "mercado-livre" as const, available: true },
 ];
 const PHASES: Record<string, string> = {
   queued: "Na fila",
@@ -38,7 +40,7 @@ type Picked = { file: File; key: string };
 type Phase = "idle" | "uploading" | "working" | "error";
 
 export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB: number }) {
-  const [marketplace, setMarketplace] = useState<"mercado-livre" | "shopee" | "tiktok">("mercado-livre");
+  const [marketplace, setMarketplace] = useState<"mercado-livre" | "shopee" | "tiktok" | "full-ml">("mercado-livre");
   const [files, setFiles] = useState<Picked[]>([]);
   const [phase, setPhase] = useState<Phase>("idle");
   const [uploadingIndex, setUploadingIndex] = useState(0);
@@ -227,7 +229,7 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
                   : "cursor-not-allowed border-[var(--color-line)] bg-[var(--color-surface)] text-[var(--color-faint)]"
             }`}
           >
-            <ChannelMark id={channel.id} size={22} muted={!channel.available} />
+            <ChannelMark id={channel.mark} size={22} muted={!channel.available} />
             {channel.name}
             {channel.available
               ? <span className={`ml-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold ${selected ? "bg-[var(--color-ok-surface)] text-[var(--color-ok)]" : "bg-[var(--color-surface-2)] text-[var(--color-faint)]"}`}>Disponível</span>
@@ -241,6 +243,8 @@ export function LoteFlow({ planName, maxFileMB }: { planName: string; maxFileMB:
         <ShopeeLoteFlow planName={planName} maxFileMB={maxFileMB} />
       ) : marketplace === "tiktok" ? (
         <TikTokLoteFlow planName={planName} maxFileMB={maxFileMB} />
+      ) : marketplace === "full-ml" ? (
+        <FullMlFlow />
       ) : (
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_320px]">
       <section className="card-soft overflow-hidden rounded-2xl">
