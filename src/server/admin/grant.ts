@@ -17,10 +17,11 @@ export type TestGrantResult = {
 
 /**
  * Admin override that unlocks a paid plan (and optionally the API add-on) for an
- * organization, by setting the prepaid and add-on columns directly — no payment,
- * no Stripe. It is a manual test grant, so it writes the columns rather than a
- * billing_grants record: reconciliation never runs for an org without a Stripe
- * subscription, so the override persists. Replaying it just re-sets the columns.
+ * organization, by setting the prepaid columns directly — no payment, no Stripe.
+ * Both land in prepaid columns (prepaid_plan_id/period_end and
+ * api_addon_prepaid_until) that reconciliation never overwrites, so the override
+ * survives the periodic Stripe reconcile even with no Stripe subscription.
+ * Replaying it just re-sets the columns.
  *
  * The effective plan becomes the higher of the Stripe plan and this prepaid plan
  * (so it coexists with a real subscription), and the API entitlement needs this
@@ -53,7 +54,9 @@ export async function grantTestEntitlement(input: TestGrantInput, database: UnoD
     await tx.update(subscriptions).set({
       prepaidPlanId: planId,
       prepaidPeriodEnd: periodEnd,
-      ...(input.apiAddon ? { apiAddonStatus: "ACTIVE" as const, apiAddonCurrentPeriodEnd: periodEnd } : {}),
+      // The add-on grant goes in the prepaid column, which reconciliation never
+      // overwrites — so it is not wiped on an org without a Stripe add-on sub.
+      ...(input.apiAddon ? { apiAddonPrepaidUntil: periodEnd } : {}),
       updatedAt: now,
     }).where(and(eq(subscriptions.organizationId, org.organizationId)));
     return { organizationId: org.organizationId, prepaidPlanId: planId, prepaidPeriodEnd: periodEnd.toISOString(), apiAddon: input.apiAddon };

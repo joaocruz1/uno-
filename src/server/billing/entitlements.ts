@@ -25,6 +25,8 @@ export type SubscriptionEntitlement = PlanSubscription & {
   /** API add-on state, reconciled from its own Stripe subscription. */
   apiAddonStatus: SubscriptionStatus | null;
   apiAddonCurrentPeriodEnd: Date | null;
+  /** Prepaid API add-on (admin/manual grant), independent of Stripe; reconciliation never clears it. */
+  apiAddonPrepaidUntil?: Date | null;
 };
 
 export type EffectivePlan = {
@@ -42,6 +44,7 @@ export const subscriptionEntitlementColumns = {
   currentPeriodEnd: subscriptions.currentPeriodEnd,
   apiAddonStatus: subscriptions.apiAddonStatus,
   apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
+  apiAddonPrepaidUntil: subscriptions.apiAddonPrepaidUntil,
   prepaidPlanId: subscriptions.prepaidPlanId,
   prepaidPeriodEnd: subscriptions.prepaidPeriodEnd,
 };
@@ -53,6 +56,7 @@ export const FREE_ENTITLEMENT: SubscriptionEntitlement = Object.freeze({
   currentPeriodEnd: null,
   apiAddonStatus: null,
   apiAddonCurrentPeriodEnd: null,
+  apiAddonPrepaidUntil: null,
   prepaidPlanId: null,
   prepaidPeriodEnd: null,
 });
@@ -83,10 +87,13 @@ export function effectivePlanId(subscription: PlanSubscription | undefined, now 
 
 /** The add-on subscription itself is paid up, regardless of the plan. */
 export function apiAddonActive(
-  subscription: Pick<SubscriptionEntitlement, "apiAddonStatus" | "apiAddonCurrentPeriodEnd"> | undefined,
+  subscription: Pick<SubscriptionEntitlement, "apiAddonStatus" | "apiAddonCurrentPeriodEnd" | "apiAddonPrepaidUntil"> | undefined,
   now = new Date(),
 ): boolean {
   if (!subscription) return false;
+  // A prepaid/admin add-on grant lives in its own column, which reconciliation
+  // never overwrites — so it survives an org that has no Stripe add-on subscription.
+  if (subscription.apiAddonPrepaidUntil && subscription.apiAddonPrepaidUntil > now) return true;
   if (subscription.apiAddonStatus !== "ACTIVE" && subscription.apiAddonStatus !== "TRIALING") return false;
   return Boolean(subscription.apiAddonCurrentPeriodEnd && subscription.apiAddonCurrentPeriodEnd > now);
 }

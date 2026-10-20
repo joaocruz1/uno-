@@ -100,6 +100,7 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
       currentPeriodEnd: subscriptions.currentPeriodEnd,
       apiAddonStatus: subscriptions.apiAddonStatus,
       apiAddonCurrentPeriodEnd: subscriptions.apiAddonCurrentPeriodEnd,
+      apiAddonPrepaidUntil: subscriptions.apiAddonPrepaidUntil,
       prepaidPlanId: subscriptions.prepaidPlanId,
       prepaidPeriodEnd: subscriptions.prepaidPeriodEnd,
     })
@@ -133,6 +134,7 @@ export async function resolveActor(identity: Identity, preferredOrganizationId: 
     currentPeriodEnd: membership.currentPeriodEnd,
     apiAddonStatus: membership.apiAddonStatus,
     apiAddonCurrentPeriodEnd: membership.apiAddonCurrentPeriodEnd,
+    apiAddonPrepaidUntil: membership.apiAddonPrepaidUntil,
     prepaidPlanId: membership.prepaidPlanId,
     prepaidPeriodEnd: membership.prepaidPeriodEnd,
   } : undefined);

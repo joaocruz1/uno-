@@ -1,0 +1,1 @@
+ALTER TABLE "subscriptions" ADD COLUMN "api_addon_prepaid_until" timestamp with time zone;
