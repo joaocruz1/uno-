@@ -152,6 +152,11 @@ describe("billing entitlements and configuration", () => {
     for (const status of ["PAST_DUE", "CANCELED", "UNPAID", "PAUSED", "INCOMPLETE"] as const) {
       expect(api({ ...paid, ...addon, apiAddonStatus: status })).toBe(false);
     }
+    // Prepaid add-on grant (admin): survives even when reconciliation wipes the
+    // Stripe add-on status to null — the exact case that broke before.
+    expect(api({ ...paid, apiAddonStatus: null, apiAddonPrepaidUntil: later })).toBe(true);
+    expect(api({ ...paid, planId: "FREE", apiAddonPrepaidUntil: later })).toBe(false); // still needs a paid plan
+    expect(api({ ...paid, apiAddonPrepaidUntil: NOW })).toBe(false); // prepaid window ended
   });
 
   it("keeps plan billing configured without the add-on price", () => {

@@ -202,6 +202,9 @@ export const subscriptions = pgTable(
     apiAddonSubscriptionId: text("api_addon_subscription_id"),
     apiAddonStatus: subscriptionStatusEnum("api_addon_status"),
     apiAddonCurrentPeriodEnd: timestamp("api_addon_current_period_end", { withTimezone: true }),
+    // Prepaid API add-on, granted without a Stripe add-on subscription (admin/manual).
+    // Reconciliation never writes this, so it is not wiped when the Stripe side has no add-on.
+    apiAddonPrepaidUntil: timestamp("api_addon_prepaid_until", { withTimezone: true }),
     // Prepaid plan days bought by PIX or earned by referral, independent of Stripe.
     // Reconciliation never writes these, so an active Stripe sub cannot clear them.
     prepaidPlanId: planIdEnum("prepaid_plan_id"),
