@@ -36,6 +36,11 @@ export type SyntheticPdfOptions = {
   scanned?: boolean;
   /** Prints the simplified DANFE header fields and a 44-digit key barcode. */
   fiscalSummary?: boolean;
+  /**
+   * Slides the logistics barcode to the right and draws a service icon on the
+   * left, as Mercado Livre does for some shipments (e.g. Jadlog, hourglass).
+   */
+  shiftedLogisticsBarcodePt?: number;
 };
 
 function yFromTop(top: number, fontSize: number): number {
@@ -97,7 +102,9 @@ async function drawLogistics(document: PDFDocument, page: PDFPage, options: Synt
   const primary = options.unknown ? "DOCUMENTO SINTETICO" : "DESPACHAR";
   drawText(page, options.unknown ? "CABECALHO TESTE" : "MLB 00000001", 18, 8, regular);
   drawText(page, primary, 72, 9, bold, 178);
-  page.drawImage(images.logistics, { x: 37.1339, y: 270.9921, width: 170.0787, height: 56.6929 });
+  const shift = options.shiftedLogisticsBarcodePt ?? 0;
+  page.drawImage(images.logistics, { x: 37.1339 + shift, y: 270.9921, width: 170.0787, height: 56.6929 });
+  if (shift > 0) page.drawImage(images.qr, { x: 10, y: 268, width: 26, height: 55 });
   drawText(page, "DESTINATARIO TESTE SINTETICO", 212, 8, regular);
   drawText(page, "RUA EXEMPLO, 100 - SEM DADOS REAIS", 263, 7, regular);
   drawText(page, "PEDIDO SINTETICO 0001", 315, 7, regular);
