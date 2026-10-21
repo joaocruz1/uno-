@@ -1,7 +1,7 @@
 import { EngineError } from "./errors";
 import { recognizeScannedPage } from "./ocr";
 import { openPdfRenderer, type RenderedBitmap } from "./render";
-import { listTemplateDefinitions, normalizeEvidenceText, selectTemplateDefinitions, type TemplateDefinition } from "./templates";
+import { listTemplateDefinitions, normalizeEvidenceText, resolveProtectedCodes, selectTemplateDefinitions, type TemplateDefinition } from "./templates";
 import type { Analysis, DetectedPage, Detection, Detector, OcrBlock, PageRole } from "./types";
 
 function protectedInk(bitmap: RenderedBitmap, box: { left: number; bottom: number; right: number; top: number }, pageWidth: number, pageHeight: number): boolean {
@@ -25,7 +25,7 @@ function protectedInk(bitmap: RenderedBitmap, box: { left: number; bottom: numbe
 }
 
 async function verifyProtectedGeometry(definition: TemplateDefinition, analysis: Analysis, logisticsPage: number, danfePage: number): Promise<void> {
-  const codes = definition.protectedCodes(logisticsPage, danfePage);
+  const codes = resolveProtectedCodes(definition, analysis, logisticsPage, danfePage);
   const digitalGeometryValid = codes.every((code) => {
     const page = analysis.pages.find((candidate) => candidate.pageNumber === code.pageNumber);
     if (!page || page.kind !== "digital") return true;

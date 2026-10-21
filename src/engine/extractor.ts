@@ -6,7 +6,7 @@ import {
   structuralBorderTopPositions,
   templateRegions,
 } from "./template";
-import { findTemplateDefinition, type TemplateDefinition } from "./templates";
+import { findTemplateDefinition, resolveProtectedCodes, type TemplateDefinition } from "./templates";
 import type { Analysis, Detection, Extraction, ExtractedRegion, Extractor, PdfRect } from "./types";
 
 function meaningful(value: string): boolean {
@@ -156,7 +156,7 @@ export class TemplateExtractor implements Extractor {
     const logistics = detection.pages.find((page) => page.role === "logistics");
     const danfe = detection.pages.find((page) => page.role === "danfe");
     if (!logistics || !danfe) throw new EngineError("ambiguous_template");
-    const protectedCodes = definition.protectedCodes(logistics.pageNumber, danfe.pageNumber);
+    const protectedCodes = resolveProtectedCodes(definition, analysis, logistics.pageNumber, danfe.pageNumber);
     const regions: ExtractedRegion[] = [];
     const contentBoxes: Extraction["contentBoxes"] = [];
 

@@ -34,6 +34,20 @@ function hasCode(code: string) {
 }
 
 describe("UNO PDF engine pipeline", () => {
+  it("validates the logistics barcode where it really is when Mercado Livre slides it sideways", async () => {
+    // A fixed template box cut 45 pt of this barcode and every such label failed with codes_unreadable.
+    const input = await syntheticPdf({ fiscalSummary: true, shiftedLogisticsBarcodePt: 45 });
+    const result = await convertPdf(input, { preset: "100x150" }, "mercado-livre@1.0.0");
+    expect(result.pageCount).toBe(1);
+    expect(result.validation).toEqual({ contentPreserved: true, geometryValid: true, codesEquivalent: true });
+
+    const analysis = await new PdfAnalyzer().analyze(input);
+    const detection = await new TemplateDetector().detect(analysis, "mercado-livre@1.0.0");
+    const extraction = await new TemplateExtractor().extract(analysis, detection);
+    const logistics = extraction.protectedCodes.find((code) => code.id === "logistics_barcode");
+    expect(logistics?.box.left).toBeCloseTo(37.1339 + 45, 1);
+  });
+
   it("converts a synthetic digital pair with additional fiscal content and validates all protected codes", async () => {
     const input = await syntheticPdf({ additionalInformation: true });
     const progress: ProgressEvent[] = [];
