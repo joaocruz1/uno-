@@ -1,6 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { closeDb } from "@/db";
 import { promoteSyntheticPro, restoreSyntheticFree } from "./helpers/api-fixture";
 import { isolateClientIp } from "./helpers/client-ip";
 
@@ -8,9 +7,8 @@ test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
-test.afterAll(async () => {
-  if (process.env.UNO_LOCAL_API_E2E === "1") await closeDb();
-});
+// No closeDb() in afterAll: a timed-out test's cleanup can still be running
+// then. The pool lets the worker exit on idle outside production.
 
 async function signedInPage(page: Page): Promise<string> {
   const origin = "http://127.0.0.1:3100";

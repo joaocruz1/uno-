@@ -48,9 +48,18 @@ test("owner renames the organization, invites a member by e-mail and the invitee
 
   await owner.page.goto("/dashboard/settings");
   await expect(owner.page.getByRole("heading", { name: "Configurações", exact: true })).toBeVisible();
-  await owner.page.getByLabel("Nome da organização").fill(organizationName);
-  await owner.page.getByLabel("Nome da organização").locator("xpath=ancestor::form[1]").getByRole("button", { name: "Salvar nome", exact: true }).click();
+  const renameForm = owner.page.getByLabel("Nome da organização").locator("xpath=ancestor::form[1]");
+  // The panel may remount once after load (it is keyed by the organization), so
+  // retype until the submit button reflects the new name.
+  await expect(async () => {
+    await owner.page.getByLabel("Nome da organização").fill(organizationName);
+    await expect(renameForm.getByRole("button", { name: "Salvar nome", exact: true })).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+  await renameForm.getByRole("button", { name: "Salvar nome", exact: true }).click();
   await expect(owner.page.getByRole("main").getByText(organizationName).first()).toBeVisible();
+  // The rename refreshes server data and remounts the settings panel; wait for
+  // the server-rendered header so the invitation form is the final instance.
+  await expect(owner.page.getByRole("banner").getByText(organizationName).first()).toBeAttached();
 
   await owner.page.getByLabel("E-mail", { exact: true }).fill(invitee.email);
   await owner.page.getByRole("button", { name: "Enviar convite", exact: true }).click();

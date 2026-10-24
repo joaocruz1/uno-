@@ -138,3 +138,12 @@ Fixed on the way:
 - All specs ran from one address and tripped Better Auth's per-IP limits (3 sign-ups per 10 s, 3 verification e-mails per minute). `tests/e2e/helpers/client-ip.ts` now gives each test context its own RFC 5737 `x-forwarded-for`; the production limits are unchanged.
 
 To reproduce: `corepack pnpm exec playwright install`, start the services above, then `UNO_TEST_URL=http://127.0.0.1:3100 UNO_LOCAL_AUTH_E2E=1 UNO_LOCAL_API_E2E=1 UNO_LOCAL_UPLOAD_E2E=1 corepack pnpm exec playwright test`.
+
+### Follow-up: landing hydration fixed, 60/60 (2026-10-24)
+
+- **Landing hydration.** The theme script now goes through `src/components/inline-script.tsx`: `text/javascript` on the server, inert `text/plain` on the client, with `suppressHydrationWarning`, as in Next's "preventing flash before hydration" guide. `<html>` also gets `suppressHydrationWarning`, because that script sets `data-theme` before hydration.
+- **Reduced motion.** `Magnetic` always renders the same element and turns the effect off under reduced motion. `HeroStage` and `HowItWorks` only switch to their reduced-motion trees after hydration, through the new `src/lib/use-hydrated.ts`.
+- **Flaky specs fixed.**
+  - The team spec now waits for the settings panel's remount around the organization rename.
+  - The API spec no longer closes the shared DB pool in `afterAll`, where it could race a timed-out test's cleanup.
+- **Result.** The full suite passed **60/60** on Chromium, Firefox, WebKit and mobile; the team spec passed 24/24 on `--repeat-each=3`. Lint, typecheck, Vitest (471 passed) and the production build PASS.
