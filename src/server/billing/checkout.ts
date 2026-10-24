@@ -99,6 +99,10 @@ async function prepareCheckout(
         .returning();
       subscription = inserted[0]!;
     }
+    // An interrupted 7-day refund must finish before anything new is bought.
+    if (subscription.refundStartedAt && !subscription.refundedAt) {
+      throw new AppError("refund_in_progress", "Há um reembolso em andamento. Conclua o reembolso antes de contratar.", 409);
+    }
     if (target.addon) {
       // The add-on only exists on top of a paid plan in force, and only once.
       if (effectivePlanId(subscription, now) === "FREE") {

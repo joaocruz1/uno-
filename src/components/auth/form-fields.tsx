@@ -59,25 +59,3 @@ export function FormMessage({ error, success }: { error?: string; success?: stri
     </p>
   );
 }
-
-export function friendlyAuthError(code?: string): string {
-  switch (code) {
-    case "INVALID_EMAIL_OR_PASSWORD":
-    case "INVALID_PASSWORD":
-    case "USER_NOT_FOUND":
-      return "E-mail ou senha inválidos.";
-    case "EMAIL_NOT_VERIFIED":
-      return "Confirme seu e-mail antes de entrar.";
-    case "USER_ALREADY_EXISTS":
-    case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL":
-      return "Já existe uma conta com este e-mail.";
-    case "PASSWORD_TOO_SHORT":
-      return "A senha deve ter pelo menos 8 caracteres.";
-    case "INVALID_TOKEN":
-      return "Este link é inválido ou expirou.";
-    case "TOO_MANY_REQUESTS":
-      return "Muitas tentativas. Aguarde um pouco e tente novamente.";
-    default:
-      return "Não foi possível concluir. Tente novamente.";
-  }
-}

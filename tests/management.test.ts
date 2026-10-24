@@ -43,7 +43,7 @@ const sent: InvitationEmailMessage[] = [];
 const mailer: InvitationMailer = { async sendOrganizationInvitation(message) { sent.push(message); } };
 
 const who = (userId: string, name = "Pessoa"): Pick<Identity, "userId" | "name"> => ({ userId, name });
-const identity = (userId: string, email: string): Identity => ({ userId, email, name: "Pessoa", platformRole: "USER" });
+const identity = (userId: string, email: string): Identity => ({ userId, email, name: "Pessoa", platformRole: "USER", emailVerified: true });
 
 async function migrate() {
   const directory = fileURLToPath(new URL("../drizzle", import.meta.url));

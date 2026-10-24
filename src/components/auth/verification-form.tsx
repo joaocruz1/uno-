@@ -10,7 +10,7 @@ import { Field, FormMessage, SubmitButton } from "./form-fields";
 export function VerificationForm({ initialEmail, verified }: { initialEmail?: string; verified?: boolean }) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string>();
-  const [success, setSuccess] = useState<string | undefined>(verified ? "E-mail confirmado. Sua conta está pronta." : undefined);
+  const [success, setSuccess] = useState<string | undefined>(verified ? "E-mail confirmado. Entre novamente para continuar." : undefined);
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -27,7 +27,7 @@ export function VerificationForm({ initialEmail, verified }: { initialEmail?: st
         setError("Não foi possível reenviar agora. Aguarde e tente novamente.");
         return;
       }
-      setSuccess("Se a conta estiver aguardando confirmação, um novo link foi enviado.");
+      setSuccess("Se a conta estiver aguardando confirmação, o link foi enviado.");
     } catch {
       setError("Não foi possível reenviar agora. Aguarde e tente novamente.");
     } finally {
@@ -41,10 +41,10 @@ export function VerificationForm({ initialEmail, verified }: { initialEmail?: st
       {!verified && (
         <form onSubmit={submit} className="space-y-4">
           <Field label="E-mail" name="email" type="email" autoComplete="email" placeholder="voce@empresa.com" defaultValue={initialEmail} readOnly={Boolean(initialEmail)} />
-          <SubmitButton pending={pending}>Reenviar confirmação</SubmitButton>
+          <SubmitButton pending={pending}>Enviar link de confirmação</SubmitButton>
         </form>
       )}
-      <p className="text-center text-sm"><Link href="/login" className="font-semibold text-white hover:text-uno-red">Ir para o login</Link></p>
+      <p className="text-center text-sm"><Link href="/dashboard" className="font-semibold text-white hover:text-uno-red">Ir para o painel</Link></p>
     </div>
   );
 }

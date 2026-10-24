@@ -10,12 +10,18 @@ import { ensureDefaultOrganization } from "./organization";
 
 export const SELECTED_ORGANIZATION_COOKIE = "uno_selected_organization";
 
-/** Verified identity. It carries no organization authorization by itself. */
+/** Authenticated identity. It carries no organization authorization by itself. */
 export type Identity = {
   userId: string;
   email: string;
   name: string;
   platformRole: "USER" | "ADMIN";
+  /**
+   * Whether the address was confirmed. Normal use does not depend on it; it
+   * gates platform administration and invitation acceptance, because without
+   * confirmation anyone can register someone else's address.
+   */
+  emailVerified: boolean;
 };
 
 export type Actor = Identity & {
@@ -47,7 +53,9 @@ async function requestHeaders(provided?: Headers): Promise<Headers> {
 }
 
 /**
- * Authenticates a verified identity without requiring any organization.
+ * Authenticates an identity without requiring any organization. A confirmed
+ * e-mail is NOT required here (NEX-42); callers that need it check
+ * `emailVerified` (platform administration, invitation acceptance).
  * Listing, switching and creating organizations and accepting invitations use
  * it so a removed member can still recover. The platform role is re-read from
  * the database on every request.
@@ -62,16 +70,12 @@ export async function requireIdentity(providedHeaders?: Headers, database: UnoDa
   }
 
   if (!authSession) throw new AppError("unauthorized", "Autenticação necessária.", 401);
-  if (!authSession.user.emailVerified) {
-    throw new AppError("email_not_verified", "Confirme seu e-mail antes de continuar.", 403);
-  }
 
   const rows = await database.select({ email: user.email, name: user.name, emailVerified: user.emailVerified, platformRole: user.platformRole })
     .from(user).where(eq(user.id, authSession.user.id)).limit(1);
   const current = rows[0];
   if (!current) throw new AppError("unauthorized", "Autenticação necessária.", 401);
-  if (!current.emailVerified) throw new AppError("email_not_verified", "Confirme seu e-mail antes de continuar.", 403);
-  return { userId: authSession.user.id, email: current.email, name: current.name, platformRole: current.platformRole };
+  return { userId: authSession.user.id, email: current.email, name: current.name, platformRole: current.platformRole, emailVerified: current.emailVerified };
 }
 
 /** Reads the selected-organization preference. It is never an authorization. */
@@ -159,9 +163,13 @@ function configuredAdminEmails(): ReadonlySet<string> {
   return new Set((process.env.ADMIN_EMAILS ?? "").split(",").map((email) => email.trim().toLowerCase()).filter(Boolean));
 }
 
-/** Platform administration needs BOTH the stored role and the operational allowlist. */
-export function isPlatformAdmin(identity: Pick<Identity, "email" | "platformRole">): boolean {
-  return identity.platformRole === "ADMIN" && configuredAdminEmails().has(identity.email.trim().toLowerCase());
+/**
+ * Platform administration needs the stored role, the operational allowlist AND
+ * a confirmed e-mail: the role is granted from ADMIN_EMAILS when the account is
+ * created, and sign-up no longer proves ownership of the address.
+ */
+export function isPlatformAdmin(identity: Pick<Identity, "email" | "platformRole" | "emailVerified">): boolean {
+  return identity.emailVerified && identity.platformRole === "ADMIN" && configuredAdminEmails().has(identity.email.trim().toLowerCase());
 }
 
 export async function requireAdmin(providedHeaders?: Headers): Promise<Actor> {

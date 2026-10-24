@@ -63,6 +63,40 @@ template is rejected; there is no generic or best-effort fallback.
 - Record the engine version, template version, state, attempts, and usage for
   every conversion.
 
+## Sign-up, sign-in and checkout (NEX-42)
+
+- Sign-up with e-mail and password signs the person in at once. E-mail
+  confirmation is never sent automatically and never blocks normal use
+  (dashboard, conversions, batches, billing, API management).
+- "Continuar com Google" is offered on sign-in and sign-up only when the Google
+  OAuth client is configured. Google accounts arrive with a confirmed e-mail and
+  are provisioned like any other account (personal FREE organization).
+- Google never links implicitly onto an existing password account whose e-mail
+  was not confirmed; the person is told to sign in with e-mail and password.
+- A confirmed e-mail is still required for: (a) platform administration (stored
+  ADMIN role + `ADMIN_EMAILS` + confirmed e-mail), because the role is granted
+  from `ADMIN_EMAILS` when the account is created; and (b) accepting an
+  organization invitation, because invitations match by e-mail. Without
+  confirmation anyone could register someone else's address. The confirmation
+  link is requested on demand (`/verify-email` or the invitation screen).
+- After sign-up (e-mail or Google from the sign-up page) the person goes
+  straight to `/checkout`, preserving `?plan=` from the pricing page, unless a
+  safe internal `callbackURL` was given (for example `/invite`) or the visitor
+  explicitly chose the free plan (`?plan=free` → `/dashboard`).
+- Sign-in honors a safe internal `callbackURL`; otherwise a valid `?plan=` goes
+  to `/checkout?plan=…` and no plan goes to `/dashboard`. An account created by
+  Google from the sign-in page goes to `/checkout`.
+- `plan` is validated on the server against the paid plan ids (STARTER, PRO,
+  BUSINESS, case-insensitive); any other value is ignored.
+- `/checkout` is authenticated. It preselects the plan, shows the first-month
+  promotional price when there is one, and starts Stripe Checkout through
+  `POST /api/dashboard/billing/checkout` with an Idempotency-Key, following only
+  https `checkout.stripe.com`/`billing.stripe.com` URLs. An organization with a
+  paid plan in force (or a live subscription to manage) is sent to
+  `/dashboard/billing`. Members who are not OWNER/ADMIN see that they cannot
+  buy; without billing configuration the page says so. "Continuar no plano
+  grátis" always leads to `/dashboard`.
+
 ## Plans and quotas
 
 Monthly price is the recurring amount, charged from the second month; the first
@@ -156,6 +190,12 @@ price). PIX one-off purchases charge the recurring price.
   from the API creation latency measure.
 - AC-UNO-014: Lint, strict typecheck, relevant automated tests, production build,
   supported-browser checks, security review, and spec audit pass before release.
+
+- AC-UNO-015: A new e-mail/password account is signed in by sign-up and uses the
+  dashboard without confirming the address; platform administration and
+  invitation acceptance still refuse an unconfirmed e-mail; Google sign-in is
+  registered only when its client is configured; the `plan` parameter accepts
+  only paid plan ids and new accounts land on `/checkout`.
 
 # Open questions
 

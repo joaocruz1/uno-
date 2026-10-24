@@ -2,9 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
-import { Button } from "@/components/ui";
-import { billingStateSchema } from "@/lib/billing-model";
+import { Button, Modal } from "@/components/ui";
+import { billingPlanChangeResultSchema, billingStateSchema, type PaidPlanId } from "@/lib/billing-model";
 import { formatBrlCents } from "@/lib/plans";
+
+import { postBilling, SubscriptionManager } from "./subscription-manager";
 
 type BillingState = z.infer<typeof billingStateSchema>;
 const statusLabels: Record<string, string> = { ACTIVE: "Ativa", TRIALING: "Em teste", INCOMPLETE: "Pagamento pendente", PAST_DUE: "Pagamento em atraso", UNPAID: "Pagamento pendente", PAUSED: "Pausada", CANCELED: "Cancelada" };
@@ -21,11 +23,11 @@ function AddonCard({ billing, canManage, busy, onSubscribe }: { billing: Billing
     <div className="mt-6 flex flex-wrap items-center gap-4">
       {addon.active ? <p className="text-sm font-semibold text-uno-red">Adicional ativo{addon.currentPeriodEnd ? ` · período até ${dateLabel(addon.currentPeriodEnd)}` : ""}</p>
         : addon.inactiveWithoutPaidPlan ? <p className="text-sm text-amber-300">O adicional está pago, mas inativo: a API só funciona com um plano pago ativo. Escolha um plano ou cancele o adicional no portal.</p>
-        : pending ? <p className="text-sm text-amber-300">{statusLabels[addon.status ?? ""] ?? "Pagamento pendente"} — regularize o adicional em Gerenciar assinatura.</p>
+        : pending ? <p className="text-sm text-amber-300">{statusLabels[addon.status ?? ""] ?? "Pagamento pendente"} — regularize o adicional em Gerenciar no portal.</p>
         : addon.available ? <Button variant="secondary" disabled={Boolean(busy)} onClick={onSubscribe}>{busy === ADDON_OPERATION ? "Abrindo…" : `Contratar + ${addon.name}`}</Button>
         : <p className="text-sm text-[var(--color-muted)]">{!canManage ? "Gerenciado pelo administrador" : billing.effectivePlanId === "FREE" ? "Disponível para os planos Starter, Pro e Business. Escolha um plano pago para contratar." : "O adicional ainda não está disponível nesta instalação."}</p>}
     </div>
-    <p className="mt-4 text-xs text-[var(--color-muted)]">O adicional é uma assinatura mensal própria. Para cancelar, use Gerenciar assinatura (portal do cliente).</p>
+    <p className="mt-4 text-xs text-[var(--color-muted)]">O adicional é uma assinatura mensal própria. Ele pode ser cancelado junto com o plano em Cancelar assinatura, ou sozinho em Gerenciar no portal.</p>
   </section>;
 }
 
@@ -36,6 +38,8 @@ export function BillingPanel({ canManage }: { canManage: boolean }) {
   const [error, setError] = useState<string>();
   const [refresh, setRefresh] = useState(0);
   const [busy, setBusy] = useState<string>();
+  const [planDialog, setPlanDialog] = useState<PaidPlanId>();
+  const [notice, setNotice] = useState<string>();
   const operationKeys = useRef(new Map<string, string>());
   const locked = useRef(false);
   useEffect(() => {
@@ -70,13 +74,48 @@ export function BillingPanel({ canManage }: { canManage: boolean }) {
     finally { locked.current = false; setBusy(undefined); }
   };
 
+  // In-app plan swap on the live card subscription; without one the server answers with the Checkout.
+  const changePlan = async (planId: PaidPlanId) => {
+    if (locked.current || !canManage) return;
+    const operation = `plan:${planId}`;
+    locked.current = true; setBusy(operation); setError(undefined); setNotice(undefined);
+    let checkout = false;
+    try {
+      const key = operationKeys.current.get(operation) ?? crypto.randomUUID();
+      operationKeys.current.set(operation, key);
+      const result = billingPlanChangeResultSchema.parse(await postBilling("plan", key, { planId }));
+      operationKeys.current.delete(operation);
+      setPlanDialog(undefined);
+      if (result.checkout) checkout = true;
+      else { setNotice(`Plano alterado para ${billing?.plans.find(plan => plan.id === planId)?.name ?? planId}. Upgrade cobrado agora no cartão.`); setRefresh(value => value + 1); }
+    } catch (cause) { setPlanDialog(undefined); setError(cause instanceof Error && !(cause instanceof z.ZodError) ? cause.message : "Não foi possível trocar de plano."); }
+    finally { locked.current = false; setBusy(undefined); }
+    if (checkout) await openBilling(planId);
+  };
+  const targetPlan = billing?.plans.find(plan => plan.id === planDialog);
+  const currentPlanPrice = billing?.plans.find(plan => plan.id === billing.effectivePlanId)?.priceBrlCents;
+
   return <div className="mt-8 space-y-8">
-    {error ? <p role="alert" className="text-sm text-red-300">{error}</p> : null}
+    {error ? <p role="alert" className="text-sm text-uno-red">{error}</p> : null}
+    {notice ? <p role="status" className="text-sm text-[var(--color-ink)]">{notice}</p> : null}
     <section className="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6">
-      <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-heading text-xl font-semibold">Plano atual</h2>{billing ? <><p className="mt-3 text-[var(--color-ink)]">{billing.plans.find(plan => plan.id === billing.effectivePlanId)?.name ?? billing.effectivePlanId}</p><p className="mt-2 text-sm text-[var(--color-muted)]">{statusLabels[billing.status] ?? "Free"} · Período: {dateLabel(billing.currentPeriodStart)} — {dateLabel(billing.currentPeriodEnd)}</p>{billing.cancelAtPeriodEnd ? <p className="mt-2 text-sm text-amber-300">Cancelamento agendado para o fim do período.</p> : null}</> : <p role="status" className="mt-3 text-[var(--color-muted)]">Consultando assinatura…</p>}</div><div className="flex flex-wrap gap-3"><Button size="sm" variant="ghost" onClick={() => setRefresh(value => value + 1)}>Atualizar</Button>{billing?.portalAvailable && canManage ? <Button size="sm" variant="secondary" disabled={Boolean(busy)} onClick={() => void openBilling()}>{busy === "portal" ? "Abrindo…" : "Gerenciar assinatura"}</Button> : null}</div></div>
+      <div className="flex flex-wrap items-start justify-between gap-4"><div><h2 className="font-heading text-xl font-semibold">Plano atual</h2>{billing ? <><p className="mt-3 text-[var(--color-ink)]">{billing.plans.find(plan => plan.id === billing.effectivePlanId)?.name ?? billing.effectivePlanId}</p><p className="mt-2 text-sm text-[var(--color-muted)]">{statusLabels[billing.status] ?? "Free"} · Período: {dateLabel(billing.currentPeriodStart)} — {dateLabel(billing.currentPeriodEnd)}</p></> : <p role="status" className="mt-3 text-[var(--color-muted)]">Consultando assinatura…</p>}</div><div className="flex flex-wrap gap-3"><Button size="sm" variant="ghost" onClick={() => setRefresh(value => value + 1)}>Atualizar</Button>{billing?.portalAvailable && canManage ? <Button size="sm" variant="ghost" disabled={Boolean(busy)} onClick={() => void openBilling()}>{busy === "portal" ? "Abrindo…" : "Gerenciar no portal"}</Button> : null}</div></div>
+      {billing ? <div className="mt-5"><SubscriptionManager billing={billing} canManage={canManage} onChanged={() => setRefresh(value => value + 1)} /></div> : null}
+      {billing?.portalAvailable && canManage ? <p className="mt-4 text-xs text-[var(--color-muted)]">Cartão, dados de cobrança e faturas ficam em Gerenciar no portal.</p> : null}
       {!canManage ? <p className="mt-4 text-sm text-[var(--color-muted)]">O proprietário ou administrador da organização gerencia a assinatura.</p> : billing && !billing.checkoutAvailable && !billing.portalAvailable ? <p className="mt-4 text-sm text-[var(--color-muted)]">A cobrança ainda não está configurada para esta instalação.</p> : null}
     </section>
-    {billing ? <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Planos disponíveis">{billing.plans.map(plan => <article key={plan.id} className={`flex flex-col rounded-2xl border bg-[var(--color-surface)] p-6 ${plan.id === billing.effectivePlanId ? "border-uno-red" : "border-[var(--color-line)]"}`}><h2 className="font-heading text-xl font-bold">{plan.name}</h2>{plan.priceBrlCents > 0 && plan.firstMonthPriceBrlCents < plan.priceBrlCents ? <><p className="mt-4 font-heading text-3xl font-bold">{formatBrlCents(plan.firstMonthPriceBrlCents)}<span className="text-sm font-normal text-uno-red"> no 1º mês</span></p><p className="mt-1 text-xs text-[var(--color-muted)]">depois {formatBrlCents(plan.priceBrlCents)}/mês</p></> : <p className="mt-4 font-heading text-3xl font-bold">{formatBrlCents(plan.priceBrlCents)}<span className="text-sm font-normal text-[var(--color-muted)]"> /mês</span></p>}<ul className="mt-5 flex-1 space-y-3 text-sm text-[var(--color-muted)]"><li>{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas por mês</li><li>Até {plan.maxFileMB} MB por arquivo</li><li>Lotes de até {plan.batchLimit} arquivos</li><li>Retenção de {plan.retentionDays} dias</li><li>{plan.id === "FREE" ? "Conversões pelo painel" : `API e webhooks com o adicional + API · ${plan.rateLimit} req/min`}</li></ul>{plan.id === billing.effectivePlanId ? <p className="mt-6 text-sm font-semibold text-uno-red">Seu plano atual</p> : plan.id !== "FREE" && canManage ? <Button className="mt-6" variant="secondary" disabled={Boolean(busy) || !billing.checkoutAvailable && !billing.portalAvailable} onClick={() => void openBilling(billing.checkoutAvailable ? plan.id : undefined)}>{busy === plan.id || busy === "portal" ? "Abrindo…" : billing.checkoutAvailable ? `Escolher ${plan.name}` : "Alterar no portal"}</Button> : <p className="mt-6 text-xs text-[var(--color-muted)]">{plan.id === "FREE" ? billing.portalAvailable ? "Cancelamento disponível no portal" : "Plano sem mensalidade" : "Gerenciado pelo administrador"}</p>}</article>)}</section> : null}
+    {billing ? <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" aria-label="Planos disponíveis">{billing.plans.map(plan => <article key={plan.id} className={`flex flex-col rounded-2xl border bg-[var(--color-surface)] p-6 ${plan.id === billing.effectivePlanId ? "border-uno-red" : "border-[var(--color-line)]"}`}><h2 className="font-heading text-xl font-bold">{plan.name}</h2>{plan.priceBrlCents > 0 && plan.firstMonthPriceBrlCents < plan.priceBrlCents ? <><p className="mt-4 font-heading text-3xl font-bold">{formatBrlCents(plan.firstMonthPriceBrlCents)}<span className="text-sm font-normal text-uno-red"> no 1º mês</span></p><p className="mt-1 text-xs text-[var(--color-muted)]">depois {formatBrlCents(plan.priceBrlCents)}/mês</p></> : <p className="mt-4 font-heading text-3xl font-bold">{formatBrlCents(plan.priceBrlCents)}<span className="text-sm font-normal text-[var(--color-muted)]"> /mês</span></p>}<ul className="mt-5 flex-1 space-y-3 text-sm text-[var(--color-muted)]"><li>{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas por mês</li><li>Até {plan.maxFileMB} MB por arquivo</li><li>Lotes de até {plan.batchLimit} arquivos</li><li>Retenção de {plan.retentionDays} dias</li><li>{plan.id === "FREE" ? "Conversões pelo painel" : `API e webhooks com o adicional + API · ${plan.rateLimit} req/min`}</li></ul>{plan.id === billing.effectivePlanId ? <p className="mt-6 text-sm font-semibold text-uno-red">Seu plano atual</p> : plan.id !== "FREE" && canManage && billing.management.changePlan ? <Button className="mt-6" variant="secondary" disabled={Boolean(busy)} onClick={() => setPlanDialog(plan.id as PaidPlanId)}>{busy === `plan:${plan.id}` ? "Alterando…" : `Mudar para ${plan.name}`}</Button> : plan.id !== "FREE" && canManage ? <Button className="mt-6" variant="secondary" disabled={Boolean(busy) || !billing.checkoutAvailable && !billing.portalAvailable} onClick={() => void openBilling(billing.checkoutAvailable ? plan.id : undefined)}>{busy === plan.id || busy === "portal" ? "Abrindo…" : billing.checkoutAvailable ? `Escolher ${plan.name}` : "Alterar no portal"}</Button> : <p className="mt-6 text-xs text-[var(--color-muted)]">{plan.id === "FREE" ? billing.management.cancel || billing.management.resume ? "Para voltar ao Free, cancele a assinatura" : billing.portalAvailable ? "Cancelamento disponível no portal" : "Plano sem mensalidade" : "Gerenciado pelo administrador"}</p>}</article>)}</section> : null}
     {billing ? <AddonCard billing={billing} canManage={canManage} busy={busy} onSubscribe={() => void openBilling(ADDON_OPERATION)} /> : null}
+    <Modal open={Boolean(targetPlan)} onClose={() => setPlanDialog(undefined)} title={`Mudar para o plano ${targetPlan?.name ?? ""}?`} description="A troca vale agora, na mesma assinatura do cartão.">
+      <ul className="list-disc space-y-2 pl-5 text-sm text-[var(--color-ink)]">
+        <li>A cota passa a ser de {targetPlan?.monthlyLimit.toLocaleString("pt-BR")} etiquetas por mês; o que já foi usado no período continua contando.</li>
+        <li>{targetPlan && currentPlanPrice !== undefined && targetPlan.priceBrlCents > currentPlanPrice ? "A diferença proporcional aos dias restantes do período é cobrada agora no cartão." : "A troca vale agora, sem crédito pelos dias restantes do período."} Depois, {targetPlan ? formatBrlCents(targetPlan.priceBrlCents) : ""}/mês a partir da renovação.</li>
+        {billing?.cancelAtPeriodEnd ? <li>O cancelamento agendado é desfeito.</li> : null}
+      </ul>
+      <div className="mt-6 flex flex-wrap justify-end gap-3">
+        <Button variant="ghost" onClick={() => setPlanDialog(undefined)}>Voltar</Button>
+        <Button disabled={Boolean(busy)} onClick={() => { if (planDialog) void changePlan(planDialog); }}>{busy?.startsWith("plan:") ? "Alterando…" : "Confirmar troca"}</Button>
+      </div>
+    </Modal>
   </div>;
 }

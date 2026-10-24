@@ -52,13 +52,40 @@ resolve no portal) e Price do adicional configurado (503 addon_unavailable),
 distinto dos Prices de plano e validado como os demais (ativo, BRL, mensal,
 valor do catálogo). Usa o mesmo Customer, a mesma intenção/idempotência e
 metadata organizationId + uno_addon=API na assinatura. Cancelamento do adicional
-é feito no portal. STRIPE_PRICE_API_ADDON é opcional: sem ele a cobrança dos
+acompanha o do plano (alsoAddon) ou é feito sozinho no portal. STRIPE_PRICE_API_ADDON é opcional: sem ele a cobrança dos
 planos funciona e o adicional apenas não é oferecido.
 POST billing/portal exige OWNER/ADMIN/mesma origem, usa exclusivamente Customer
 da organização, returnURL fixo.
 GET billing inclui estado/plano/período/cancelamento e disponibilidade real,
 e apiAddon {name, priceBrlCents, active, status, currentPeriodEnd, available,
-inactiveWithoutPaidPlan}.
+inactiveWithoutPaidPlan}, management {changePlan, cancel, resume} (OWNER/ADMIN,
+assinatura no cartão ACTIVE/TRIALING) e prepaid {planId, periodEnd} | null.
+
+Gestão no app (OWNER/ADMIN, mesma origem, Idempotency-Key, escopo da
+organização; MEMBER 403). Só a assinatura no cartão do próprio Customer, com o
+id reconciliado localmente, é alterada; ao final reconcilia o Customer.
+POST billing/plan {planId}: troca o Price do item do plano na mesma assinatura
+(maior: always_invoice + error_if_incomplete, cobrado na hora; menor:
+proration none, sem crédito) e limpa cancelamento agendado; Price de destino validado
+como no checkout; plano atual → 409 same_plan; inadimplente → 409
+payment_pending; sem assinatura no cartão → {checkout:true}.
+POST billing/cancel {alsoAddon?=true}: cancel_at_period_end no plano e, por
+padrão, no adicional; direitos até o fim do período. POST billing/resume
+{alsoAddon?=true} desfaz. Sem assinatura → 409 no_card_subscription.
+Reembolso de 7 dias (direito de arrependimento, CDC art. 49), automático e
+único por organização. GET billing/refund → {eligible, reason
+(no_card_subscription|no_paid_invoice|window_expired|already_refunded),
+deadline, amountBrlCents, inProgress}. Janela: [paid_at da primeira fatura paga
+da assinatura do plano, +7×24 h]. POST billing/refund estorna 100% de cada
+PaymentIntent das faturas do plano e do adicional pagas na janela (chave
+uno-refund-<fatura>-<payment_intent>, metadata organizationId e uno_refund=7d),
+encerra essas assinaturas imediatamente e reconcilia (volta ao Free). Grava
+subscriptions.refund_started_at antes da Stripe e refunded_at ao final;
+refunded_at preenchido → 409 refund_already_used; inelegível → 409
+refund_not_eligible. Reembolso iniciado e interrompido pode ser concluído por
+novo POST mesmo fora da janela, pulando pagamentos já estornados; enquanto
+isso checkout/troca/cancelamento → 409 refund_in_progress. Crédito pré-pago
+(PIX/indicação) fica fora dessas ações.
 
 POST api/stripe/webhook verifica assinatura sobre bytes originais limitados,
 sem aceitar JSON reparsed. Eventos Stripe deduplicados por ID+hash. Eventos
@@ -98,7 +125,10 @@ uploads, criação, reprocessamento, lotes, API e webhooks.
 
 Tests: assinatura válida/inválida, ID duplicado/hash divergente, eventos fora de
 ordem, relação Customer/organização, Price desconhecido, estados/períodos,
-cancelamento, upgrade/downgrade, cota concorrente, matriz de direitos do
+cancelamento, upgrade/downgrade, cota concorrente, troca de plano no app,
+cancelamento/retomada com e sem adicional, reembolso de 7 dias (janela, único
+por organização, adicional junto, retomada após falha parcial), MEMBER e
+isolamento entre organizações, matriz de direitos do
 adicional, regras do checkout do adicional e classificação na reconciliação. Provider sandbox real e
 produção ficam gates externos quando faltam credenciais. Impostos requerem
 configuração fiscal do operador; automatic_tax não é habilitado por hipótese.

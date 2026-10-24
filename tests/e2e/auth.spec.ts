@@ -1,23 +1,24 @@
 import { expect, test } from "@playwright/test";
 import { mailLink } from "./helpers/mail";
 
-test("verified registration, session, logout and password recovery", async ({ page, request }, info) => {
+test("registration signs in straight to checkout, session, logout and password recovery", async ({ page, request }, info) => {
   test.skip(process.env.UNO_LOCAL_AUTH_E2E !== "1", "Requires local PostgreSQL, Redis and Mailpit");
   test.setTimeout(120_000);
   const email = `uno-e2e-${info.project.name}-${crypto.randomUUID()}@example.test`;
   const password = "Uno-test-password-2026";
   await page.goto("/dashboard");
   await expect(page).toHaveURL(/\/login/);
-  await page.goto("/register");
+  await page.goto("/register?plan=pro");
   await page.getByLabel("Nome", { exact: true }).fill("Operador Teste");
   await page.getByLabel("E-mail", { exact: true }).fill(email);
   await page.getByLabel("Senha", { exact: true }).fill(password);
   await page.getByLabel("Confirmar senha", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Criar conta" }).click();
-  await expect(page).toHaveURL(/\/verify-email/);
-  await page.goto(await mailLink(request, email, "verify-email"));
-  await expect(page.getByText("E-mail confirmado. Sua conta está pronta.")).toBeVisible();
-  await page.goto("/dashboard");
+  // No e-mail confirmation step (NEX-42): the new account lands on checkout with the chosen plan.
+  await expect(page).toHaveURL(/\/checkout\?plan=pro/);
+  await expect(page.getByRole("heading", { name: "Escolha o ritmo da sua expedição." })).toBeVisible();
+  await expect(page.getByRole("radio", { name: /Pro/ })).toBeChecked();
+  await page.getByRole("link", { name: "Continuar no plano grátis" }).click();
   await expect(page.getByRole("heading", { name: "Olá, Operador" })).toBeVisible();
   await page.getByRole("button", { name: "Sair", exact: true }).click();
   await expect(page).toHaveURL(/\/login/);

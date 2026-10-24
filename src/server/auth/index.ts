@@ -1,5 +1,5 @@
 import { getDb } from "@/db";
-import { authEnvironment } from "@/lib/env";
+import { authEnvironment, googleOAuthEnvironment } from "@/lib/env";
 import { authSecondaryStorage } from "@/server/redis";
 
 import { createUnoAuth, type UnoAuth } from "./config";
@@ -31,6 +31,7 @@ export function getAuth(): UnoAuth {
       appURL: process.env.APP_URL ?? environment.baseURL,
       adminEmails: adminEmails(),
       production: process.env.NODE_ENV === "production",
+      google: googleOAuthEnvironment(),
     },
     secondaryStorage: authSecondaryStorage(),
     provisionUser: (created) => ensureDefaultOrganization(created, database),

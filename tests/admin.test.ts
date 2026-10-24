@@ -157,9 +157,11 @@ afterAll(async () => {
 
 describe("platform administration access", () => {
   it("requires the stored ADMIN role and the allowlist together", async () => {
-    expect(isPlatformAdmin({ email: "Platform@Example.test", platformRole: "ADMIN" })).toBe(true);
-    expect(isPlatformAdmin({ email: "role-only@example.test", platformRole: "ADMIN" })).toBe(false);
-    expect(isPlatformAdmin({ email: "listed-only@example.test", platformRole: "USER" })).toBe(false);
+    expect(isPlatformAdmin({ email: "Platform@Example.test", platformRole: "ADMIN", emailVerified: true })).toBe(true);
+    expect(isPlatformAdmin({ email: "role-only@example.test", platformRole: "ADMIN", emailVerified: true })).toBe(false);
+    expect(isPlatformAdmin({ email: "listed-only@example.test", platformRole: "USER", emailVerified: true })).toBe(false);
+    // Sign-up no longer proves the address (NEX-42): an unconfirmed e-mail never administers.
+    expect(isPlatformAdmin({ email: "Platform@Example.test", platformRole: "ADMIN", emailVerified: false })).toBe(false);
     await expect(assertPlatformAdmin(admin, database)).resolves.toBeUndefined();
 
     const denied = { code: "forbidden", status: 403 };

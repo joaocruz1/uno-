@@ -5,7 +5,7 @@ status: approved
 
 # Upload privado do painel
 
-`POST /api/dashboard/uploads` exige sessão verificada, membership na organização
+`POST /api/dashboard/uploads` exige sessão autenticada, membership na organização
 selecionada e origem do painel. O corpo JSON contém `contentLength` inteiro
 positivo, `contentType: "application/pdf"`, `originalFileName` opcional (somente
 para exibição) e `checksumSha256` hexadecimal opcional. O limite deriva do plano.

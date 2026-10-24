@@ -73,6 +73,50 @@ allowed range stops the retention worker at start; an invalid
 `UNO_CSP_CONNECT_SRC` fails the configuration load. Nothing falls back
 silently. Retention length itself comes from the plan catalogue (`docs/billing.md`).
 
+## Sign-up without e-mail confirmation (NEX-42)
+
+Owner decision: confirming the e-mail no longer blocks normal use. Sign-up
+signs the person in at once, and no confirmation e-mail is sent automatically
+(`requireEmailVerification`, `sendOnSignUp` and `sendOnSignIn` are off; the
+sender stays configured for on-demand confirmation at `/verify-email` and on
+the invitation screen).
+
+Trade-off: an account no longer proves that its owner controls the address.
+Anyone can register `someone@company.com` and use a FREE organization under
+that name. Everything that trusts the address still requires a confirmed
+e-mail, re-read from the database on every operation:
+
+- **Platform administration.** `platform_role = 'ADMIN'` is granted from
+  `ADMIN_EMAILS` when the account is created, so `isPlatformAdmin` and
+  `assertPlatformAdmin` also require `email_verified`. Someone who registers an
+  admin address first gets the role stored but never the access; the real
+  owner of the address must confirm it (or the operator must delete the
+  impostor account) before administering.
+- **Invitation acceptance.** Invitations match by e-mail, so accepting one
+  returns 403 `email_not_verified` until the address is confirmed.
+- **Google account linking.** Better Auth's default
+  `requireLocalEmailVerified` stays on: a Google sign-in never links implicitly
+  onto a password account whose e-mail was not confirmed (the person is told to
+  sign in with e-mail and password). Accounts created by Google arrive
+  confirmed by Google.
+
+- **Confirmation never hands an account over.** Without this, someone could
+  register the victim's address, trigger a confirmation e-mail, and the victim's
+  click would mark the account confirmed and sign the victim into it (and the
+  creator, who knows the password, would keep their session). So
+  `autoSignInAfterVerification` is off and `afterEmailVerification` ends every
+  session of the account. For an `ADMIN_EMAILS` address it also removes the
+  password set before confirmation: administration starts only after the inbox
+  owner chooses a password through "Esqueci a senha" (or signs in with Google).
+- **Redirect targets** (`callbackURL`, the post-auth `/checkout`) go through
+  `safeInternalPath`, which validates the normalized path, so `/.//evil.com`
+  and similar cannot become `//evil.com`.
+
+Residual risks to monitor: squatting of addresses (a later legitimate owner
+gets "Já existe uma conta com este e-mail" and must recover through password
+reset, which does prove the address), and abuse of FREE quotas with
+throwaway addresses (sign-up stays rate limited per IP).
+
 ## HTTP headers
 
 `next.config.ts` sets, for every route: `Content-Security-Policy`,
