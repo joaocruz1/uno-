@@ -1,7 +1,19 @@
 "use client";
 
 import { Moon, Sun } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+type Theme = "light" | "dark";
+
+// The attribute on <html> is the source of truth, so the control subscribes to it
+// instead of mirroring it into state (and picks up changes made elsewhere).
+function subscribe(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  return () => observer.disconnect();
+}
+
+const readTheme = (): Theme => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
 
 /**
  * Light/dark switch for the dashboard shell. The theme lives in a `data-theme`
@@ -9,15 +21,10 @@ import { useEffect, useState } from "react";
  * (so there is no flash); this control flips it and remembers the choice.
  */
 export function ThemeToggle({ className }: { className?: string }) {
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-
-  useEffect(() => {
-    setTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
-  }, []);
+  const theme = useSyncExternalStore(subscribe, readTheme, () => "light" as Theme);
 
   const toggle = () => {
     const next = theme === "dark" ? "light" : "dark";
-    setTheme(next);
     document.documentElement.setAttribute("data-theme", next);
     try {
       localStorage.setItem("uno-theme", next);

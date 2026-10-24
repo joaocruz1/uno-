@@ -3,6 +3,8 @@
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
+import { useState } from "react";
 import {
   BarChart3,
   ChevronRight,
@@ -50,20 +52,29 @@ function useIsActive() {
   return (href: string) => (href === "/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`));
 }
 
+const PILL = { type: "spring", stiffness: 480, damping: 38, mass: 0.7 } as const;
+
 function NavLink({ item, active }: { item: Item; active: boolean }) {
   const [label, href, Icon] = item;
+  const reduced = useReducedMotion();
   return (
     <Link
       href={href}
       aria-current={active ? "page" : undefined}
-      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red/70 ${
-        active
-          ? "bg-uno-red text-white shadow-[0_6px_18px_-8px_rgba(239,35,60,.9)]"
-          : "text-[#9a9aa2] hover:bg-white/[.05] hover:text-white"
+      className={`group relative flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red/70 ${
+        active ? "text-white" : "text-[#9a9aa2] hover:bg-white/[.05] hover:text-white"
       }`}
     >
-      <Icon size={18} className={active ? "text-white" : "text-[#7d7d85]"} />
-      {label}
+      {active ? (
+        <motion.span
+          layoutId="sidebar-pill"
+          transition={reduced ? { duration: 0 } : PILL}
+          className="absolute inset-0 rounded-xl bg-uno-red shadow-[0_6px_18px_-8px_rgba(239,35,60,.9)]"
+          aria-hidden
+        />
+      ) : null}
+      <Icon size={18} className={`relative transition-transform duration-200 group-hover:translate-x-0.5 ${active ? "text-white" : "text-[#7d7d85]"}`} />
+      <span className="relative">{label}</span>
     </Link>
   );
 }
@@ -71,6 +82,10 @@ function NavLink({ item, active }: { item: Item; active: boolean }) {
 export function Sidebar({ accountName, planName, showAdmin = false }: { accountName: string; planName: string; showAdmin?: boolean }) {
   const isActive = useIsActive();
   const moreHasActive = MORE.some(([, href]) => isActive(href));
+  const reduced = useReducedMotion();
+  // null = follow the route (open while a "Mais" page is active); a click pins the choice.
+  const [moreChoice, setMoreChoice] = useState<boolean | null>(null);
+  const showMore = moreChoice ?? moreHasActive;
 
   return (
     <aside className="sticky top-0 flex h-screen w-64 flex-col p-3">
@@ -85,17 +100,36 @@ export function Sidebar({ accountName, planName, showAdmin = false }: { accountN
             <NavLink key={item[1]} item={item} active={isActive(item[1])} />
           ))}
 
-          <details className="nav-reveal mt-1" open={moreHasActive}>
-            <summary className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[#9a9aa2] transition-colors hover:bg-white/[.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red/70">
-              <ChevronRight size={18} className="nav-chevron text-[#7d7d85]" />
+          <div className="mt-1">
+            <button
+              type="button"
+              onClick={() => setMoreChoice(!showMore)}
+              aria-expanded={showMore}
+              aria-controls="sidebar-mais"
+              className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium text-[#9a9aa2] transition-colors hover:bg-white/[.05] hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-uno-red/70"
+            >
+              <ChevronRight size={18} className={`text-[#7d7d85] transition-transform duration-200 ease-[cubic-bezier(.16,1,.3,1)] ${showMore ? "rotate-90" : ""}`} />
               Mais
-            </summary>
-            <div className="nav-reveal-body mt-1 flex flex-col gap-1 pl-3">
-              {MORE.map((item) => (
-                <NavLink key={item[1]} item={item} active={isActive(item[1])} />
-              ))}
-            </div>
-          </details>
+            </button>
+            <AnimatePresence initial={false}>
+              {showMore ? (
+                <motion.div
+                  id="sidebar-mais"
+                  initial={reduced ? false : { height: 0, opacity: 0 }}
+                  animate={{ height: "auto", opacity: 1 }}
+                  exit={reduced ? undefined : { height: 0, opacity: 0 }}
+                  transition={{ duration: 0.26, ease: [0.16, 1, 0.3, 1] }}
+                  className="overflow-hidden"
+                >
+                  <div className="mt-1 flex flex-col gap-1 pl-3">
+                    {MORE.map((item) => (
+                      <NavLink key={item[1]} item={item} active={isActive(item[1])} />
+                    ))}
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
+          </div>
 
           {showAdmin ? (
             <div className="mt-1 border-t border-white/[.07] pt-2">

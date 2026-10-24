@@ -1,19 +1,16 @@
 import Link from "next/link";
-import { ArrowRight, BadgeCheck, Braces, Lock, Package, Printer, ScanLine, UploadCloud } from "lucide-react";
+import { ArrowRight, BadgeCheck, Braces, Lock, Package } from "lucide-react";
 
 import { Footer, Navbar } from "@/components";
 import { ButtonLink } from "@/components/ui";
-import { LabelScanner } from "@/components/marketing/label-scanner";
+import { HeroStage } from "@/components/marketing/hero-stage";
+import { HowItWorks } from "@/components/marketing/how-it-works";
+import { Magnetic, SpotlightCard } from "@/components/marketing/interactive";
+import { Reveal } from "@/components/marketing/reveal";
 import { TrialStudio } from "@/components/marketing/trial-studio";
 import { formatBrlCents, getApiAddon, getPlanCatalog, hasFirstMonthPromo } from "@/lib/plans";
 
 const GUTTER = "px-[clamp(1.25rem,5vw,6rem)]";
-
-const steps = [
-  { icon: UploadCloud, title: "Envie o PDF", text: "A etiqueta do marketplace, do jeito que o pedido baixou." },
-  { icon: ScanLine, title: "Validamos os códigos", text: "Decodificamos cada código e conferimos com a chave. Não bateu, não sai." },
-  { icon: Printer, title: "Imprima a 10×15", text: "Uma página pronta pra térmica, sem espaço em branco." },
-];
 
 const differentials = [
   { icon: BadgeCheck, title: "Valida de verdade", text: "Decodifica os códigos na saída a 203 e 300 dpi e compara com a entrada. Recusa em vez de arriscar." },
@@ -37,21 +34,22 @@ export default function Home() {
 
         <div className="relative z-10 mx-auto grid w-full max-w-[1500px] items-center gap-14 lg:grid-cols-[1.05fr_minmax(360px,.82fr)] lg:gap-20">
           <div>
-            <h1 className="uno-enter uno-d1 font-heading text-[clamp(2.9rem,7.2vw,5.4rem)] font-extrabold leading-[.95] tracking-[-.05em] text-[var(--color-ink)]">
-              Duas páginas.<br />Uma etiqueta.
+            <h1 className="font-heading text-[clamp(2.9rem,7.2vw,5.4rem)] font-extrabold leading-[.95] tracking-[-.05em] text-[var(--color-ink)]">
+              <span className="line-mask"><span>Duas páginas.</span></span>
+              <span className="line-mask"><span>Uma etiqueta.</span></span>
             </h1>
             <p className="uno-enter uno-d2 mt-6 max-w-md text-lg leading-7 text-[var(--color-muted)]">
               Solte o PDF do marketplace e receba uma etiqueta 10×15 pronta pra térmica — com cada código conferido antes de sair.
             </p>
             <div className="uno-enter uno-d3 mt-8 flex flex-col gap-3 sm:flex-row">
-              <ButtonLink href="#testar" size="lg" className="glow-cta">Testar sem cadastro <ArrowRight size={17} /></ButtonLink>
-              <ButtonLink href="/register" variant="secondary" size="lg">Criar conta grátis</ButtonLink>
+              <Magnetic><ButtonLink href="#testar" size="lg" className="glow-cta">Testar sem cadastro <ArrowRight size={17} /></ButtonLink></Magnetic>
+              <Magnetic><ButtonLink href="/register" variant="secondary" size="lg">Criar conta grátis</ButtonLink></Magnetic>
             </div>
             <p className="uno-enter uno-d3 mt-4 text-sm text-[var(--color-faint)]">Grátis até {plans.FREE.monthlyLimit} etiquetas por mês. Sem cartão.</p>
           </div>
 
           <div className="uno-enter uno-d4 flex justify-center lg:justify-end">
-            <LabelScanner />
+            <HeroStage />
           </div>
         </div>
       </section>
@@ -66,33 +64,30 @@ export default function Home() {
         </div>
       </section>
 
-      <section id="como-funciona" className={`scroll-mt-24 ${GUTTER} py-14`}>
-        <div className="mx-auto max-w-7xl">
-          <h2 className="font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">Como funciona</h2>
-          <div className="mt-8 grid gap-5 sm:grid-cols-3">
-            {steps.map((step) => (
-              <div key={step.title} className="card-soft rounded-2xl p-6">
-                <span className="grid size-11 place-items-center rounded-xl bg-uno-red/10 text-uno-red"><step.icon size={22} /></span>
-                <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{step.title}</h3>
-                <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{step.text}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <HowItWorks />
 
       <section id="produto" className={`scroll-mt-24 ${GUTTER} py-14`}>
         <div className="mx-auto max-w-7xl">
           <h2 className="max-w-2xl font-heading text-[clamp(1.9rem,4vw,2.6rem)] font-extrabold tracking-tight text-[var(--color-ink)]">
             Por que a UNO, e não só um conversor.
           </h2>
-          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {differentials.map((item) => (
-              <div key={item.title} className="card-soft rounded-2xl p-6">
-                <item.icon className="text-uno-red" size={22} />
-                <h3 className="mt-4 font-heading text-lg font-bold text-[var(--color-ink)]">{item.title}</h3>
-                <p className="mt-1.5 text-sm leading-6 text-[var(--color-muted)]">{item.text}</p>
-              </div>
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {differentials.map((item, index) => (
+              <Reveal key={item.title} delay={index * 70} className={index === 0 ? "sm:col-span-2 lg:row-span-2" : ""}>
+                <SpotlightCard className={`card-soft h-full rounded-2xl ${index === 0 ? "flex flex-col justify-between p-7 lg:p-9" : "p-6"}`}>
+                  <div>
+                    <item.icon className="text-uno-red" size={index === 0 ? 28 : 22} />
+                    <h3 className={`mt-4 font-heading font-bold text-[var(--color-ink)] ${index === 0 ? "text-2xl tracking-tight lg:text-3xl" : "text-lg"}`}>{item.title}</h3>
+                    <p className={`mt-1.5 leading-6 text-[var(--color-muted)] ${index === 0 ? "max-w-md text-base leading-7" : "text-sm"}`}>{item.text}</p>
+                  </div>
+                  {index === 0 ? (
+                    <dl className="mt-8 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-xl bg-[var(--color-surface-2)] p-4 ring-1 ring-inset ring-[var(--color-line)]"><dt className="text-[var(--color-muted)]">Resolução de conferência</dt><dd className="mt-1 font-heading text-xl font-extrabold tabular-nums text-[var(--color-ink)]">203 e 300 dpi</dd></div>
+                      <div className="rounded-xl bg-[var(--color-surface-2)] p-4 ring-1 ring-inset ring-[var(--color-line)]"><dt className="text-[var(--color-muted)]">Se o código não bate</dt><dd className="mt-1 font-heading text-xl font-extrabold text-[var(--color-ink)]">A etiqueta não sai</dd></div>
+                    </dl>
+                  ) : null}
+                </SpotlightCard>
+              </Reveal>
             ))}
           </div>
         </div>
@@ -105,11 +100,12 @@ export default function Home() {
             <p className="text-sm text-[var(--color-muted)]">No cartão ou avulso por PIX. Sem excedente automático.</p>
           </div>
           <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {order.map((id) => {
+            {order.map((id, index) => {
               const plan = plans[id];
               const highlight = id === "PRO";
               return (
-                <div key={id} className={`card-soft rounded-2xl p-5 ${highlight ? "ring-2 ring-uno-red" : ""}`}>
+                <Reveal key={id} delay={index * 70}>
+                <SpotlightCard className={`card-soft h-full rounded-2xl p-5 ${highlight ? "ring-2 ring-uno-red" : ""}`}>
                   <p className="font-heading text-base font-bold text-[var(--color-ink)]">{plan.name}</p>
                   {hasFirstMonthPromo(plan) ? (
                     <>
@@ -127,7 +123,8 @@ export default function Home() {
                   )}
                   <p className="mt-3 text-sm text-[var(--color-muted)]">{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas/mês</p>
                   <ButtonLink href="/register" variant={highlight ? "primary" : "secondary"} size="sm" className="mt-5 w-full">Começar</ButtonLink>
-                </div>
+                </SpotlightCard>
+                </Reveal>
               );
             })}
           </div>
@@ -144,7 +141,7 @@ export default function Home() {
           <div className="relative">
             <h2 className="font-heading text-[clamp(2rem,5vw,3.4rem)] font-extrabold tracking-tight text-white">Duas páginas esperando pra virar uma?</h2>
             <p className="mx-auto mt-3 max-w-md text-[#b5b5bd]">Crie sua conta e gere as primeiras etiquetas no plano Free.</p>
-            <ButtonLink href="/register" size="lg" className="glow-cta mt-7">Criar conta grátis <ArrowRight size={17} /></ButtonLink>
+            <Magnetic className="mt-7"><ButtonLink href="/register" size="lg" className="glow-cta">Criar conta grátis <ArrowRight size={17} /></ButtonLink></Magnetic>
           </div>
         </div>
       </section>
