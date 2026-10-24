@@ -125,3 +125,16 @@ E-mail confirmation no longer blocks use: sign-up signs in at once and nothing i
 - **Browser, local only.** Sign-up at `/register?plan=pro` signed in at once and landed on `/checkout?plan=pro` with the plan preselected and catalog prices; `/dashboard/settings` rendered the Perfil (unconfirmed badge, "Confirmar e-mail"), Senha, Assinatura and Organização sections with no console errors on that page.
 - **NOT VERIFIED.** The e2e suite did not run: the Playwright browsers are not installed on this machine (all 60 cases failed at `browserType.launch`). Google sign-in (no OAuth client), Stripe plan change, cancel, resume and the 7-day refund against Stripe test or live mode, and the new screens in dark mode were not exercised.
 - **Git history audit (NEX-39).** All 115 commits were scanned for Stripe/AWS/GitHub/Google keys, webhook secrets, database and Redis URLs with passwords, private keys, JWTs, 44-digit access keys, CPF/CNPJ patterns and added PDF/ZPL/env files. Nothing sensitive was found: the only fiscal-looking values are zeroed synthetic ones and no PDF was ever committed. `tests/fixtures/shopee-packing-sample.xlsx` holds names marked "Teste" but tracking codes in real format; the owner should confirm they are invented. The production URL and Easypanel project name are in `CLAUDE.md`, `public/openapi.json` and the docs page.
+
+## End-to-end run (2026-10-24, after NEX-42/NEX-43)
+
+Full Playwright suite on Chromium, Firefox, WebKit and mobile against the local stack (PostgreSQL 17 on 55432, Redis on 56379, local S3, Mailpit, worker, `next dev` on 3100 with `STRIPE_SECRET_KEY` blank, since the billing spec asserts the "not configured" state), with `UNO_LOCAL_AUTH_E2E=1 UNO_LOCAL_API_E2E=1 UNO_LOCAL_UPLOAD_E2E=1`: **55 passed, 5 failed**. The one Firefox failure in the team-management spec did not reproduce (6/6 passes on `--repeat-each=3`). The other four are the same case in every browser, "reduced motion hydrates without browser errors": a real hydration mismatch on the landing from the uncommitted landing work (`Magnetic` in `src/components/marketing/interactive.tsx` renders `tabindex`/`style` on the client only, and the inline theme script is rendered inside a React component). It is left for that work.
+
+Fixed on the way:
+- The specs were behind the committed redesigns: the API page link, the dashboard usage card, the landing trial (marketplace tabs, "Baixar PDF") and the landing CTA.
+- The confirmation now ends every session, so the team spec signs in again after confirming.
+- The settings page has two "Salvar nome" buttons since NEX-43.
+- The mobile dashboard menu button had no accessible name; it is now "Abrir menu".
+- All specs ran from one address and tripped Better Auth's per-IP limits (3 sign-ups per 10 s, 3 verification e-mails per minute). `tests/e2e/helpers/client-ip.ts` now gives each test context its own RFC 5737 `x-forwarded-for`; the production limits are unchanged.
+
+To reproduce: `corepack pnpm exec playwright install`, start the services above, then `UNO_TEST_URL=http://127.0.0.1:3100 UNO_LOCAL_AUTH_E2E=1 UNO_LOCAL_API_E2E=1 UNO_LOCAL_UPLOAD_E2E=1 corepack pnpm exec playwright test`.

@@ -1,6 +1,9 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import { mailLink } from "./helpers/mail";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
@@ -8,6 +11,7 @@ const origin = "http://127.0.0.1:3100";
 
 async function verifiedPage(browser: Browser, label: string): Promise<{ page: Page; email: string }> {
   const context = await browser.newContext();
+  await isolateClientIp(context);
   const page = await context.newPage();
   const email = `uno-team-e2e-${label}-${crypto.randomUUID()}@example.test`;
   let signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
@@ -28,6 +32,10 @@ async function verifiedPage(browser: Browser, label: string): Promise<{ page: Pa
   const requested = await page.request.post(`${origin}/api/auth/send-verification-email`, { headers: { origin }, data: { email, callbackURL: "/dashboard" } });
   expect(requested.status()).toBe(200);
   await page.goto(await mailLink(page.request, email, "verify-email"));
+  // Confirming ends every session of the account (it must never hand an
+  // account over), so sign in again.
+  const signin = await page.request.post(`${origin}/api/auth/sign-in/email`, { headers: { origin }, data: { email, password: "Team-e2e-password" } });
+  expect(signin.status()).toBe(200);
   return { page, email };
 }
 
@@ -41,7 +49,7 @@ test("owner renames the organization, invites a member by e-mail and the invitee
   await owner.page.goto("/dashboard/settings");
   await expect(owner.page.getByRole("heading", { name: "Configurações", exact: true })).toBeVisible();
   await owner.page.getByLabel("Nome da organização").fill(organizationName);
-  await owner.page.getByRole("button", { name: "Salvar nome", exact: true }).click();
+  await owner.page.getByLabel("Nome da organização").locator("xpath=ancestor::form[1]").getByRole("button", { name: "Salvar nome", exact: true }).click();
   await expect(owner.page.getByRole("main").getByText(organizationName).first()).toBeVisible();
 
   await owner.page.getByLabel("E-mail", { exact: true }).fill(invitee.email);

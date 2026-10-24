@@ -1,6 +1,9 @@
 import { expect, test } from "@playwright/test";
 
 import { syntheticPdf } from "../fixtures/synthetic-pdf";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test("history searches a failed conversion and reprocesses it with an independent quota event", async ({ page }) => {
   test.setTimeout(120_000);
@@ -40,5 +43,5 @@ test("history searches a failed conversion and reprocesses it with an independen
   expect((await download).suggestedFilename()).toMatch(/^uno-[0-9a-f-]+\.pdf$/);
 
   await page.goto("/dashboard");
-  await expect(page.getByText("Uso do período", { exact: true }).locator("..")).toContainText("1");
+  await expect(page.getByRole("region", { name: "Uso do período" })).toContainText("1 confirmada");
 });

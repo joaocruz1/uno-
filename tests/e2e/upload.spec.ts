@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { syntheticPdf } from "../fixtures/synthetic-pdf";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test("private dashboard conversion validates, processes and downloads a synthetic PDF", async ({ page }) => {
   test.setTimeout(90_000);

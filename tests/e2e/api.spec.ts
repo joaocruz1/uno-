@@ -2,6 +2,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 import { closeDb } from "@/db";
 import { promoteSyntheticPro, restoreSyntheticFree } from "./helpers/api-fixture";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
@@ -36,7 +39,7 @@ test("free API page is plan-gated and never exposes a key creation form", async 
   await page.goto("/dashboard/api");
   await expect(page.getByRole("heading", { name: "API", exact: true })).toBeVisible();
   await expect(page.getByText("A API exige o adicional + API", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Consultar planos", exact: true })).toHaveAttribute("href", "/dashboard/billing");
+  await expect(page.getByRole("link", { name: "Contratar o adicional de API", exact: true })).toHaveAttribute("href", "/dashboard/billing");
   await expect(page.getByText("Nenhuma chave criada", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Nome da integração", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Criar chave", exact: true })).toHaveCount(0);

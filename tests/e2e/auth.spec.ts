@@ -1,5 +1,8 @@
 import { expect, test } from "@playwright/test";
 import { mailLink } from "./helpers/mail";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test("registration signs in straight to checkout, session, logout and password recovery", async ({ page, request }, info) => {
   test.skip(process.env.UNO_LOCAL_AUTH_E2E !== "1", "Requires local PostgreSQL, Redis and Mailpit");

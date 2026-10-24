@@ -1,6 +1,9 @@
 import { expect, test, type Page } from "@playwright/test";
 
 import { syntheticPdf } from "../fixtures/synthetic-pdf";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 async function signedInPage(page: Page): Promise<void> {
   const origin = "http://127.0.0.1:3100";
@@ -65,5 +68,5 @@ test("failed batch produces no ZIP output and releases its reservation", async (
   await expect(page.getByRole("button", { name: "Baixar ZIP", exact: true })).toHaveCount(0);
   await expect(page.getByText("0 aprovadas", { exact: true })).toBeVisible();
   await page.goto("/dashboard");
-  await expect(page.getByText("Uso do período", { exact: true }).locator("..")).toContainText("0");
+  await expect(page.getByRole("region", { name: "Uso do período" })).toContainText("0 confirmadas");
 });

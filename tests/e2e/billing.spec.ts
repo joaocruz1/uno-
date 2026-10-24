@@ -1,4 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 
 async function signedInPage(page: Page): Promise<void> {
@@ -43,8 +46,8 @@ test("usage shows the free 0/10 state and mobile dashboard links", async ({ page
   await expect(page.getByText("Concluídas", { exact: true }).locator("..")).toContainText("0");
   await expect(page.getByText("Reservadas", { exact: true }).locator("..")).toContainText("0");
   await expect(page.getByText("Disponíveis", { exact: true }).locator("..")).toContainText("10");
-  await page.getByText("Menu", { exact: true }).click();
-  const mobileNav = page.getByRole("navigation", { name: "Dashboard móvel", exact: true });
+  await page.getByLabel("Abrir menu", { exact: true }).click();
+  const mobileNav = page.getByRole("navigation", { name: "Menu", exact: true });
   await expect(mobileNav).toBeVisible();
   await expect(mobileNav.getByRole("link", { name: "Uso", exact: true })).toHaveAttribute("href", "/dashboard/usage");
   await expect(mobileNav.getByRole("link", { name: "Assinatura", exact: true })).toHaveAttribute("href", "/dashboard/billing");
