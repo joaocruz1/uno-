@@ -1,39 +1,19 @@
 "use client";
 
-import { Check, Lock, ArrowRight } from "lucide-react";
+import { ArrowRight, Check } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import Link from "next/link";
-import { useRef, useState } from "react";
-import { z } from "zod";
+import { useState } from "react";
 
 import { Button } from "@/components/ui";
 import type { PaidPlanId, PublicBillingPlan } from "@/lib/billing-model";
 import { formatBrlCents } from "@/lib/plans";
 
+import { CouponField, hasPromo as promo, planFeatures as features, PriceBreakdown, SecurePaymentNote, useCouponCheckout } from "./checkout-summary";
+
+export { safeStripeRedirect } from "./checkout-summary";
+
 const EASE = [0.22, 1, 0.36, 1] as const;
-const STRIPE_HOSTS = ["checkout.stripe.com", "billing.stripe.com"];
-
-/** Only an https Stripe Checkout or Billing Portal URL is ever followed. */
-export function safeStripeRedirect(value: unknown): string | null {
-  const parsed = z.object({ url: z.url() }).safeParse(value);
-  if (!parsed.success) return null;
-  const destination = new URL(parsed.data.url);
-  if (destination.protocol !== "https:" || destination.username || destination.password || !STRIPE_HOSTS.includes(destination.hostname)) return null;
-  return destination.href;
-}
-
-function promo(plan: PublicBillingPlan): boolean {
-  return plan.priceBrlCents > 0 && plan.firstMonthPriceBrlCents < plan.priceBrlCents;
-}
-
-function features(plan: PublicBillingPlan): string[] {
-  return [
-    `${plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas por mês`,
-    `Lotes de até ${plan.batchLimit} arquivos`,
-    `Arquivos de até ${plan.maxFileMB} MB`,
-    `Histórico guardado por ${plan.retentionDays} dias`,
-  ];
-}
 
 function Steps({ reduce }: { reduce: boolean | null }) {
   const steps = ["Conta criada", "Plano", "Pagamento"];
@@ -79,42 +59,13 @@ export function CheckoutPicker({
 }) {
   const reduce = useReducedMotion();
   const [selected, setSelected] = useState<PaidPlanId>(plans.some((plan) => plan.id === initialPlan) ? initialPlan : (plans[0]?.id as PaidPlanId));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const keys = useRef(new Map<string, string>());
-  const locked = useRef(false);
   const plan = plans.find((candidate) => candidate.id === selected) ?? plans[0];
   const purchasable = canManage && configured;
+  const checkout = useCouponCheckout(plan);
+  const busy = checkout.paying;
+  const error = checkout.payError;
 
-  const pay = async () => {
-    if (locked.current || !purchasable || !plan) return;
-    locked.current = true;
-    setBusy(true);
-    setError(undefined);
-    try {
-      // One key per plan, reused on retries, so a double click never opens two sessions.
-      const key = keys.current.get(plan.id) ?? crypto.randomUUID();
-      keys.current.set(plan.id, key);
-      const response = await fetch("/api/dashboard/billing/checkout", {
-        method: "POST",
-        headers: { "content-type": "application/json", "idempotency-key": key },
-        body: JSON.stringify({ planId: plan.id }),
-      });
-      const body: unknown = await response.json().catch(() => null);
-      if (!response.ok) {
-        const message = z.object({ error: z.object({ message: z.string() }) }).safeParse(body);
-        throw new Error(message.success ? message.data.error.message : "Não foi possível abrir o pagamento.");
-      }
-      const destination = safeStripeRedirect(body);
-      if (!destination) throw new Error("Não foi possível abrir o pagamento.");
-      window.location.assign(destination);
-      return; // Keep the button busy while the browser leaves.
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Não foi possível abrir o pagamento.");
-    }
-    locked.current = false;
-    setBusy(false);
-  };
+  const pay = () => { if (purchasable) void checkout.pay(); };
 
   const enter = (delay: number) => reduce
     ? {}
@@ -148,7 +99,7 @@ export function CheckoutPicker({
                   className={`card-soft relative flex cursor-pointer flex-col rounded-2xl p-5 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-uno-red has-[:focus-visible]:ring-offset-2 has-[:focus-visible]:ring-offset-[var(--color-canvas)] ${active ? "border-uno-red!" : "hover:border-[var(--color-line-strong)]!"}`}
                 >
                   {featured ? <span className="absolute -top-2.5 left-5 z-10 rounded-full bg-uno-red px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap text-white shadow-[0_6px_16px_-8px_rgba(239,35,60,.9)]">Mais escolhido</span> : null}
-                  <input type="radio" name="plan" value={candidate.id} checked={active} onChange={() => { setSelected(candidate.id as PaidPlanId); setError(undefined); }} className="sr-only" />
+                  <input type="radio" name="plan" value={candidate.id} checked={active} onChange={() => { setSelected(candidate.id as PaidPlanId); void checkout.changePlan(candidate.id as PaidPlanId); }} className="sr-only" />
                   {active ? (
                     <motion.span
                       layoutId={reduce ? undefined : "plan-glow"}
@@ -196,18 +147,15 @@ export function CheckoutPicker({
                   <li key={item} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-uno-red" aria-hidden="true" />{item}</li>
                 ))}
               </ul>
-              <dl className="mt-6 space-y-2 border-t border-[var(--color-line)] pt-5 text-sm">
-                <div className="flex items-baseline justify-between gap-4">
-                  <dt className="text-[var(--color-muted)]">Hoje</dt>
-                  <dd className="font-heading text-2xl font-extrabold tabular-nums">{formatBrlCents(promo(plan) ? plan.firstMonthPriceBrlCents : plan.priceBrlCents)}</dd>
-                </div>
-                <div className="flex items-baseline justify-between gap-4">
-                  <dt className="text-[var(--color-muted)]">{promo(plan) ? "A partir do 2º mês" : "Renovação mensal"}</dt>
-                  <dd className="tabular-nums text-[var(--color-ink)]">{formatBrlCents(plan.priceBrlCents)}/mês</dd>
-                </div>
-              </dl>
+              <div className="mt-6 border-t border-[var(--color-line)] pt-5">
+                <PriceBreakdown plan={plan} preview={checkout.preview} />
+              </div>
             </motion.div>
           </AnimatePresence>
+
+          <div className="mt-5">
+            <CouponField checkout={checkout} disabled={busy} idPrefix="checkout-coupon" />
+          </div>
 
           {error ? <p role="alert" className="mt-5 rounded-lg border border-red-500/25 bg-red-500/10 px-3 py-2.5 text-sm text-[var(--color-ink)]">{error}</p> : null}
           {!canManage ? (
@@ -217,11 +165,11 @@ export function CheckoutPicker({
           ) : null}
 
           <motion.div className="mt-6" whileTap={reduce || !purchasable ? undefined : { scale: 0.98 }}>
-            <Button size="lg" className="w-full" disabled={busy || !purchasable} aria-busy={busy} onClick={() => void pay()}>
+            <Button size="lg" className="w-full" disabled={busy || !purchasable} aria-busy={busy} onClick={pay}>
               {busy ? "Abrindo o pagamento…" : <>Ir para o pagamento <ArrowRight size={16} aria-hidden="true" /></>}
             </Button>
           </motion.div>
-          <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-[var(--color-muted)]"><Lock size={12} aria-hidden="true" /> Pagamento seguro pela Stripe. Cancele quando quiser.</p>
+          <SecurePaymentNote />
           <p className="mt-5 text-center text-sm">
             <Link href="/dashboard" className="text-[var(--color-muted)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline">Continuar no plano grátis</Link>
           </p>

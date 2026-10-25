@@ -179,3 +179,5 @@ request.
 - The retention worker must be running; without it nothing expires.
 - Before release, load the app in a browser and confirm the console reports no
   CSP violations for upload, preview, download, checkout and analytics consent.
+
+The phone collected at sign-up (NEX-51) is format-validated only and never verified (no SMS or call, owner decision): treat it as contact data typed by the user, not as proof of identity.

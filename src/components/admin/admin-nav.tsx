@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 export const ADMIN_SECTIONS = [
   ["Visão geral", "/admin"],
   ["Financeiro", "/admin/finance"],
+  ["Cupons", "/admin/coupons"],
   ["Clientes", "/admin/customers"],
   ["Atividade", "/admin/activity"],
   ["Chaves de API", "/admin/api-keys"],

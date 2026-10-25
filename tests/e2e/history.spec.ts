@@ -13,7 +13,7 @@ test("history searches a failed conversion and reprocesses it with an independen
   const email = `uno-history-e2e-${crypto.randomUUID()}@example.test`;
   const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
     headers: { origin },
-    data: { name: "Operador Histórico", email, password: "Synthetic-history-password" },
+    data: { name: "Operador Histórico", email, password: "Synthetic-history-password", phone: "(11) 98765-4321" },
   });
   expect(signup.status()).toBe(200);
   // Sign-up signs in at once (NEX-42): the session cookie is already in this context.

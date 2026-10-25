@@ -97,6 +97,40 @@ template is rejected; there is no generic or best-effort fallback.
   buy; without billing configuration the page says so. "Continuar no plano
   grátis" always leads to `/dashboard`.
 
+## Purchase from the plans page, phone and coupons (NEX-51)
+
+- Owner decision: there is no e-mail confirmation of any kind in the purchase
+  flow (no link, no code). "Validation" means form validation only: format,
+  required fields and an e-mail that already has an account.
+- On `/pricing` and on the landing's plan section, the paid plans' buttons open
+  an accessible dialog over the plans (focus trap, Esc, labelled title) instead
+  of navigating. Without a session it offers "Criar conta" and "Já tenho conta"
+  tabs, keeps the chosen plan visible and, on success, moves to the summary
+  step in the same dialog: plan (switchable among the paid plans), features,
+  coupon field, price breakdown and "Ir para o pagamento", which calls the
+  existing checkout API and goes to Stripe. With a session it opens straight on
+  the summary. The URL never changes before Stripe. Validation errors, an
+  e-mail already registered (with a shortcut to sign in with it) and an expired
+  session (back to the sign-in tab with a notice) are handled in the dialog.
+  The buttons are plain links to `/register?plan=…` until the page is
+  interactive, so `/register`, `/login` and `/checkout` keep working for direct
+  links.
+- A phone is mandatory for e-mail sign-up: a Brazilian DDD (Anatel list) plus
+  a 9-digit mobile starting with 9 or an 8-digit landline starting with 2–5,
+  typed with a mask and stored as E.164 (`user.phone`, `+55DDNNNNNNNNN`). The
+  server enforces it (`PHONE_REQUIRED`) and normalizes every write, at sign-up
+  and on `/update-user`. Google sign-ups and older accounts have no phone: the
+  dashboard asks for it in a non-blocking banner once per browser session, and
+  it can be edited in Configurações → Perfil. The platform admin sees the
+  owner's phone and e-mail in Clientes. The buyer's phone is sent to the Stripe
+  Customer when the Customer is created.
+- Coupons are typed in the summary step and on `/checkout`; the server prices
+  them (see the billing contract) and shows the final value before paying, or a
+  single message ("Cupom inválido ou indisponível para este plano.") when the
+  code is invalid, expired, exhausted or not valid for the plan, so a response
+  never reveals that a code exists; "Este cupom já foi usado nesta conta." when
+  the organization already used it (one use per organization).
+
 ## Plans and quotas
 
 Monthly price is the recurring amount, charged from the second month; the first
@@ -196,6 +230,14 @@ price). PIX one-off purchases charge the recurring price.
   invitation acceptance still refuse an unconfirmed e-mail; Google sign-in is
   registered only when its client is configured; the `plan` parameter accepts
   only paid plan ids and new accounts land on `/checkout`.
+
+- AC-UNO-016: Buying from the plans page never leaves it until Stripe: sign-up
+  or sign-in happen in the dialog and continue to the summary with the chosen
+  plan; e-mail sign-up refuses a missing or invalid Brazilian phone and stores
+  it as E.164; the phone is visible in the admin customers view; a coupon shows
+  the final value before paying and an invalid one a clear message; the coupon
+  applied is recorded on the checkout intent and on the subscription and shown
+  in the admin finance view.
 
 # Open questions
 

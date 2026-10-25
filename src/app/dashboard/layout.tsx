@@ -4,11 +4,13 @@ import Image from "next/image";
 import { Layers3 } from "lucide-react";
 
 import { LogoutButton } from "@/components/auth";
+import { PhoneReminder } from "@/components/auth/phone-reminder";
 import { MobileMenu } from "@/components/mobile-menu";
 import { Sidebar } from "@/components/sidebar";
 import { AppError } from "@/lib/errors";
 import { getPlanCatalog } from "@/lib/plans";
 import { isPlatformAdmin } from "@/server/auth/actor";
+import { readUserPhone } from "@/server/auth/profile";
 import { requireActor } from "@/server/http";
 
 // Authenticated area: never prerender at build time, when no database is available.
@@ -25,6 +27,8 @@ export default async function DashboardLayout({ children }: { children: React.Re
   }
 
   const planName = getPlanCatalog()[actor.planId].name;
+  // Older and Google accounts have no phone yet (NEX-51): ask, without blocking.
+  const missingPhone = !(await readUserPhone(actor.userId));
 
   return (
     <div className="app-shell min-h-screen lg:flex">
@@ -60,7 +64,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           </div>
         </header>
 
-        <main className="px-4 py-7 sm:px-6 sm:py-8 lg:px-8">{children}</main>
+        <main className="px-4 py-7 sm:px-6 sm:py-8 lg:px-8">
+          {missingPhone ? <PhoneReminder /> : null}
+          {children}
+        </main>
       </div>
     </div>
   );

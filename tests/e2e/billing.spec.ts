@@ -9,14 +9,14 @@ async function signedInPage(page: Page): Promise<void> {
   const email = `uno-billing-e2e-${crypto.randomUUID()}@example.test`;
   let signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
     headers: { origin },
-    data: { name: "Operador Cobrança", email, password: "Billing-e2e-password" },
+    data: { name: "Operador Cobrança", email, password: "Billing-e2e-password", phone: "(11) 98765-4321" },
   });
   for (let attempt = 0; signup.status() === 429 && attempt < 8; attempt += 1) {
     const retryAfter = Number(signup.headers()["retry-after"]);
     await page.waitForTimeout(Math.min(30_000, Math.max(1_000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : 5_000)));
     signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
       headers: { origin },
-      data: { name: "Operador Cobrança", email, password: "Billing-e2e-password" },
+      data: { name: "Operador Cobrança", email, password: "Billing-e2e-password", phone: "(11) 98765-4321" },
     });
   }
   expect(signup.status()).toBe(200);

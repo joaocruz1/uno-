@@ -42,11 +42,39 @@ export const apiAddonStateSchema = z.object({
   inactiveWithoutPaidPlan: z.boolean(),
 });
 
-/** Checkout request: exactly one of a paid plan or the API add-on. */
+/** A coupon code as typed by the buyer; the server normalizes and validates it. */
+export const promotionCodeInputSchema = z.string().trim().min(1).max(64);
+
+/** Checkout request: exactly one of a paid plan (optionally with a coupon) or the API add-on. */
 export const billingCheckoutRequestSchema = z.union([
-  z.object({ planId: paidPlanIdSchema }).strict(),
+  z.object({ planId: paidPlanIdSchema, promotionCode: promotionCodeInputSchema.optional() }).strict(),
   z.object({ addon: apiAddonIdSchema }).strict(),
 ]);
+
+/** POST billing/coupon/preview: price a plan with a coupon before paying (NEX-51). */
+export const couponPreviewRequestSchema = z.object({ planId: paidPlanIdSchema, code: promotionCodeInputSchema }).strict();
+
+/**
+ * Server-computed price of a plan with a coupon. Stripe Checkout takes one
+ * discount, so the lower first payment between the coupon and the first-month
+ * promo wins (`appliedDiscount`).
+ */
+export const couponPreviewSchema = z.object({
+  /** The code exists and can be used now (it may still lose to the first-month promo). */
+  valid: z.boolean(),
+  message: z.string(),
+  code: z.string().nullable(),
+  appliedDiscount: z.enum(["coupon", "first_month", "none"]),
+  firstPaymentBrlCents: z.number().int().nonnegative(),
+  /** What the second month costs. */
+  recurringBrlCents: z.number().int().nonnegative(),
+  /** The plan's regular monthly price. */
+  regularBrlCents: z.number().int().nonnegative(),
+  /** Months with the applied discount: null is every month, 0 is none. */
+  discountedMonths: z.number().int().nonnegative().nullable(),
+  /** Description of the coupon's discount, when the code is valid. */
+  label: z.string().nullable(),
+});
 
 /** POST billing/plan: swap the plan of the live card subscription. */
 export const billingPlanChangeRequestSchema = z.object({ planId: paidPlanIdSchema }).strict();
@@ -57,7 +85,12 @@ export const billingCancelRequestSchema = z.object({ alsoAddon: z.boolean().opti
 /** Without a card subscription the plan is bought through the regular Checkout. */
 export const billingPlanChangeResultSchema = z.union([
   z.object({ checkout: z.literal(true) }),
-  z.object({ checkout: z.literal(false), planId: paidPlanIdSchema }),
+  z.object({
+    checkout: z.literal(false),
+    planId: paidPlanIdSchema,
+    /** A coupon restricted to other plans was removed by the swap (its code), or null. */
+    couponRemoved: z.string().nullable().optional(),
+  }),
 ]);
 
 export const refundIneligibleReasonSchema = z.enum([
@@ -107,11 +140,17 @@ export const billingStateSchema = z.object({
   cancelAtPeriodEnd: z.boolean(),
   checkoutAvailable: z.boolean(),
   portalAvailable: z.boolean(),
+  /** The viewer is OWNER/ADMIN of the organization (buying and managing are theirs). */
+  canManage: z.boolean(),
+  /** Stripe billing is configured in this installation. */
+  billingConfigured: z.boolean(),
   plans: z.array(publicPlanSchema).length(4),
   apiAddon: apiAddonStateSchema,
   management: billingManagementSchema,
   /** Prepaid days (PIX or referral) in force; not refundable or cancelable here. */
   prepaid: prepaidStateSchema.nullable(),
+  /** Coupon on the plan subscription (NEX-51); planIds empty means every plan. */
+  appliedCoupon: z.object({ code: z.string(), planIds: z.array(paidPlanIdSchema) }).nullable().optional(),
 });
 
 export const usageStateSchema = z.object({
@@ -137,6 +176,7 @@ export type BillingCheckoutRequest = z.infer<typeof billingCheckoutRequestSchema
 export type PublicBillingPlan = z.infer<typeof publicPlanSchema>;
 export type PublicPlan = PublicBillingPlan;
 export type BillingView = z.infer<typeof billingStateSchema>;
+export type CouponPreview = z.infer<typeof couponPreviewSchema>;
 export type UsageView = z.infer<typeof usageStateSchema>;
 export type BillingPlanChangeResult = z.infer<typeof billingPlanChangeResultSchema>;
 export type RefundEligibility = z.infer<typeof refundEligibilitySchema>;

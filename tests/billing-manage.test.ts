@@ -8,7 +8,7 @@ import type Stripe from "stripe";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as schema from "@/db/schema";
-import { billingCheckoutIntents, organizations, subscriptions, usagePeriods, user, type UnoDatabase } from "@/db";
+import { billingCheckoutIntents, coupons, organizations, subscriptions, usagePeriods, user, type UnoDatabase } from "@/db";
 import { billingCancelRequestSchema, billingPlanChangeRequestSchema } from "@/lib/billing-model";
 import {
   cancelBillingSubscription,
@@ -67,7 +67,9 @@ class ManageProvider implements BillingProvider {
   async listSubscriptions(customerId: string) {
     return [...this.subs.values()].filter((snapshot) => snapshot.customerId === customerId).map((snapshot) => ({ ...snapshot, priceIds: [...snapshot.priceIds] }));
   }
-  async changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean }, idempotencyKey: string) {
+  removedDiscounts: string[] = [];
+  async changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean; removeDiscounts?: boolean }, idempotencyKey: string) {
+    if (input.removeDiscounts) this.removedDiscounts.push(input.subscriptionId);
     this.calls.push(`change:${input.subscriptionId}:${input.toPriceId}:${idempotencyKey}`);
     this.upgrades.push(input.upgrade);
     const subscription = this.subs.get(input.subscriptionId)!;
@@ -86,6 +88,10 @@ class ManageProvider implements BillingProvider {
   async refundedAmount(paymentIntentId: string) {
     return this.refunds.filter((refund) => refund.paymentIntentId === paymentIntentId).reduce((total, refund) => total + refund.amount, 0);
   }
+  async expireCheckout(): Promise<"expired" | "complete"> { return "expired"; }
+  async retrievePromotionCode() { return null; }
+  async createCouponWithCode(): Promise<{ couponId: string; promotionCodeId: string }> { throw new Error("unused"); }
+  async setPromotionCodeActive() { throw new Error("unused"); }
   async createRefund(input: { paymentIntentId: string; metadata: Record<string, string> }, idempotencyKey: string) {
     const replay = this.refunds.find((refund) => refund.idempotencyKey === idempotencyKey);
     if (replay) return { id: replay.id };
@@ -180,13 +186,35 @@ describe("plan change", () => {
     await provider.setCancelAtPeriodEnd("sub_plan", true);
     await reconcileStripeCustomer("cus_manage", deps);
     const result = await changeBillingPlan(owner, "PRO", KEY, deps);
-    expect(result).toEqual({ checkout: false, planId: "PRO" });
+    expect(result).toEqual({ checkout: false, planId: "PRO", couponRemoved: null });
+    expect(provider.removedDiscounts).toEqual([]);
     expect(provider.subs.get("sub_plan")).toMatchObject({ priceIds: ["price_pro"], cancelAtPeriodEnd: false });
     expect(provider.calls).toContain(`change:sub_plan:price_pro:uno-plan-sub_plan-PRO-${KEY}`);
     expect(await row()).toMatchObject({ planId: "PRO", cancelAtPeriodEnd: false, stripeSubscriptionId: "sub_plan" });
     // Starter → Pro is charged now; Pro → Starter earns no credit.
     await changeBillingPlan(owner, "STARTER", "downgrade-key-0123456789", deps);
     expect(provider.upgrades).toEqual([true, false]);
+  });
+
+  it("removes a coupon restricted to other plans when swapping, and says so (NEX-51)", async () => {
+    await subscribe();
+    const [restricted] = await database.insert(coupons).values({
+      code: "SOSTARTER", stripeCouponId: "coupon_s", stripePromotionCodeId: "promo_s", discountType: "PERCENT", percentOff: 50,
+      duration: "forever", planIds: ["STARTER"],
+    }).returning();
+    await database.update(subscriptions).set({ appliedCouponId: restricted!.id, appliedCouponCode: "SOSTARTER", appliedPromotionCodeId: "promo_s" })
+      .where(eq(subscriptions.organizationId, ORG));
+    expect((await readBillingState(owner, database, NOW)).appliedCoupon).toEqual({ code: "SOSTARTER", planIds: ["STARTER"] });
+    expect(await changeBillingPlan(owner, "PRO", KEY, deps)).toEqual({ checkout: false, planId: "PRO", couponRemoved: "SOSTARTER" });
+    expect(provider.removedDiscounts).toEqual(["sub_plan"]);
+    expect(await row()).toMatchObject({ planId: "PRO", appliedCouponId: null, appliedCouponCode: null });
+    // A coupon valid for every plan stays.
+    await database.update(coupons).set({ planIds: [] });
+    await database.update(subscriptions).set({ appliedCouponId: restricted!.id }).where(eq(subscriptions.organizationId, ORG));
+    expect(await changeBillingPlan(owner, "STARTER", "downgrade-key-0123456789", deps)).toMatchObject({ couponRemoved: null });
+    expect(provider.removedDiscounts).toEqual(["sub_plan"]);
+    await database.update(subscriptions).set({ appliedCouponId: null }).where(eq(subscriptions.organizationId, ORG));
+    await database.delete(coupons);
   });
 
   it("rejects the current plan and an invalid target price", async () => {

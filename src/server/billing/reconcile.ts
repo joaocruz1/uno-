@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 
-import { and, asc, eq, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
 import type Stripe from "stripe";
 
 import {
   billingCheckoutIntents,
+  coupons,
   getDb,
   processedStripeEvents,
   subscriptions,
@@ -189,6 +190,22 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
       apiAddonStatus: current.apiAddonStatus,
       apiAddonCurrentPeriodEnd: current.apiAddonCurrentPeriodEnd,
     };
+    // Coupon on the plan subscription (NEX-51). A one-time discount disappears from
+    // Stripe after the first invoice, so what was seen is kept for audit until the
+    // plan subscription itself changes.
+    let couponState: { appliedCouponId: string | null; appliedCouponCode: string | null; appliedPromotionCodeId: string | null } = {
+      appliedCouponId: current.appliedCouponId, appliedCouponCode: current.appliedCouponCode, appliedPromotionCodeId: current.appliedPromotionCodeId,
+    };
+    const promotionCodeIds = selected?.promotionCodeIds ?? [];
+    if (selected && promotionCodeIds.length > 0) {
+      const known = await transaction.select({ id: coupons.id, code: coupons.code, promotionCodeId: coupons.stripePromotionCodeId })
+        .from(coupons).where(inArray(coupons.stripePromotionCodeId, promotionCodeIds)).limit(1);
+      couponState = known[0]
+        ? { appliedCouponId: known[0].id, appliedCouponCode: known[0].code, appliedPromotionCodeId: known[0].promotionCodeId }
+        : { appliedCouponId: null, appliedCouponCode: null, appliedPromotionCodeId: promotionCodeIds[0]! };
+    } else if (!selected || selected.id !== current.stripeSubscriptionId) {
+      couponState = { appliedCouponId: null, appliedCouponCode: null, appliedPromotionCodeId: null };
+    }
     const entitlement = effectivePlanFromSubscription({
       planId, status, currentPeriodStart, currentPeriodEnd,
       apiAddonStatus: addonState.apiAddonStatus,
@@ -207,6 +224,7 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
       currentPeriodEnd,
       cancelAtPeriodEnd: selected?.cancelAtPeriodEnd ?? false,
       ...addonState,
+      ...couponState,
       lastReconciledAt: now,
       updatedAt: now,
     }).where(and(eq(subscriptions.id, current.id), eq(subscriptions.reconciliationVersion, claim.version)));

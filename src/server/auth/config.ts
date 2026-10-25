@@ -1,8 +1,10 @@
 import { drizzleAdapter } from "@better-auth/drizzle-adapter";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 import { nextCookies } from "better-auth/next-js";
 
 import * as schema from "@/db/schema";
+import { brPhoneSchema, PHONE_REQUIRED_MESSAGE } from "@/lib/phone";
 import type { AuthSecondaryStorage } from "@/server/redis";
 
 import type { AuthMailer } from "./email";
@@ -70,6 +72,15 @@ export function createUnoAuth(dependencies: UnoAuthDependencies) {
           defaultValue: "USER",
           input: false,
         },
+        // NEX-51: required at e-mail sign-up (enforced in the create hook below, so
+        // Google sign-ups and older accounts still work and are asked for it later).
+        // Every write, sign-up and /update-user alike, is normalized to E.164.
+        phone: {
+          type: "string",
+          required: false,
+          input: true,
+          validator: { input: brPhoneSchema },
+        },
       },
     },
     emailAndPassword: {
@@ -126,7 +137,11 @@ export function createUnoAuth(dependencies: UnoAuthDependencies) {
     databaseHooks: {
       user: {
         create: {
-          async before(candidate) {
+          async before(candidate, context) {
+            // Owner decision (NEX-51): a phone is mandatory for e-mail sign-up.
+            if (context?.path === "/sign-up/email" && !(candidate as { phone?: unknown }).phone) {
+              throw APIError.from("BAD_REQUEST", { code: "PHONE_REQUIRED", message: PHONE_REQUIRED_MESSAGE });
+            }
             const email = normalizeEmail(candidate.email);
             return {
               data: {

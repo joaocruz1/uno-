@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { PhoneInput } from "@/components/auth/phone-input";
 import { Button, Input, LoadingState } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
+import { formatBrPhone, normalizeBrPhone, PHONE_INVALID_MESSAGE } from "@/lib/phone";
 
 const sectionClass = "rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface)] p-6";
 const FALLBACK = "Não foi possível concluir a solicitação. Tente novamente.";
@@ -38,7 +40,11 @@ export function ProfileSection({ initialName, email }: { initialName: string; em
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState<"name" | "verify" | "password">();
+  const savedPhone = session.data?.user.phone ?? null;
+  // null until the person edits the field: shows the stored phone once the session loads.
+  const [phoneDraft, setPhoneDraft] = useState<string | null>(null);
+  const phone = phoneDraft ?? formatBrPhone(savedPhone);
+  const [busy, setBusy] = useState<"name" | "phone" | "verify" | "password">();
   const [profileMessage, setProfileMessage] = useState<Message>();
   const [passwordMessage, setPasswordMessage] = useState<Message>();
   const lock = useRef(false);
@@ -57,7 +63,7 @@ export function ProfileSection({ initialName, email }: { initialName: string; em
     return () => { active = false; };
   }, []);
 
-  const run = async (operation: "name" | "verify" | "password", action: () => Promise<void>) => {
+  const run = async (operation: "name" | "phone" | "verify" | "password", action: () => Promise<void>) => {
     if (lock.current) return;
     lock.current = true; setBusy(operation);
     try { await action(); } finally { lock.current = false; setBusy(undefined); }
@@ -68,6 +74,17 @@ export function ProfileSection({ initialName, email }: { initialName: string; em
     const { error } = await authClient.updateUser({ name: name.trim() }).catch(() => ({ error: { message: FALLBACK } }));
     if (error) { setProfileMessage({ kind: "error", text: authMessage(error, "Não foi possível salvar o nome.") }); return; }
     setProfileMessage({ kind: "ok", text: "Nome atualizado." });
+    router.refresh();
+  });
+
+  const savePhone = () => run("phone", async () => {
+    setProfileMessage(undefined);
+    const normalized = normalizeBrPhone(phone);
+    if (!normalized) { setProfileMessage({ kind: "error", text: PHONE_INVALID_MESSAGE }); return; }
+    const { error } = await authClient.updateUser({ phone: normalized }).catch(() => ({ error: { message: FALLBACK } }));
+    if (error) { setProfileMessage({ kind: "error", text: authMessage(error, "Não foi possível salvar o telefone.") }); return; }
+    setPhoneDraft(null);
+    setProfileMessage({ kind: "ok", text: "Telefone atualizado." });
     router.refresh();
   });
 
@@ -101,6 +118,18 @@ export function ProfileSection({ initialName, email }: { initialName: string; em
             <Input className="mt-2" value={name} minLength={2} maxLength={80} required autoComplete="name" disabled={Boolean(busy)} onChange={(event) => setName(event.target.value)} />
           </label>
           <Button type="submit" disabled={Boolean(busy) || trimmed.length < 2 || trimmed === savedName}>{busy === "name" ? "Salvando…" : "Salvar nome"}</Button>
+        </form>
+        <form className="mt-6 flex flex-wrap items-end gap-3" onSubmit={(event) => { event.preventDefault(); void savePhone(); }}>
+          <label className="min-w-0 flex-1 text-sm text-[var(--color-muted)]">Telefone (com DDD)
+            <PhoneInput
+              value={phone}
+              onValueChange={setPhoneDraft}
+              required
+              disabled={Boolean(busy)}
+              className="mt-2 h-11 w-full rounded-lg border border-[var(--c-line)] bg-[var(--c-surface-2)] px-3 text-sm text-[var(--c-ink)] outline-none placeholder:text-[var(--c-faint)] focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-50"
+            />
+          </label>
+          <Button type="submit" disabled={Boolean(busy) || !normalizeBrPhone(phone) || normalizeBrPhone(phone) === savedPhone}>{busy === "phone" ? "Salvando…" : "Salvar telefone"}</Button>
         </form>
         <div className="mt-6">
           <p className="text-sm text-[var(--color-muted)]">E-mail</p>

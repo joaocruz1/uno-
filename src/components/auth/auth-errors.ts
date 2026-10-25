@@ -13,6 +13,11 @@ export function friendlyAuthError(code?: string): string {
     case "USER_ALREADY_EXISTS":
     case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL":
       return "Já existe uma conta com este e-mail.";
+    case "PHONE_REQUIRED":
+      return "Informe seu telefone com DDD.";
+    // The phone is the only sign-up field with a custom validator (NEX-51).
+    case "VALIDATION_ERROR":
+      return "Informe um telefone válido com DDD, como (11) 98765-4321.";
     case "PASSWORD_TOO_SHORT":
       return "A senha deve ter pelo menos 8 caracteres.";
     case "INVALID_TOKEN":

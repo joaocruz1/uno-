@@ -1,5 +1,5 @@
 import { appUrl, requiredEnv } from "@/lib/env";
-import { getPlanCatalog, type PlanId } from "@/lib/plans";
+import { publicPlans } from "@/lib/public-plans";
 import type { PublicBillingPlan, PaidPlanId } from "@/lib/billing-model";
 
 export const PAID_PLAN_IDS: readonly PaidPlanId[] = ["STARTER", "PRO", "BUSINESS"];
@@ -28,22 +28,7 @@ export function apiAddonPriceId(): string | null {
 }
 
 export function publicBillingPlans(): PublicBillingPlan[] {
-  const plans = getPlanCatalog();
-  return (Object.keys(plans) as PlanId[]).map((id) => {
-    const plan = plans[id];
-    return {
-      id,
-      name: plan.name,
-      priceBrlCents: plan.priceBrlCents,
-      firstMonthPriceBrlCents: plan.firstMonthPriceBrlCents,
-      monthlyLimit: plan.monthlyLimit,
-      maxFileMB: plan.maxFileMB,
-      batchLimit: plan.batchLimit,
-      retentionDays: plan.retentionDays,
-      api: plan.api,
-      rateLimit: plan.rateLimit,
-    };
-  });
+  return publicPlans();
 }
 
 export function billingProviderConfigured(): boolean {
