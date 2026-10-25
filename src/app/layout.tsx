@@ -3,6 +3,8 @@ import "@fontsource-variable/inter";
 import "@fontsource-variable/manrope";
 import "./globals.css";
 
+import { InlineScript } from "@/components/inline-script";
+
 export const metadata: Metadata = {
   title: { default: "UNO | Duas páginas. Uma etiqueta.", template: "%s | UNO" },
   description: "Recomponha uma etiqueta logística e uma DANFE em uma única página pronta para o seu fluxo de impressão.",
@@ -15,9 +17,9 @@ const THEME_SCRIPT = `(function(){try{var t=localStorage.getItem('uno-theme');do
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="pt-BR" data-theme="light">
+    <html lang="pt-BR" data-theme="light" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+        <InlineScript html={THEME_SCRIPT} />
       </head>
       <body>{children}</body>
     </html>

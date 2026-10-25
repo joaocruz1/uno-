@@ -31,6 +31,8 @@ export async function readBillingState(
   const effective = effectivePlanId(entitlement, now);
   const paidPlan = effective !== "FREE";
   const addonPaid = apiAddonActive(entitlement, now);
+  // In-app plan management only applies to a card subscription that is paid up.
+  const cardPlanLive = Boolean(subscription?.stripeSubscriptionId) && (entitlement.status === "ACTIVE" || entitlement.status === "TRIALING");
   // A live add-on subscription (even past due) is managed in the portal, never bought twice.
   const addonManageable = Boolean(subscription?.apiAddonSubscriptionId) && entitlement.apiAddonStatus !== "CANCELED";
   return {
@@ -52,6 +54,14 @@ export async function readBillingState(
       available: canManage && apiAddonConfigured() && paidPlan && Boolean(subscription?.stripeSubscriptionId) && !addonManageable,
       inactiveWithoutPaidPlan: addonPaid && !paidPlan,
     },
+    management: {
+      changePlan: canManage && configured && cardPlanLive,
+      cancel: canManage && configured && cardPlanLive && !(subscription?.cancelAtPeriodEnd ?? false),
+      resume: canManage && configured && cardPlanLive && (subscription?.cancelAtPeriodEnd ?? false),
+    },
+    prepaid: subscription?.prepaidPlanId && subscription.prepaidPeriodEnd && subscription.prepaidPeriodEnd > now
+      ? { planId: subscription.prepaidPlanId, periodEnd: subscription.prepaidPeriodEnd.toISOString() }
+      : null,
   };
 }
 

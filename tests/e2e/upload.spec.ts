@@ -1,15 +1,17 @@
 import { expect, test } from "@playwright/test";
-import { mailLink } from "./helpers/mail";
 import { syntheticPdf } from "../fixtures/synthetic-pdf";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test("private dashboard conversion validates, processes and downloads a synthetic PDF", async ({ page }) => {
   test.setTimeout(90_000);
-  test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires local PostgreSQL, Redis, S3, Mailpit and worker");
+  test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires local PostgreSQL, Redis, S3 and worker");
   const origin = "http://127.0.0.1:3100";
   const email = `uno-upload-e2e-${crypto.randomUUID()}@example.test`;
-  const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, { headers: { origin }, data: { name: "Operador Upload", email, password: "Synthetic-upload-password", callbackURL: "/verify-email?verified=1" } });
+  const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, { headers: { origin }, data: { name: "Operador Upload", email, password: "Synthetic-upload-password" } });
   expect(signup.status()).toBe(200);
-  await page.goto(await mailLink(page.request, email, "verify-email"));
+  // Sign-up signs in at once (NEX-42): the session cookie is already in this context.
   await page.goto("/dashboard/process");
   await expect(page.getByRole("button", { name: "Selecionar arquivo", exact: true })).toBeVisible();
   const file = page.getByLabel("Selecionar arquivo PDF", { exact: true });

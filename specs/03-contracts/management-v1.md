@@ -6,7 +6,7 @@ spec: SPEC-UNO-001
 
 # Organizações e administração
 
-Identidade verificada e mesma origem nas mutações. Toda operação relê membership
+Identidade autenticada (e-mail confirmado não é exigido, exceto onde indicado) e mesma origem nas mutações. Toda operação relê membership
 vigente; seleção por cookie é preferência, não autorização. Listar/trocar
 organizações autentica identidade independentemente de cookie selecionado,
 permitindo recuperação após remoção. Provisionamento pessoal ocorre somente
@@ -25,8 +25,9 @@ troca proprietário e rebaixa anterior a ADMIN atomicamente. Não remover/rebaix
 OWNER por outro caminho. Remoção/rebaixamento perde autorização na próxima request.
 
 POST/GET /:id/invitations cria/lista convites por OWNER/ADMIN; DELETE /:id/invitations/:id
-revoga. POST dashboard/invitations/accept aceita token para identidade verificada
-com e-mail correspondente. Token aleatório persistido somente como hash, prazo
+revoga. POST dashboard/invitations/accept aceita token para identidade com e-mail
+confirmado e correspondente (sem confirmação: 403 `email_not_verified`; a tela
+do convite oferece enviar o link de confirmação). Token aleatório persistido somente como hash, prazo
 operacional configurável e consumo único. Aceitação sob lock relê autorização
 do emissor, papel permitido, estado/expiração e e-mail normalizado; replay não
 duplica membership. Convites são enviados pelo provedor configurado; testes usam
@@ -34,7 +35,7 @@ somente Mailpit e endereços sintéticos. Limites operacionais/rate limits confi
 
 # Administração e liberação
 
-Exigir platformRole ADMIN e allowlist operacional. ADMIN de organização não
+Exigir platformRole ADMIN, allowlist operacional e e-mail confirmado. ADMIN de organização não
 concede privilégio de plataforma. GET api/admin/* oferece métricas e metadados
 paginados de organizações, assinaturas, uso, conversões, falhas e jobs: IDs,
 estados, versões, tempos, contadores e códigos seguros. Nunca PDFs, previews,

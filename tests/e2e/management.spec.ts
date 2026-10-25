@@ -1,6 +1,9 @@
 import { expect, test, type Browser, type Page } from "@playwright/test";
 
 import { mailLink } from "./helpers/mail";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
@@ -8,22 +11,31 @@ const origin = "http://127.0.0.1:3100";
 
 async function verifiedPage(browser: Browser, label: string): Promise<{ page: Page; email: string }> {
   const context = await browser.newContext();
+  await isolateClientIp(context);
   const page = await context.newPage();
   const email = `uno-team-e2e-${label}-${crypto.randomUUID()}@example.test`;
   let signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
     headers: { origin },
-    data: { name: `Operador ${label}`, email, password: "Team-e2e-password", callbackURL: "/verify-email?verified=1" },
+    data: { name: `Operador ${label}`, email, password: "Team-e2e-password" },
   });
   for (let attempt = 0; signup.status() === 429 && attempt < 8; attempt += 1) {
     const retryAfter = Number(signup.headers()["retry-after"]);
     await page.waitForTimeout(Math.min(30_000, Math.max(1_000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : 5_000)));
     signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
       headers: { origin },
-      data: { name: `Operador ${label}`, email, password: "Team-e2e-password", callbackURL: "/verify-email?verified=1" },
+      data: { name: `Operador ${label}`, email, password: "Team-e2e-password" },
     });
   }
   expect(signup.status()).toBe(200);
+  // Sign-up signs in at once, but accepting an invitation still requires a
+  // confirmed e-mail, so these accounts confirm it on request.
+  const requested = await page.request.post(`${origin}/api/auth/send-verification-email`, { headers: { origin }, data: { email, callbackURL: "/dashboard" } });
+  expect(requested.status()).toBe(200);
   await page.goto(await mailLink(page.request, email, "verify-email"));
+  // Confirming ends every session of the account (it must never hand an
+  // account over), so sign in again.
+  const signin = await page.request.post(`${origin}/api/auth/sign-in/email`, { headers: { origin }, data: { email, password: "Team-e2e-password" } });
+  expect(signin.status()).toBe(200);
   return { page, email };
 }
 
@@ -36,13 +48,23 @@ test("owner renames the organization, invites a member by e-mail and the invitee
 
   await owner.page.goto("/dashboard/settings");
   await expect(owner.page.getByRole("heading", { name: "Configurações", exact: true })).toBeVisible();
-  await owner.page.getByLabel("Nome da organização").fill(organizationName);
-  await owner.page.getByRole("button", { name: "Salvar nome", exact: true }).click();
+  const renameForm = owner.page.getByLabel("Nome da organização").locator("xpath=ancestor::form[1]");
+  // The panel may remount once after load (it is keyed by the organization), so
+  // retype until the submit button reflects the new name.
+  await expect(async () => {
+    await owner.page.getByLabel("Nome da organização").fill(organizationName);
+    await expect(renameForm.getByRole("button", { name: "Salvar nome", exact: true })).toBeEnabled({ timeout: 1_000 });
+  }).toPass({ timeout: 20_000 });
+  await renameForm.getByRole("button", { name: "Salvar nome", exact: true }).click();
   await expect(owner.page.getByRole("main").getByText(organizationName).first()).toBeVisible();
+  // The rename refreshes server data and remounts the settings panel; wait for
+  // the server-rendered header so the invitation form is the final instance.
+  await expect(owner.page.getByRole("banner").getByText(organizationName).first()).toBeAttached();
 
   await owner.page.getByLabel("E-mail", { exact: true }).fill(invitee.email);
   await owner.page.getByRole("button", { name: "Enviar convite", exact: true }).click();
-  await expect(owner.page.getByRole("button", { name: `Revogar convite de ${invitee.email}`, exact: true })).toBeVisible();
+  // Sending the invitation goes through SMTP, which can be slow under a parallel run.
+  await expect(owner.page.getByRole("button", { name: `Revogar convite de ${invitee.email}`, exact: true })).toBeVisible({ timeout: 30_000 });
 
   const link = await mailLink(owner.page.request, invitee.email, "/invite");
   expect(link).toContain("#token=");

@@ -50,7 +50,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
         <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b border-[var(--color-line)] bg-[color-mix(in_srgb,var(--color-canvas)_82%,transparent)] px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
             <details className="relative lg:hidden">
-              <summary className="grid size-9 cursor-pointer list-none place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink)]">
+              <summary aria-label="Abrir menu" className="grid size-9 cursor-pointer list-none place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink)]">
                 <span className="flex flex-col gap-[3px]"><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /></span>
               </summary>
               <nav aria-label="Menu" className="card-soft absolute left-0 top-11 z-30 w-60 rounded-2xl p-2">

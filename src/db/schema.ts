@@ -209,6 +209,11 @@ export const subscriptions = pgTable(
     // Reconciliation never writes these, so an active Stripe sub cannot clear them.
     prepaidPlanId: planIdEnum("prepaid_plan_id"),
     prepaidPeriodEnd: timestamp("prepaid_period_end", { withTimezone: true }),
+    // 7-day withdrawal refund (CDC art. 49): one per organization. Started marks the
+    // commitment (a retry after a partial failure finishes it); refunded marks it done.
+    // Reconciliation never writes these.
+    refundStartedAt: timestamp("refund_started_at", { withTimezone: true }),
+    refundedAt: timestamp("refunded_at", { withTimezone: true }),
     reconciliationVersion: integer("reconciliation_version").notNull().default(0),
     lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),

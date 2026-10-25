@@ -48,6 +48,56 @@ export const billingCheckoutRequestSchema = z.union([
   z.object({ addon: apiAddonIdSchema }).strict(),
 ]);
 
+/** POST billing/plan: swap the plan of the live card subscription. */
+export const billingPlanChangeRequestSchema = z.object({ planId: paidPlanIdSchema }).strict();
+
+/** POST billing/cancel and billing/resume: the "+ API" add-on follows the plan by default. */
+export const billingCancelRequestSchema = z.object({ alsoAddon: z.boolean().optional() }).strict();
+
+/** Without a card subscription the plan is bought through the regular Checkout. */
+export const billingPlanChangeResultSchema = z.union([
+  z.object({ checkout: z.literal(true) }),
+  z.object({ checkout: z.literal(false), planId: paidPlanIdSchema }),
+]);
+
+export const refundIneligibleReasonSchema = z.enum([
+  "no_card_subscription",
+  "no_paid_invoice",
+  "window_expired",
+  "already_refunded",
+]);
+
+/** 7-day withdrawal refund (CDC art. 49), one per organization. */
+export const refundEligibilitySchema = z.object({
+  eligible: z.boolean(),
+  reason: refundIneligibleReasonSchema.nullable(),
+  /** End of the 7-day window counted from the first paid invoice of the plan subscription. */
+  deadline: z.iso.datetime({ offset: true }).nullable(),
+  /** What would be refunded now: plan and add-on invoices paid inside the window, minus refunds already made. */
+  amountBrlCents: z.number().int().nonnegative(),
+  /** A previous request was interrupted; requesting again finishes it. */
+  inProgress: z.boolean(),
+});
+
+export const refundResultSchema = z.object({
+  refundedBrlCents: z.number().int().nonnegative(),
+  refundedAt: z.iso.datetime({ offset: true }),
+});
+
+export const billingManagementSchema = z.object({
+  /** The actor can swap plans in-app (live card plan subscription). */
+  changePlan: z.boolean(),
+  /** The actor can schedule the cancellation at period end. */
+  cancel: z.boolean(),
+  /** A scheduled cancellation can be withdrawn. */
+  resume: z.boolean(),
+});
+
+export const prepaidStateSchema = z.object({
+  planId: planIdSchema,
+  periodEnd: z.iso.datetime({ offset: true }),
+});
+
 export const billingStateSchema = z.object({
   planId: planIdSchema,
   effectivePlanId: planIdSchema,
@@ -59,6 +109,9 @@ export const billingStateSchema = z.object({
   portalAvailable: z.boolean(),
   plans: z.array(publicPlanSchema).length(4),
   apiAddon: apiAddonStateSchema,
+  management: billingManagementSchema,
+  /** Prepaid days (PIX or referral) in force; not refundable or cancelable here. */
+  prepaid: prepaidStateSchema.nullable(),
 });
 
 export const usageStateSchema = z.object({
@@ -85,4 +138,7 @@ export type PublicBillingPlan = z.infer<typeof publicPlanSchema>;
 export type PublicPlan = PublicBillingPlan;
 export type BillingView = z.infer<typeof billingStateSchema>;
 export type UsageView = z.infer<typeof usageStateSchema>;
+export type BillingPlanChangeResult = z.infer<typeof billingPlanChangeResultSchema>;
+export type RefundEligibility = z.infer<typeof refundEligibilitySchema>;
+export type RefundResult = z.infer<typeof refundResultSchema>;
 export type BillingRedirect = z.infer<typeof billingRedirectSchema>;

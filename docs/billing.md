@@ -30,9 +30,52 @@ requisições por minuto continua sendo o do plano.
 O adicional é uma assinatura Stripe separada (um único item) no mesmo Customer:
 o portal do cliente não altera assinaturas com vários produtos, e a troca de
 plano é feita por ele. A contratação é POST /api/dashboard/billing/checkout com
-{"addon":"API"} (OWNER/ADMIN, Idempotency-Key); o cancelamento é feito no
-portal ("Gerenciar assinatura"). Na reconciliação cada assinatura do Customer é
+{"addon":"API"} (OWNER/ADMIN, Idempotency-Key); o cancelamento acompanha o do
+plano (abaixo) ou é feito sozinho no portal ("Gerenciar no portal"). Na reconciliação cada assinatura do Customer é
 classificada pelos seus Prices (plano, adicional ou ambos).
+
+## Gestão da assinatura na área do cliente
+
+Em Configurações → Assinatura e na página Assinatura, OWNER/ADMIN gerenciam a
+assinatura no cartão sem sair da UNO; MEMBER vê só o estado. Todas as rotas
+abaixo exigem mesma origem e `Idempotency-Key`, valem só para a organização
+selecionada e, depois da chamada à Stripe, reconciliam o Customer na hora
+(`reconcileStripeCustomer`), sem esperar o webhook. O portal continua para
+cartão, dados de cobrança, faturas e cancelamento só do adicional.
+
+- **Troca de plano** — POST /api/dashboard/billing/plan `{planId}`: troca o
+  Price do item do plano na mesma assinatura. Plano maior: a diferença
+  proporcional é cobrada na hora (`proration_behavior: always_invoice`,
+  `payment_behavior: error_if_incomplete`), então a cota maior nunca é usada a
+  crédito. Plano menor: vale agora, sem crédito pelos dias restantes
+  (`proration_behavior: none`) e desfaz um cancelamento agendado. Recusa o plano
+  atual (409 `same_plan`) e assinatura inadimplente (409 `payment_pending`).
+  O Price de destino é validado como no checkout. Sem assinatura no cartão a
+  resposta é `{checkout:true}` e a tela abre o Checkout normal.
+- **Cancelamento** — POST /api/dashboard/billing/cancel `{alsoAddon?}`:
+  `cancel_at_period_end=true`; os direitos seguem até o fim do período. Por
+  padrão (`alsoAddon` omitido ou `true`) o "+ API" também é agendado para
+  cancelar, pois sem plano pago ele não concede nada. POST
+  /api/dashboard/billing/resume `{alsoAddon?}` desfaz.
+- **Reembolso de 7 dias** — GET/POST /api/dashboard/billing/refund. Direito de
+  arrependimento (CDC, art. 49), automático: elegível quando a primeira fatura
+  paga da assinatura do plano tem `status_transitions.paid_at` há no máximo
+  7×24 h e a organização nunca usou esse reembolso. Estorna 100% de cada
+  pagamento (PaymentIntent) das faturas do plano e do adicional pagas nessa
+  janela (`refunds.create` com chave `uno-refund-<fatura>-<payment_intent>` e
+  metadata `organizationId` + `uno_refund=7d`), encerra essas assinaturas na
+  hora (`subscriptions.cancel`, sem crédito proporcional) e reconcilia: a
+  organização volta ao Free. GET devolve `{eligible, reason, deadline, amountBrlCents, inProgress}`.
+  **Um por organização**: `subscriptions.refund_started_at` é gravado antes de
+  qualquer chamada à Stripe e `refunded_at` ao final (migração 0017).
+  Assinar de novo não reabre o direito. Se a execução parar no meio, um novo
+  POST conclui (mesmo fora da janela): pagamentos já estornados são pulados
+  (`refunds.list` por PaymentIntent) e as chaves de idempotência evitam
+  estorno duplo. Enquanto houver reembolso em andamento, checkout, troca e
+  cancelamento devolvem 409 `refund_in_progress`. Cada reembolso concluído gera
+  uma linha JSON `billing.refund.completed` no log (sem dados de pagamento).
+  Crédito pré-pago por PIX ou indicação não é reembolsado nem cancelado por
+  aqui: a tela só informa até quando ele vale.
 
 Configurar STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e STRIPE_PRICE_STARTER/PRO/
 BUSINESS no ambiente privado. STRIPE_PRICE_API_ADDON é opcional: sem ele os

@@ -42,7 +42,8 @@ Every variable is listed in `.env.example`. Required in production:
 `EMAIL_FROM`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
 `STRIPE_PRICE_{STARTER,PRO,BUSINESS}`, `WEBHOOK_ENCRYPTION_KEY`, and
 `ADMIN_EMAILS` (platform admins also need `platform_role = 'ADMIN'` in the
-database). `UNO_ALLOW_DRAFT_TEMPLATES` is ignored in production.
+database and, since sign-up no longer confirms the address, a confirmed
+e-mail: request the link at `/verify-email` or sign in with Google). `UNO_ALLOW_DRAFT_TEMPLATES` is ignored in production.
 
 `STRIPE_PRICE_API_ADDON` is optional. It is the price of the "+ API" add-on
 (API keys, public API and webhooks, sold on top of any paid plan as a separate
@@ -53,6 +54,26 @@ those products. Migration `0010_rich_zodiak` adds the add-on columns: apply it
 before the web and API services run this version. No plan includes the API any
 more, so organizations that used it through Pro or Business need the add-on
 (or a manual grant in `subscriptions.api_addon_*`) to keep access.
+
+Google sign-in is optional: set both `GOOGLE_CLIENT_ID` and
+`GOOGLE_CLIENT_SECRET` (web app service only; the worker does not need them)
+and the "Continuar com Google" button appears on `/login` and `/register`.
+With either one missing, the provider is not registered and the button is
+hidden. Create the client in Google Cloud Console → APIs & Services →
+Credentials → Create credentials → OAuth client ID → "Web application":
+
+- Authorized JavaScript origins: the public origin, e.g.
+  `https://api-nextpy-uno.1nwz76.easypanel.host` (and `http://localhost:3000`
+  for development, in a separate client if preferred).
+- Authorized redirect URIs: `${BETTER_AUTH_URL}/api/auth/callback/google`
+  (`BETTER_AUTH_URL` falls back to `APP_URL`), e.g.
+  `https://api-nextpy-uno.1nwz76.easypanel.host/api/auth/callback/google`.
+- The OAuth consent screen needs the `openid`, `email` and `profile` scopes
+  (the defaults) and must be published ("In production") before people outside
+  the test-user list can sign in.
+
+The flow is a top-level redirect to `accounts.google.com` and back to our own
+origin, so the CSP (`form-action 'self'`, `connect-src`) needs no change.
 
 Security headers and the Content-Security-Policy are computed at **build
 time**: `S3_ENDPOINT` (and `NEXT_PUBLIC_POSTHOG_*`, if used) must be present in

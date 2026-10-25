@@ -56,6 +56,13 @@ class FakeProvider implements BillingProvider {
   }
   async createPortal() { this.portalCalls += 1; return { url: "https://billing.stripe.com/p/session/test" }; }
   async listSubscriptions(customerId: string) { return this.subscriptionsByCustomer.get(customerId) ?? this.subscriptions; }
+  // Plan management is covered by tests/billing-manage.test.ts with a stateful fake.
+  async changeSubscriptionPrice() { throw new Error("unused"); }
+  async setCancelAtPeriodEnd() { throw new Error("unused"); }
+  async cancelSubscriptionNow() { throw new Error("unused"); }
+  async listPaidInvoices() { return []; }
+  async refundedAmount() { return 0; }
+  async createRefund(): Promise<{ id: string }> { throw new Error("unused"); }
   constructEvent() { return this.event; }
 }
 

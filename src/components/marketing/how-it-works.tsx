@@ -4,6 +4,8 @@ import { Printer, ScanLine, UploadCloud } from "lucide-react";
 import { useMotionValueEvent, useReducedMotion, useScroll } from "motion/react";
 import { useRef, useState } from "react";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { LabelStage } from "./label-stage";
 
 const STEPS = [
@@ -44,7 +46,9 @@ function StepList({ active }: { active: number | null }) {
 }
 
 export function HowItWorks() {
-  const reduced = useReducedMotion();
+  const hydrated = useHydrated();
+  // Only once hydrated: the server always renders the scroll story.
+  const reduced = useReducedMotion() && hydrated;
   const section = useRef<HTMLElement>(null);
   const progress = useRef(0);
   const [active, setActive] = useState(0);

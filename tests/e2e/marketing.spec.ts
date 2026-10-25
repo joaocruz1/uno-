@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { syntheticClientIp } from "./helpers/client-ip";
 test("landing identifies UNO and stays within the viewport", async ({page})=>{
   await page.goto("/");
   await expect(page).toHaveTitle(/UNO/);
@@ -6,7 +7,7 @@ test("landing identifies UNO and stays within the viewport", async ({page})=>{
   await expect(page.getByRole("heading",{level:1})).toContainText(/DUAS PÁGINAS/i);
   const hasOverflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+1);
   expect(hasOverflow).toBe(false);
-  await expect(page.getByRole("link",{name:/unir minha etiqueta/i}).first()).toHaveAttribute("href",/register/);
+  await expect(page.getByRole("link",{name:/criar conta grátis/i}).first()).toHaveAttribute("href",/register/);
 });
 test("pricing and documentation expose the real commercial and API contract",async({page})=>{
   await page.goto("/pricing");
@@ -23,7 +24,7 @@ test("reduced motion hydrates without browser errors", async ({page})=>{
   page.on("console",message=>{if(message.type()==="error")errors.push(message.text());});
   await page.emulateMedia({reducedMotion:"reduce"});
   await page.goto("/",{waitUntil:"networkidle"});
-  await expect(page.getByText("Etiqueta pronta",{exact:true}).first()).toBeVisible();
+  await expect(page.getByRole("heading",{level:1})).toContainText(/Duas páginas/i);
   expect(errors).toEqual([]);
 });
 
@@ -31,16 +32,16 @@ test("landing converts one label without an account and then asks for sign-up", 
   test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires the local app with Redis");
   test.setTimeout(90_000);
   const { syntheticPdf } = await import("../fixtures/synthetic-pdf");
-  await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Math.floor(Math.random()*250)+1}` });
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": syntheticClientIp() });
   await page.goto("/");
-  await expect(page.getByRole("heading",{name:"Jogue sua etiqueta aqui.",exact:true})).toBeVisible();
-  await page.getByLabel("Selecionar PDF para o teste gratuito").setInputFiles({ name:"synthetic.pdf", mimeType:"application/pdf", buffer:Buffer.from(await syntheticPdf({ fiscalSummary:true })) });
-  await expect(page.getByText("Etiqueta unificada",{exact:true})).toBeVisible({ timeout:45_000 });
-  await expect(page.getByRole("img",{name:"Etiqueta unificada, página 1",exact:true})).toHaveCount(1,{ timeout:20_000 });
+  await expect(page.getByRole("tab",{name:/Mercado Livre/})).toHaveAttribute("aria-selected","true");
+  await page.getByLabel("Selecionar PDF para o teste",{exact:true}).setInputFiles({ name:"synthetic.pdf", mimeType:"application/pdf", buffer:Buffer.from(await syntheticPdf({ fiscalSummary:true })) });
+  await expect(page.getByRole("heading",{name:"Etiqueta unificada, pronta pra 10×15.",exact:true})).toBeVisible({ timeout:45_000 });
+  await expect(page.getByText("Conferido",{exact:true}).first()).toBeVisible();
   const download = page.waitForEvent("download");
-  await page.getByRole("link",{name:"Baixar etiqueta",exact:true}).click();
-  expect((await download).suggestedFilename()).toBe("uno-etiqueta-unificada.pdf");
+  await page.getByRole("link",{name:"Baixar PDF",exact:true}).click();
+  expect((await download).suggestedFilename()).toBe("uno-etiqueta.pdf");
   await page.reload();
   await expect(page.getByRole("heading",{name:"Você já usou o teste gratuito.",exact:true})).toBeVisible();
-  await expect(page.getByRole("link",{name:/Criar conta grátis/})).toHaveAttribute("href","/register");
+  await expect(page.getByRole("heading",{name:"Você já usou o teste gratuito.",exact:true}).locator("..").getByRole("link").first()).toHaveAttribute("href","/register");
 });

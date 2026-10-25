@@ -1,52 +1,52 @@
 import { expect, test, type Page } from "@playwright/test";
 
-import { closeDb } from "@/db";
-import { mailLink } from "./helpers/mail";
 import { promoteSyntheticPro, restoreSyntheticFree } from "./helpers/api-fixture";
+import { isolateClientIp } from "./helpers/client-ip";
+
+test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 test.use({ trace: "off", video: "off", screenshot: "off" });
 
-test.afterAll(async () => {
-  if (process.env.UNO_LOCAL_API_E2E === "1") await closeDb();
-});
+// No closeDb() in afterAll: a timed-out test's cleanup can still be running
+// then. The pool lets the worker exit on idle outside production.
 
-async function verifiedPage(page: Page): Promise<string> {
+async function signedInPage(page: Page): Promise<string> {
   const origin = "http://127.0.0.1:3100";
   const email = `uno-api-e2e-${crypto.randomUUID()}@example.test`;
   let signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
     headers: { origin },
-    data: { name: "Operador API", email, password: "Api-key-e2e-password", callbackURL: "/verify-email?verified=1" },
+    data: { name: "Operador API", email, password: "Api-key-e2e-password" },
   });
   for (let attempt = 0; signup.status() === 429 && attempt < 8; attempt += 1) {
     const retryAfter = Number(signup.headers()["retry-after"]);
     await page.waitForTimeout(Math.min(30_000, Math.max(1_000, Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1_000 : 5_000)));
     signup = await page.request.post(`${origin}/api/auth/sign-up/email`, {
       headers: { origin },
-      data: { name: "Operador API", email, password: "Api-key-e2e-password", callbackURL: "/verify-email?verified=1" },
+      data: { name: "Operador API", email, password: "Api-key-e2e-password" },
     });
   }
   expect(signup.status()).toBe(200);
-  await page.goto(await mailLink(page.request, email, "verify-email"));
+  // Sign-up signs in at once (NEX-42): the session cookie is already in this context.
   return email;
 }
 
 test("free API page is plan-gated and never exposes a key creation form", async ({ page }) => {
-  test.skip(process.env.UNO_LOCAL_AUTH_E2E !== "1", "Requires local PostgreSQL and Mailpit");
+  test.skip(process.env.UNO_LOCAL_AUTH_E2E !== "1", "Requires local PostgreSQL");
   test.setTimeout(120_000);
-  await verifiedPage(page);
+  await signedInPage(page);
   await page.goto("/dashboard/api");
   await expect(page.getByRole("heading", { name: "API", exact: true })).toBeVisible();
   await expect(page.getByText("A API exige o adicional + API", { exact: false })).toBeVisible();
-  await expect(page.getByRole("link", { name: "Consultar planos", exact: true })).toHaveAttribute("href", "/dashboard/billing");
+  await expect(page.getByRole("link", { name: "Contratar o adicional de API", exact: true })).toHaveAttribute("href", "/dashboard/billing");
   await expect(page.getByText("Nenhuma chave criada", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Nome da integração", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Criar chave", exact: true })).toHaveCount(0);
 });
 
 test("paid API key is shown once, authenticates usage, and revokes", async ({ page }) => {
-    test.skip(process.env.UNO_LOCAL_API_E2E !== "1", "Requires local PostgreSQL, Mailpit and a local API fixture");
+    test.skip(process.env.UNO_LOCAL_API_E2E !== "1", "Requires local PostgreSQL and a local API fixture");
     test.setTimeout(120_000);
-    const email = await verifiedPage(page);
+    const email = await signedInPage(page);
     await page.goto("/dashboard");
     const { organizationId } = await promoteSyntheticPro(email);
     let secret = "";

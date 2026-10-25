@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { Button, ButtonLink, LoadingState } from "@/components/ui";
+import { authClient } from "@/lib/auth-client";
 import { acceptedInvitationSchema, ROLE_LABELS, type AcceptedInvitation } from "@/lib/management-model";
 
 import { RequestError, requestJson } from "./request";
@@ -12,7 +13,8 @@ import { RequestError, requestJson } from "./request";
 const STORAGE_KEY = "uno_pending_invitation";
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const LOGIN_URL = "/login?callbackURL=/invite";
-const REGISTER_URL = "/register";
+const REGISTER_URL = "/register?callbackURL=/invite";
+const VERIFY_CALLBACK_URL = "/invite";
 
 type State =
   | { step: "reading" }
@@ -20,7 +22,7 @@ type State =
   | { step: "ready" }
   | { step: "sending" }
   | { step: "login" }
-  | { step: "verify" }
+  | { step: "verify"; sending?: boolean; sent?: boolean; error?: string }
   | { step: "done"; accepted: AcceptedInvitation }
   | { step: "failed"; text: string; retry: boolean };
 
@@ -85,10 +87,39 @@ export function InvitationAcceptance() {
     return <div><p role="status" className="text-sm text-emerald-300">Convite aceito.</p><p className="mt-3 text-sm text-[var(--color-ink)]">Você agora participa de <strong className="text-[var(--color-ink)]">{state.accepted.organizationName}</strong> como {ROLE_LABELS[state.accepted.role]}.</p><Button className="mt-6 w-full" onClick={() => { router.push("/dashboard"); router.refresh(); }}>Abrir a organização</Button></div>;
   }
   if (state.step === "login") {
-    return <div><p role="status" className="text-sm text-[var(--color-ink)]">Entre com a conta do e-mail que recebeu o convite. Ele continua guardado nesta aba.</p><div className="mt-6 grid gap-3"><ButtonLink href={LOGIN_URL}>Entrar para aceitar</ButtonLink><Link href={REGISTER_URL} className="text-center text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)]">Ainda não tenho conta</Link></div><p className="mt-4 text-xs text-[var(--color-muted)]">Ao criar uma conta, confirme seu e-mail e abra o link do convite outra vez.</p></div>;
+    return <div><p role="status" className="text-sm text-[var(--color-ink)]">Entre com a conta do e-mail que recebeu o convite. Ele continua guardado nesta aba.</p><div className="mt-6 grid gap-3"><ButtonLink href={LOGIN_URL}>Entrar para aceitar</ButtonLink><Link href={REGISTER_URL} className="text-center text-sm text-[var(--color-muted)] hover:text-[var(--color-ink)]">Ainda não tenho conta</Link></div><p className="mt-4 text-xs text-[var(--color-muted)]">Para aceitar, o e-mail da conta precisa estar confirmado; enviaremos o link quando for preciso.</p></div>;
   }
   if (state.step === "verify") {
-    return <div><p role="alert" className="text-sm text-red-300">Confirme seu e-mail antes de aceitar o convite.</p><Link href="/verify-email" className="mt-5 inline-block text-sm font-semibold text-[var(--color-ink)] hover:text-uno-red">Confirmar e-mail</Link></div>;
+    // Invitations match by e-mail, so accepting one requires a confirmed address.
+    const sendLink = async () => {
+      if (state.sending) return;
+      setState({ step: "verify", sending: true });
+      try {
+        const session = await authClient.getSession();
+        const email = session.data?.user.email;
+        if (!email) { setState({ step: "login" }); return; }
+        const result = await authClient.sendVerificationEmail({ email, callbackURL: VERIFY_CALLBACK_URL });
+        if (result.error) {
+          setState({ step: "verify", error: result.error.code?.toUpperCase() === "EMAIL_ALREADY_VERIFIED" ? "Seu e-mail já está confirmado. Tente aceitar o convite outra vez." : "Não foi possível enviar agora. Aguarde um pouco e tente novamente." });
+          return;
+        }
+        setState({ step: "verify", sent: true });
+      } catch {
+        setState({ step: "verify", error: "Não foi possível enviar agora. Aguarde um pouco e tente novamente." });
+      }
+    };
+    return (
+      <div>
+        <p role="alert" className="text-sm text-[var(--color-ink)]">Para aceitar o convite, confirme primeiro o e-mail da sua conta.</p>
+        <p className="mt-3 text-sm text-[var(--color-muted)]">Enviaremos um link de confirmação para o seu e-mail. Depois de confirmar, volte a esta aba e toque em “Já confirmei, aceitar convite”.</p>
+        {state.sent ? <p role="status" className="mt-4 text-sm text-emerald-300">Link enviado. Confira sua caixa de entrada (e o spam); ele expira em uma hora.</p> : null}
+        {state.error ? <p role="alert" className="mt-4 text-sm text-red-300">{state.error}</p> : null}
+        <div className="mt-6 grid gap-3">
+          <Button disabled={state.sending} onClick={() => void sendLink()}>{state.sending ? "Enviando…" : state.sent ? "Reenviar link de confirmação" : "Enviar link de confirmação"}</Button>
+          <Button variant="secondary" onClick={() => void accept()}>Já confirmei, aceitar convite</Button>
+        </div>
+      </div>
+    );
   }
   if (state.step === "failed") {
     return <div><p role="alert" className="text-sm text-red-300">{state.text}</p>{state.retry ? <Button className="mt-6 w-full" onClick={() => void accept()}>Tentar novamente</Button> : <Link href="/dashboard" className="mt-5 inline-block text-sm font-semibold text-[var(--color-ink)] hover:text-uno-red">Ir para o painel</Link>}</div>;

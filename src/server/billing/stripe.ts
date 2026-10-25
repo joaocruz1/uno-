@@ -25,6 +25,17 @@ export type StripeSubscriptionSnapshot = {
 
 export type CheckoutSnapshot = { id: string; url: string; expiresAt: Date };
 
+/** A paid invoice of a subscription and the PaymentIntents that paid it. */
+export type PaidInvoiceSnapshot = {
+  id: string;
+  subscriptionId: string;
+  paidAt: Date;
+  amountPaid: number;
+  currency: string;
+  /** Each PaymentIntent that paid (part of) the invoice and how much it paid. */
+  payments: Array<{ paymentIntentId: string; amount: number }>;
+};
+
 export interface BillingProvider {
   createCustomer(input: { organizationId: string; organizationName: string }, idempotencyKey: string): Promise<{ id: string }>;
   retrievePrice(priceId: string): Promise<StripePriceSnapshot>;
@@ -42,6 +53,18 @@ export interface BillingProvider {
   }, idempotencyKey: string): Promise<CheckoutSnapshot>;
   createPortal(customerId: string, returnUrl: string, idempotencyKey: string): Promise<{ url: string }>;
   listSubscriptions(customerId: string): Promise<StripeSubscriptionSnapshot[]>;
+  /** Swaps the single item priced `fromPriceId` to `toPriceId`, prorating, and clears any scheduled cancellation. */
+  changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean }, idempotencyKey: string): Promise<void>;
+  /** Schedules (true) or withdraws (false) the cancellation at the end of the current period. */
+  setCancelAtPeriodEnd(subscriptionId: string, cancel: boolean, idempotencyKey: string): Promise<void>;
+  /** Ends the subscription right now, without proration credit. Canceling an already canceled one is a no-op. */
+  cancelSubscriptionNow(subscriptionId: string, idempotencyKey: string): Promise<void>;
+  /** Paid invoices of a subscription with a positive amount, oldest first. */
+  listPaidInvoices(subscriptionId: string): Promise<PaidInvoiceSnapshot[]>;
+  /** Amount already refunded (succeeded or still pending) for a PaymentIntent. */
+  refundedAmount(paymentIntentId: string): Promise<number>;
+  /** Refunds whatever is left of a PaymentIntent. */
+  createRefund(input: { paymentIntentId: string; metadata: Record<string, string> }, idempotencyKey: string): Promise<{ id: string }>;
   constructEvent(rawBody: Buffer, signature: string, secret: string): Stripe.Event;
 }
 
@@ -129,6 +152,72 @@ class StripeGateway implements BillingProvider {
         currentPeriodEnd: ends.length ? new Date(Math.max(...ends) * 1_000) : null,
       };
     });
+  }
+
+  async changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean }, idempotencyKey: string): Promise<void> {
+    const subscription = await stripe().subscriptions.retrieve(input.subscriptionId);
+    const items = subscription.items.data.filter((item) => item.price.id === input.fromPriceId);
+    if (items.length !== 1) throw new Error("stripe_subscription_item_mismatch");
+    await stripe().subscriptions.update(input.subscriptionId, {
+      items: [{ id: items[0]!.id, price: input.toPriceId, quantity: 1 }],
+      // Upgrades invoice the prorated difference now and fail if it is not paid,
+      // so a bigger quota is never used on credit; downgrades earn no credit.
+      ...(input.upgrade
+        ? { proration_behavior: "always_invoice" as const, payment_behavior: "error_if_incomplete" as const }
+        : { proration_behavior: "none" as const }),
+      cancel_at_period_end: false,
+      ...(subscription.cancel_at ? { cancel_at: "" } : {}),
+    }, { idempotencyKey });
+  }
+
+  async setCancelAtPeriodEnd(subscriptionId: string, cancel: boolean, idempotencyKey: string): Promise<void> {
+    const subscription = await stripe().subscriptions.retrieve(subscriptionId);
+    // Withdrawing a cancellation must also clear a fixed `cancel_at` set elsewhere (e.g. the portal).
+    await stripe().subscriptions.update(subscriptionId, {
+      cancel_at_period_end: cancel,
+      ...(!cancel && subscription.cancel_at ? { cancel_at: "" } : {}),
+    }, { idempotencyKey });
+  }
+
+  async cancelSubscriptionNow(subscriptionId: string, idempotencyKey: string): Promise<void> {
+    const subscription = await stripe().subscriptions.retrieve(subscriptionId);
+    if (subscription.status === "canceled" || subscription.status === "incomplete_expired") return;
+    await stripe().subscriptions.cancel(subscriptionId, { invoice_now: false, prorate: false }, { idempotencyKey });
+  }
+
+  async listPaidInvoices(subscriptionId: string): Promise<PaidInvoiceSnapshot[]> {
+    const invoices = await stripe().invoices.list({ subscription: subscriptionId, status: "paid", limit: 100, expand: ["data.payments"] })
+      .autoPagingToArray({ limit: 100 });
+    return invoices
+      .filter((invoice) => invoice.amount_paid > 0 && invoice.status_transitions.paid_at !== null && invoice.id)
+      .map((invoice) => ({
+        id: invoice.id!,
+        subscriptionId,
+        paidAt: new Date(invoice.status_transitions.paid_at! * 1_000),
+        amountPaid: invoice.amount_paid,
+        currency: invoice.currency,
+        payments: (invoice.payments?.data ?? []).flatMap((payment) => {
+          const paymentIntentId = payment.payment.type === "payment_intent" ? id(payment.payment.payment_intent ?? null) : null;
+          return payment.status === "paid" && paymentIntentId ? [{ paymentIntentId, amount: payment.amount_paid ?? payment.amount_requested }] : [];
+        }),
+      }))
+      .sort((left, right) => left.paidAt.getTime() - right.paidAt.getTime());
+  }
+
+  async refundedAmount(paymentIntentId: string): Promise<number> {
+    const refunds = await stripe().refunds.list({ payment_intent: paymentIntentId, limit: 100 }).autoPagingToArray({ limit: 100 });
+    return refunds
+      .filter((refund) => refund.status !== "failed" && refund.status !== "canceled")
+      .reduce((total, refund) => total + refund.amount, 0);
+  }
+
+  async createRefund(input: { paymentIntentId: string; metadata: Record<string, string> }, idempotencyKey: string): Promise<{ id: string }> {
+    const refund = await stripe().refunds.create({
+      payment_intent: input.paymentIntentId,
+      reason: "requested_by_customer",
+      metadata: input.metadata,
+    }, { idempotencyKey });
+    return { id: refund.id };
   }
 
   constructEvent(rawBody: Buffer, signature: string, secret: string) {

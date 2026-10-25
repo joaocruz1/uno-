@@ -16,6 +16,8 @@ export type UnoAuthEnvironment = {
   appURL: string;
   adminEmails: ReadonlySet<string>;
   production: boolean;
+  /** Google sign-in. Registered only when both values are configured. */
+  google?: { clientId: string; clientSecret: string };
 };
 
 export type UnoAuthDependencies = {
@@ -33,7 +35,7 @@ export function normalizeEmail(email: string): string {
 export function createUnoAuth(dependencies: UnoAuthDependencies) {
   const { database, environment, mailer, provisionUser, secondaryStorage } = dependencies;
 
-  return betterAuth({
+  const auth = betterAuth({
     appName: "UNO",
     secret: environment.secret,
     baseURL: environment.baseURL,
@@ -72,7 +74,11 @@ export function createUnoAuth(dependencies: UnoAuthDependencies) {
     },
     emailAndPassword: {
       enabled: true,
-      requireEmailVerification: true,
+      // Owner decision (NEX-42): confirmation never blocks normal use. Sign-up
+      // signs the person in at once. A verified e-mail is still required for
+      // platform administration and for accepting organization invitations.
+      requireEmailVerification: false,
+      autoSignIn: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
       resetPasswordTokenExpiresIn: 60 * 60,
@@ -81,15 +87,42 @@ export function createUnoAuth(dependencies: UnoAuthDependencies) {
         await mailer.sendPasswordReset({ to: user.email, name: user.name, url });
       },
     },
+    // Kept configured so a person can still confirm the address on request
+    // (/verify-email and the invitation screen).
     emailVerification: {
-      sendOnSignUp: true,
-      sendOnSignIn: true,
-      autoSignInAfterVerification: true,
+      sendOnSignUp: false,
+      sendOnSignIn: false,
+      // Confirmation is optional, so an account may have been created by someone
+      // who does not own the inbox. Clicking the link must never hand that
+      // account to the inbox owner, nor leave the creator signed in.
+      autoSignInAfterVerification: false,
       expiresIn: 60 * 60,
       async sendVerificationEmail({ user, url }) {
         await mailer.sendVerification({ to: user.email, name: user.name, url });
       },
+      async afterEmailVerification(verified) {
+        const { internalAdapter } = await auth.$context;
+        await internalAdapter.deleteUserSessions(verified.id);
+        // A platform-admin address only becomes admin with a password set by the inbox owner.
+        if (environment.adminEmails.has(normalizeEmail(verified.email))) {
+          const accounts = await internalAdapter.findAccounts(verified.id);
+          for (const account of accounts) {
+            if (account.providerId === "credential") await internalAdapter.deleteAccount(account.id);
+          }
+        }
+      },
     },
+    ...(environment.google ? {
+      socialProviders: {
+        google: {
+          clientId: environment.google.clientId,
+          clientSecret: environment.google.clientSecret,
+          prompt: "select_account" as const,
+        },
+      },
+    } : {}),
+    // Default account linking stays on: requireLocalEmailVerified (default true)
+    // keeps Google from implicitly linking onto an unverified password account.
     databaseHooks: {
       user: {
         create: {
@@ -113,6 +146,7 @@ export function createUnoAuth(dependencies: UnoAuthDependencies) {
     // Set-Cookie header emitted by Better Auth.
     plugins: [nextCookies()],
   });
+  return auth;
 }
 
 export type UnoAuth = ReturnType<typeof createUnoAuth>;

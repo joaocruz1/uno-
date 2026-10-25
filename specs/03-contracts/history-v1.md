@@ -6,7 +6,7 @@ spec: SPEC-UNO-001
 
 # Histórico e reprocessamento
 
-`GET /api/dashboard/conversions` exige sessão verificada e organização do ator.
+`GET /api/dashboard/conversions` exige sessão autenticada e organização do ator.
 Parâmetros: `q` literal case-insensitive sobre nome, até 120 caracteres;
 `status` queued/processing/completed/failed; `source` dashboard/api; `from`
 inclusivo e `to` exclusivo RFC3339; `limit` padrão 20, máximo 50; cursor opaco

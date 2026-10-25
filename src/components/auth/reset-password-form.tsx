@@ -5,7 +5,8 @@ import { useState } from "react";
 
 import { authClient } from "@/lib/auth-client";
 
-import { Field, FormMessage, friendlyAuthError, SubmitButton } from "./form-fields";
+import { friendlyAuthError } from "./auth-errors";
+import { Field, FormMessage, SubmitButton } from "./form-fields";
 
 export function ResetPasswordForm({ token }: { token?: string }) {
   const router = useRouter();
