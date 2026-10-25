@@ -51,4 +51,10 @@ test("usage shows the free 0/10 state and mobile dashboard links", async ({ page
   await expect(mobileNav).toBeVisible();
   await expect(mobileNav.getByRole("link", { name: "Uso", exact: true })).toHaveAttribute("href", "/dashboard/usage");
   await expect(mobileNav.getByRole("link", { name: "Assinatura", exact: true })).toHaveAttribute("href", "/dashboard/billing");
+  // A tap outside closes the menu (no need to press the menu button again).
+  await page.mouse.click(350, 780);
+  await expect(mobileNav).toBeHidden();
+  // Regular accounts never see the administration entry.
+  await page.getByLabel("Abrir menu", { exact: true }).click();
+  await expect(mobileNav.getByRole("link", { name: "Administração", exact: true })).toHaveCount(0);
 });

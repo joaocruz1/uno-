@@ -24,10 +24,10 @@ export type Channel = {
 
 export const CHANNELS: Channel[] = [
   { id: "mercado-livre", name: "Mercado Livre", sigla: "ML", accent: "#FFE600", ink: "#121212", status: "active" },
-  { id: "shopee", name: "Shopee", sigla: "SH", accent: "#EE4D2D", ink: "#ffffff", status: "soon" },
+  { id: "shopee", name: "Shopee", sigla: "SH", accent: "#EE4D2D", ink: "#ffffff", status: "active" },
   { id: "amazon", name: "Amazon", sigla: "AM", accent: "#161e2d", ink: "#ff9900", status: "soon" },
   { id: "magalu", name: "Magalu", sigla: "MG", accent: "#0086ff", ink: "#ffffff", status: "soon" },
-  { id: "tiktok", name: "TikTok Shop", sigla: "TT", accent: "#111113", ink: "#ffffff", status: "soon" },
+  { id: "tiktok", name: "TikTok Shop", sigla: "TT", accent: "#111113", ink: "#ffffff", status: "active" },
   { id: "tray", name: "Tray", sigla: "TR", accent: "#0ea5a5", ink: "#ffffff", status: "soon" },
 ];
 
