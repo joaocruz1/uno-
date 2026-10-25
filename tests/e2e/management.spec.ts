@@ -63,7 +63,8 @@ test("owner renames the organization, invites a member by e-mail and the invitee
 
   await owner.page.getByLabel("E-mail", { exact: true }).fill(invitee.email);
   await owner.page.getByRole("button", { name: "Enviar convite", exact: true }).click();
-  await expect(owner.page.getByRole("button", { name: `Revogar convite de ${invitee.email}`, exact: true })).toBeVisible();
+  // Sending the invitation goes through SMTP, which can be slow under a parallel run.
+  await expect(owner.page.getByRole("button", { name: `Revogar convite de ${invitee.email}`, exact: true })).toBeVisible({ timeout: 30_000 });
 
   const link = await mailLink(owner.page.request, invitee.email, "/invite");
   expect(link).toContain("#token=");

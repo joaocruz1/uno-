@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { syntheticClientIp } from "./helpers/client-ip";
 test("landing identifies UNO and stays within the viewport", async ({page})=>{
   await page.goto("/");
   await expect(page).toHaveTitle(/UNO/);
@@ -31,7 +32,7 @@ test("landing converts one label without an account and then asks for sign-up", 
   test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires the local app with Redis");
   test.setTimeout(90_000);
   const { syntheticPdf } = await import("../fixtures/synthetic-pdf");
-  await page.setExtraHTTPHeaders({ "x-forwarded-for": `198.51.100.${Math.floor(Math.random()*250)+1}` });
+  await page.setExtraHTTPHeaders({ "x-forwarded-for": syntheticClientIp() });
   await page.goto("/");
   await expect(page.getByRole("tab",{name:/Mercado Livre/})).toHaveAttribute("aria-selected","true");
   await page.getByLabel("Selecionar PDF para o teste",{exact:true}).setInputFiles({ name:"synthetic.pdf", mimeType:"application/pdf", buffer:Buffer.from(await syntheticPdf({ fiscalSummary:true })) });
