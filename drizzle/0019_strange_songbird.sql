@@ -1,0 +1,4 @@
+ALTER TABLE "billing_checkout_intents" DROP CONSTRAINT "billing_checkout_intents_open_ck";--> statement-breakpoint
+ALTER TABLE "billing_checkout_intents" ADD COLUMN "stripe_subscription_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "billing_checkout_intents_stripe_subscription_uq" ON "billing_checkout_intents" USING btree ("stripe_subscription_id") WHERE "billing_checkout_intents"."stripe_subscription_id" is not null;--> statement-breakpoint
+ALTER TABLE "billing_checkout_intents" ADD CONSTRAINT "billing_checkout_intents_open_ck" CHECK ("billing_checkout_intents"."status" <> 'OPEN' or ("billing_checkout_intents"."expires_at" is not null and (("billing_checkout_intents"."stripe_session_id" is not null and "billing_checkout_intents"."checkout_url" is not null) or "billing_checkout_intents"."stripe_subscription_id" is not null)));

@@ -126,16 +126,54 @@ throwaway addresses (sign-up stays rate limited per IP).
 `Strict-Transport-Security` (two years, subdomains, no preload).
 
 The policy allows only same-origin scripts, styles, fonts, images and workers
-(the PDF.js worker and its assets are served from `/pdfjs`), forbids framing,
-plugins and foreign form targets, and limits `connect-src` to the app, the
-private storage origin (`S3_ENDPOINT`, plus the bucket subdomain) and PostHog
-only when a key is configured. It is not a nonce-based policy: `script-src` and
+(the PDF.js worker and its assets are served from `/pdfjs`), plus Stripe.js;
+forbids being framed (`frame-ancestors 'none'`), plugins and foreign form
+targets; and limits `connect-src` to the app, the private storage origin
+(`S3_ENDPOINT`, plus the bucket subdomain), Stripe and PostHog only when a key
+is configured. Stripe entries, per Stripe's CSP guidance for the Payment Element
+and 3D Secure (NEX-52): `script-src https://js.stripe.com https://*.js.stripe.com`,
+`frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com https://*.stripe.com`
+(the only frames the app may embed), `connect-src https://api.stripe.com
+https://m.stripe.network https://q.stripe.com` and `img-src https://*.stripe.com`. It is not a nonce-based policy: `script-src` and
 `style-src` include `'unsafe-inline'` because Next.js inlines its bootstrap and
 no proxy issues nonces, and `'wasm-unsafe-eval'` is needed by PDF.js decoders.
 
 Headers are fixed when the server is built. If `S3_ENDPOINT` is not available
 at build time, `connect-src` falls back to `https:`; set it (or
 `UNO_CSP_CONNECT_SRC`) in the build environment to get the narrow policy.
+
+## Card payments (NEX-52)
+
+The checkout page (`/checkout`) embeds Stripe's Payment Element: card number,
+expiry and CVC are typed inside Stripe's iframes and go straight to Stripe.
+No card data reaches UNO servers, logs or database, which keeps the
+integration in PCI DSS SAQ A scope. The server creates the subscription
+incomplete and hands the browser only the client secret of its first payment
+(or of a SetupIntent when nothing is due); the secret is never stored or
+logged. The plan is granted only by the signed Stripe webhook and the
+reconciliation that follows it, never by the browser's confirmation; a
+subscription whose first invoice is unpaid grants nothing and Stripe expires it
+after 23 h.
+
+Saved cards are Stripe PaymentMethods attached to the organization's Customer.
+The UNO reads brand, last four digits and expiry from Stripe when a page asks
+and stores none of it. The Payment Element gets a short-lived CustomerSession
+of that Customer only (OWNER/ADMIN, same origin, rate limited); removing a card
+goes through `DELETE /api/dashboard/billing/cards`, which only acts on cards of
+the organization's own Customer (others answer 404) and refuses to remove the
+only card that pays a live subscription. Removal inside the Payment Element is
+disabled for that reason. Changing the card stays in the Stripe Customer Portal.
+
+Card testing: `/subscribe` and the Payment Element could be used to test
+stolen cards, and the `setup` path (nothing due today, e.g. a 100% coupon)
+validates a card without charging it. The app limits `/subscribe` per user
+(`UNO_SUBSCRIBE_RATE_LIMIT`) and coupon lookups per user and address, but it
+does not count declines: `payment_intent.payment_failed` and
+`setup_intent.setup_failed` are not webhook events the app handles, so no
+per-organization failure guard was added. **Operational gate:** enable Stripe
+Radar's card-testing protections and add rules that block after repeated
+failures (for example, more than 5 declines per customer or per IP address in
+an hour) before opening the checkout to the public.
 
 ## Temporary files
 
@@ -178,6 +216,7 @@ request.
 - TLS termination in front of the app, so HSTS is meaningful.
 - The retention worker must be running; without it nothing expires.
 - Before release, load the app in a browser and confirm the console reports no
-  CSP violations for upload, preview, download, checkout and analytics consent.
+  CSP violations for upload, preview, download, checkout (Payment Element and a
+  3D Secure challenge with a Stripe test card) and analytics consent.
 
 The phone collected at sign-up (NEX-51) is format-validated only and never verified (no SMS or call, owner decision): treat it as contact data typed by the user, not as proof of identity.

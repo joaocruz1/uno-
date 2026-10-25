@@ -19,9 +19,31 @@ export function choseFreePlan(value: unknown): boolean {
   return typeof candidate === "string" && candidate.trim().toUpperCase() === "FREE";
 }
 
-/** The checkout page, with the chosen plan preselected when there is one. */
-export function checkoutPath(plan?: PaidPlanId): string {
-  return plan ? `/checkout?plan=${plan.toLowerCase()}` : "/checkout";
+/** A coupon code carried in the checkout URL (`?coupon=`); the server validates it again. */
+export function parseCouponParam(value: unknown): string | undefined {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  if (typeof candidate !== "string") return undefined;
+  const code = candidate.trim().toUpperCase();
+  return /^[A-Z0-9_-]{3,40}$/.test(code) ? code : undefined;
+}
+
+/** `?addon=API` on the checkout page buys the "+ API" add-on (NEX-52). */
+export function parseAddonParam(value: unknown): "API" | undefined {
+  const candidate = Array.isArray(value) ? value[0] : value;
+  return typeof candidate === "string" && candidate.trim().toUpperCase() === "API" ? "API" : undefined;
+}
+
+/** The checkout page, with the chosen plan (and coupon) preselected when there is one. */
+export function checkoutPath(plan?: PaidPlanId, options: { coupon?: string | null } = {}): string {
+  if (!plan) return "/checkout";
+  const query = new URLSearchParams({ plan: plan.toLowerCase() });
+  if (options.coupon) query.set("coupon", options.coupon);
+  return `/checkout?${query.toString()}`;
+}
+
+/** The checkout page for the "+ API" add-on. */
+export function addonCheckoutPath(): string {
+  return "/checkout?addon=API";
 }
 
 

@@ -56,23 +56,37 @@ function analyticsOrigins(environment: HeaderEnvironment): string[] {
   }
 }
 
+/**
+ * Stripe.js and the Payment Element on /checkout (NEX-52), per Stripe's CSP
+ * guidance: the script and its iframes come from js.stripe.com, 3D Secure
+ * challenges load through hooks.stripe.com and other *.stripe.com frames, and
+ * the browser talks to Stripe's API and fraud signals. Always present, because
+ * the publishable key may be configured after the image is built.
+ */
+const STRIPE = {
+  script: ["https://js.stripe.com", "https://*.js.stripe.com"],
+  frame: ["https://js.stripe.com", "https://*.js.stripe.com", "https://hooks.stripe.com", "https://*.stripe.com"],
+  connect: ["https://api.stripe.com", "https://m.stripe.network", "https://q.stripe.com"],
+  img: ["https://*.stripe.com"],
+};
+
 export function contentSecurityPolicy(environment: HeaderEnvironment = process.env): string {
   const development = environment.NODE_ENV !== "production";
   const storage = storageOrigins(environment, development);
   // Headers are fixed when the server is built. Without a known storage origin
   // the policy stays functional by allowing any HTTPS endpoint for fetches only.
-  const connect = ["'self'", ...(storage.length ? storage : ["https:"]), ...analyticsOrigins(environment)];
+  const connect = ["'self'", ...(storage.length ? storage : ["https:"]), ...analyticsOrigins(environment), ...STRIPE.connect];
   if (development) connect.push("ws:", "wss:", ...(storage.length ? [] : ["http:"]));
   const directives: Array<[string, string[]]> = [
     ["default-src", ["'self'"]],
     // Next.js bootstraps with inline scripts and no nonce is issued; PDF.js decoders need WebAssembly.
-    ["script-src", ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", ...(development ? ["'unsafe-eval'"] : [])]],
+    ["script-src", ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", ...(development ? ["'unsafe-eval'"] : []), ...STRIPE.script]],
     ["style-src", ["'self'", "'unsafe-inline'"]],
-    ["img-src", ["'self'", "data:", "blob:"]],
+    ["img-src", ["'self'", "data:", "blob:", ...STRIPE.img]],
     ["font-src", ["'self'", "data:"]],
     ["connect-src", connect],
     ["worker-src", ["'self'", "blob:"]],
-    ["frame-src", ["'none'"]],
+    ["frame-src", STRIPE.frame],
     ["object-src", ["'none'"]],
     ["base-uri", ["'self'"]],
     ["form-action", ["'self'"]],

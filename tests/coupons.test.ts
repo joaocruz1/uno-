@@ -15,7 +15,7 @@ import { createAdminCoupon, listAdminCoupons, setAdminCouponActive } from "@/ser
 import { createBillingCheckout, reconcileStripeCustomer } from "@/server/billing";
 import type { CheckoutDependencies } from "@/server/billing/checkout";
 import { clientAddress, previewCoupon, quoteCheckout } from "@/server/billing/coupons";
-import type { BillingProvider, CouponCreateInput, PromotionCodeSnapshot, StripeSubscriptionSnapshot } from "@/server/billing/stripe";
+import type { BillingProvider, CouponCreateInput, PromotionCodeSnapshot, StripeSubscriptionSnapshot, SubscriptionPaymentSnapshot } from "@/server/billing/stripe";
 
 const ADMIN = "00000000-0000-4000-8000-000000000001";
 const OWNER = "00000000-0000-4000-8000-000000000002";
@@ -29,7 +29,9 @@ const database = drizzle(pglite, { schema }) as unknown as UnoDatabase;
 /** Stripe stand-in: promotion codes, checkout sessions and subscriptions in memory. */
 class CouponProvider implements BillingProvider {
   promotions = new Map<string, PromotionCodeSnapshot>();
-  checkoutCalls: Array<{ idempotencyKey: string; input: Parameters<BillingProvider["createCheckout"]>[0] }> = [];
+  subscriptionCalls: Array<{ idempotencyKey: string; input: Parameters<BillingProvider["createSubscription"]>[0] }> = [];
+  canceled: string[] = [];
+  cancelOutcome: "canceled" | "paid" = "canceled";
   customerCalls: Array<Parameters<BillingProvider["createCustomer"]>[0]> = [];
   expired: string[] = [];
   expireOutcome: "expired" | "complete" = "expired";
@@ -42,10 +44,23 @@ class CouponProvider implements BillingProvider {
     const prices: Record<string, number> = { price_starter: 1_900, price_pro: 4_900, price_business: 13_900 };
     return { id: priceId, active: true, currency: "brl", unitAmount: prices[priceId] ?? null, recurringInterval: "month", recurringIntervalCount: 1, productId: `prod_${priceId}` };
   }
-  async createCheckout(input: Parameters<BillingProvider["createCheckout"]>[0], idempotencyKey: string) {
-    this.checkoutCalls.push({ input, idempotencyKey });
-    return { id: `cs_${this.checkoutCalls.length}`, url: `https://checkout.stripe.com/c/pay/${this.checkoutCalls.length}`, expiresAt: new Date(NOW.getTime() + 3_600_000) };
+  async createSubscription(input: Parameters<BillingProvider["createSubscription"]>[0], idempotencyKey: string): Promise<SubscriptionPaymentSnapshot> {
+    this.subscriptionCalls.push({ input, idempotencyKey });
+    const n = this.subscriptionCalls.length;
+    return { id: `sub_${n}`, customerId: input.customerId, status: "incomplete", priceIds: [input.priceId], confirmation: "payment", clientSecret: `pi_${n}_secret_synthetic`, amountDue: 980, currency: "brl" };
   }
+  async retrieveSubscriptionPayment(id: string): Promise<SubscriptionPaymentSnapshot | null> {
+    const n = Number(id.replace("sub_", ""));
+    const call = this.subscriptionCalls[n - 1];
+    if (!call) return null;
+    return { id, customerId: call.input.customerId, status: this.canceled.includes(id) ? "canceled" : "incomplete", priceIds: [call.input.priceId], confirmation: "payment", clientSecret: `pi_${n}_secret_synthetic`, amountDue: 980, currency: "brl" };
+  }
+  async cancelIncompleteSubscription(id: string) { if (this.cancelOutcome === "canceled") this.canceled.push(id); return this.cancelOutcome; }
+  async createCustomerSession(): Promise<{ clientSecret: string; expiresAt: Date }> { throw new Error("unused"); }
+  async listCards() { return { defaultPaymentMethodId: null, cards: [] }; }
+  async setDefaultCard() { throw new Error("unused"); }
+  async detachCard() { throw new Error("unused"); }
+  async adoptSubscriptionCard() {}
   async expireCheckout(sessionId: string) { this.expired.push(sessionId); return this.expireOutcome; }
   async retrievePromotionCode(id: string) { return this.promotions.get(id) ?? null; }
   async createCouponWithCode(input: CouponCreateInput) {
@@ -213,9 +228,9 @@ describe("checkout with a coupon", () => {
   it("passes only the winning coupon's Promotion Code to Stripe and records it on the intent", async () => {
     const coupon = await insertCoupon("METADE", percent(80, "repeating", 3));
     const result = await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0001", deps(), { promotionCode: "metade" });
-    expect(result.url).toContain("checkout.stripe.com");
-    expect(provider.checkoutCalls).toHaveLength(1);
-    expect(provider.checkoutCalls[0]?.input).toMatchObject({ promotionCodeId: "promo_METADE", couponId: null, priceId: "price_pro" });
+    expect(result).toMatchObject({ confirmation: "payment", clientSecret: "pi_1_secret_synthetic" });
+    expect(provider.subscriptionCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls[0]?.input).toMatchObject({ promotionCodeId: "promo_METADE", couponId: null, priceId: "price_pro" });
     const [intent] = await database.select().from(billingCheckoutIntents);
     expect(intent).toMatchObject({ promotionCode: "METADE", appliedDiscount: "COUPON", couponId: coupon.id, status: "OPEN" });
     // The buyer's phone reaches the Stripe Customer.
@@ -225,11 +240,11 @@ describe("checkout with a coupon", () => {
   it("keeps the first-month coupon when it wins and when no code is typed", async () => {
     await insertCoupon("DEZ", percent(10));
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0002", deps(), { promotionCode: "DEZ" });
-    expect(provider.checkoutCalls[0]?.input).toMatchObject({ couponId: "coupon_first_pro", promotionCodeId: null });
+    expect(provider.subscriptionCalls[0]?.input).toMatchObject({ couponId: "coupon_first_pro", promotionCodeId: null });
     expect((await database.select().from(billingCheckoutIntents))[0]).toMatchObject({ promotionCode: "DEZ", appliedDiscount: "FIRST_MONTH", couponId: null });
     await database.delete(billingCheckoutIntents);
     await createBillingCheckout(owner, "STARTER", "coupon-checkout-key-0003", deps());
-    expect(provider.checkoutCalls[1]?.input).toMatchObject({ couponId: "coupon_first_starter", promotionCodeId: null });
+    expect(provider.subscriptionCalls[1]?.input).toMatchObject({ couponId: "coupon_first_starter", promotionCodeId: null });
     expect((await database.select().from(billingCheckoutIntents))[0]).toMatchObject({ promotionCode: null, appliedDiscount: "FIRST_MONTH" });
   });
 
@@ -251,46 +266,46 @@ describe("checkout with a coupon", () => {
     expect(await previewCoupon("PRO", "METADE", "00000000-0000-4000-8000-000000000999", deps())).toMatchObject({ valid: true });
   });
 
-  it("never lets a retry from an old tab expire the newer Checkout", async () => {
+  it("never lets a retry from an old tab cancel the newer subscription", async () => {
     await insertCoupon("METADE", percent(80));
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0010", deps());
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0011", deps(), { promotionCode: "METADE" });
-    expect(provider.expired).toEqual(["cs_1"]);
+    expect(provider.canceled).toEqual(["sub_1"]);
     // The first tab retries with its own (now superseded) key.
     await expect(createBillingCheckout(owner, "PRO", "coupon-checkout-key-0010", deps())).rejects.toMatchObject({ code: "checkout_in_progress", status: 409 });
-    expect(provider.expired).toEqual(["cs_1"]);
-    expect(provider.checkoutCalls).toHaveLength(2);
+    expect(provider.canceled).toEqual(["sub_1"]);
+    expect(provider.subscriptionCalls).toHaveLength(2);
     const open = await database.select().from(billingCheckoutIntents).where(eq(billingCheckoutIntents.status, "OPEN"));
     expect(open.map((intent) => intent.idempotencyKey)).toEqual(["coupon-checkout-key-0011"]);
-    // A retry of the open one still gets its URL.
-    expect((await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0011", deps(), { promotionCode: "METADE" })).url).toBe("https://checkout.stripe.com/c/pay/2");
+    // A retry of the open one still gets its client secret.
+    expect((await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0011", deps(), { promotionCode: "METADE" })).clientSecret).toBe("pi_2_secret_synthetic");
   });
 
-  it("refuses an invalid coupon with its message before touching Stripe Checkout", async () => {
+  it("refuses an invalid coupon with its message before creating any subscription", async () => {
     await expect(createBillingCheckout(owner, "PRO", "coupon-checkout-key-0004", deps(), { promotionCode: "NAOEXISTE" }))
       .rejects.toMatchObject({ code: "invalid_coupon", status: 400, message: "Cupom inválido ou indisponível para este plano." });
-    expect(provider.checkoutCalls).toHaveLength(0);
+    expect(provider.subscriptionCalls).toHaveLength(0);
     expect(await database.select().from(billingCheckoutIntents)).toHaveLength(0);
   });
 
-  it("replaces an open Checkout when the buyer comes back with a coupon, and never when it was paid", async () => {
+  it("cancels the stale subscription when the buyer comes back with a coupon, and never when it was paid", async () => {
     await insertCoupon("METADE", percent(80));
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0005", deps());
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0006", deps(), { promotionCode: "METADE" });
-    expect(provider.expired).toEqual(["cs_1"]);
-    expect(provider.checkoutCalls.map((call) => call.input.promotionCodeId ?? null)).toEqual([null, "promo_METADE"]);
+    expect(provider.canceled).toEqual(["sub_1"]);
+    expect(provider.subscriptionCalls.map((call) => call.input.promotionCodeId ?? null)).toEqual([null, "promo_METADE"]);
     const intents = await database.select().from(billingCheckoutIntents);
     expect(intents.map((intent) => [intent.idempotencyKey, intent.status]).sort()).toEqual([
       ["coupon-checkout-key-0005", "EXPIRED"], ["coupon-checkout-key-0006", "OPEN"],
     ]);
     // Same key again: idempotent, no third session.
     await createBillingCheckout(owner, "PRO", "coupon-checkout-key-0006", deps(), { promotionCode: "METADE" });
-    expect(provider.checkoutCalls).toHaveLength(2);
+    expect(provider.subscriptionCalls).toHaveLength(2);
     // The same key with another coupon is a conflict, as with any other parameter.
     await expect(createBillingCheckout(owner, "PRO", "coupon-checkout-key-0006", deps())).rejects.toMatchObject({ code: "idempotency_conflict" });
-    provider.expireOutcome = "complete";
+    provider.cancelOutcome = "paid";
     await expect(createBillingCheckout(owner, "STARTER", "coupon-checkout-key-0007", deps())).rejects.toMatchObject({ code: "checkout_in_progress" });
-    expect(provider.checkoutCalls).toHaveLength(2);
+    expect(provider.subscriptionCalls).toHaveLength(2);
   });
 
   it("re-prices on the server instead of trusting the preview", async () => {

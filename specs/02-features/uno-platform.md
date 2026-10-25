@@ -88,14 +88,18 @@ template is rejected; there is no generic or best-effort fallback.
   Google from the sign-in page goes to `/checkout`.
 - `plan` is validated on the server against the paid plan ids (STARTER, PRO,
   BUSINESS, case-insensitive); any other value is ignored.
-- `/checkout` is authenticated. It preselects the plan, shows the first-month
-  promotional price when there is one, and starts Stripe Checkout through
-  `POST /api/dashboard/billing/checkout` with an Idempotency-Key, following only
-  https `checkout.stripe.com`/`billing.stripe.com` URLs. An organization with a
-  paid plan in force (or a live subscription to manage) is sent to
-  `/dashboard/billing`. Members who are not OWNER/ADMIN see that they cannot
-  buy; without billing configuration the page says so. "Continuar no plano
-  grátis" always leads to `/dashboard`.
+- `/checkout` is authenticated and is our own payment page (NEX-52):
+  `?plan=…[&coupon=…]` or `?addon=API`. The card is typed in Stripe's Payment
+  Element (iframe, PCI SAQ A); the page calls
+  `POST /api/dashboard/billing/subscribe` with an Idempotency-Key and confirms
+  the returned client secret in the browser (3D Secure on the page). The plan
+  is activated only by the Stripe webhook: the page polls the billing state
+  before announcing success. An organization with a paid plan in force (or a
+  live subscription to manage) is sent to `/dashboard/billing`; `?addon=API`
+  needs a paid card plan in force. Members who are not OWNER/ADMIN see that
+  they cannot buy; without the publishable key or billing configuration the
+  page says "A cobrança ainda não está configurada". "Continuar no plano
+  grátis" always leads to `/dashboard`. Contract: `CONTRACT-UNO-BILLING-001`.
 
 ## Purchase from the plans page, phone and coupons (NEX-51)
 

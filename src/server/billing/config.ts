@@ -49,3 +49,21 @@ export function billingUrls() {
     portalReturn: `${base}/dashboard/billing`,
   };
 }
+
+const PUBLISHABLE_KEY_VARIABLE = "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY";
+
+/**
+ * The Stripe publishable key for the Payment Element (NEX-52), or null when it
+ * is missing, malformed or from another mode than the secret key (test vs live).
+ * Read with a dynamic lookup on the server so the value in force at runtime is
+ * used even if the image was built without it (Next.js only inlines literal
+ * `process.env.NEXT_PUBLIC_*` references at build time).
+ */
+export function stripePublishableKey(environment: Record<string, string | undefined> = process.env): string | null {
+  const value = environment[PUBLISHABLE_KEY_VARIABLE]?.trim();
+  if (!value || !/^pk_(test|live)_[A-Za-z0-9]{10,}$/.test(value)) return null;
+  const secret = environment.STRIPE_SECRET_KEY?.trim() ?? "";
+  const mode = value.startsWith("pk_live_") ? "live" : "test";
+  if (secret && !(secret.startsWith(`sk_${mode}_`) || secret.startsWith(`rk_${mode}_`))) return null;
+  return value;
+}

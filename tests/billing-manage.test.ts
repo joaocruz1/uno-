@@ -62,7 +62,14 @@ class ManageProvider implements BillingProvider {
   async retrievePrice(priceId: string) {
     return { id: priceId, active: true, currency: "brl", unitAmount: this.prices[priceId] ?? null, recurringInterval: "month", recurringIntervalCount: 1 };
   }
-  async createCheckout(): Promise<never> { throw new Error("unused"); }
+  async createSubscription(): Promise<never> { throw new Error("unused"); }
+  async retrieveSubscriptionPayment(): Promise<never> { throw new Error("unused"); }
+  async cancelIncompleteSubscription(): Promise<never> { throw new Error("unused"); }
+  async createCustomerSession(): Promise<never> { throw new Error("unused"); }
+  async listCards() { return { defaultPaymentMethodId: null, cards: [] }; }
+  async setDefaultCard(): Promise<never> { throw new Error("unused"); }
+  async detachCard(): Promise<never> { throw new Error("unused"); }
+  async adoptSubscriptionCard() {}
   async createPortal() { return { url: "https://billing.stripe.com/p/session/test" }; }
   async listSubscriptions(customerId: string) {
     return [...this.subs.values()].filter((snapshot) => snapshot.customerId === customerId).map((snapshot) => ({ ...snapshot, priceIds: [...snapshot.priceIds] }));

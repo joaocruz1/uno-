@@ -391,8 +391,12 @@ export const billingCheckoutIntents = pgTable(
     idempotencyKey: text("idempotency_key").notNull(),
     requestHash: text("request_hash").notNull(),
     providerAttempt: integer("provider_attempt").notNull().default(1),
+    // Hosted Checkout (before NEX-52): the Stripe session and its URL.
     stripeSessionId: text("stripe_session_id"),
     checkoutUrl: text("checkout_url"),
+    // Own checkout (NEX-52): the incomplete subscription created for this intent,
+    // confirmed in the browser with the Payment Element. No client secret is stored.
+    stripeSubscriptionId: text("stripe_subscription_id"),
     status: billingCheckoutStatusEnum("status").notNull().default("CREATING"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     // Coupon audit (NEX-51): the code the buyer typed, the discount the server chose
@@ -409,12 +413,13 @@ export const billingCheckoutIntents = pgTable(
     unique("billing_checkout_intents_org_id_uq").on(table.organizationId, table.id),
     uniqueIndex("billing_checkout_intents_org_idempotency_uq").on(table.organizationId, table.idempotencyKey),
     uniqueIndex("billing_checkout_intents_stripe_session_uq").on(table.stripeSessionId).where(sql`${table.stripeSessionId} is not null`),
+    uniqueIndex("billing_checkout_intents_stripe_subscription_uq").on(table.stripeSubscriptionId).where(sql`${table.stripeSubscriptionId} is not null`),
     uniqueIndex("billing_checkout_intents_org_active_uq").on(table.organizationId).where(sql`${table.status} in ('CREATING','OPEN')`),
     index("billing_checkout_intents_status_expires_idx").on(table.status, table.expiresAt),
     check("billing_checkout_intents_plan_ck", sql`(${table.planId} is not null and ${table.planId} <> 'FREE' and ${table.addon} is null) or (${table.planId} is null and ${table.addon} = 'API')`),
     check("billing_checkout_intents_idempotency_ck", sql`char_length(${table.idempotencyKey}) between 16 and 128 and ${table.requestHash} ~ '^[0-9a-f]{64}$'`),
     check("billing_checkout_intents_provider_attempt_ck", sql`${table.providerAttempt} > 0`),
-    check("billing_checkout_intents_open_ck", sql`${table.status} <> 'OPEN' or (${table.stripeSessionId} is not null and ${table.checkoutUrl} is not null and ${table.expiresAt} is not null)`),
+    check("billing_checkout_intents_open_ck", sql`${table.status} <> 'OPEN' or (${table.expiresAt} is not null and ((${table.stripeSessionId} is not null and ${table.checkoutUrl} is not null) or ${table.stripeSubscriptionId} is not null))`),
   ],
 );
 

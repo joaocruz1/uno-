@@ -1,24 +1,15 @@
 "use client";
 
 import { Check, Lock, Tag, X } from "lucide-react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "@/components/ui";
 import { couponPreviewSchema, type CouponPreview, type PaidPlanId, type PublicBillingPlan } from "@/lib/billing-model";
+import { checkoutPath } from "@/lib/checkout-intent";
 import { formatBrlCents } from "@/lib/plans";
 
-const STRIPE_HOSTS = ["checkout.stripe.com", "billing.stripe.com"];
 const errorSchema = z.object({ error: z.object({ code: z.string().optional(), message: z.string() }) });
-
-/** Only an https Stripe Checkout or Billing Portal URL is ever followed. */
-export function safeStripeRedirect(value: unknown): string | null {
-  const parsed = z.object({ url: z.url() }).safeParse(value);
-  if (!parsed.success) return null;
-  const destination = new URL(parsed.data.url);
-  if (destination.protocol !== "https:" || destination.username || destination.password || !STRIPE_HOSTS.includes(destination.hostname)) return null;
-  return destination.href;
-}
 
 export function hasPromo(plan: PublicBillingPlan): boolean {
   return plan.priceBrlCents > 0 && plan.firstMonthPriceBrlCents < plan.priceBrlCents;
@@ -38,21 +29,36 @@ export class SessionExpiredError extends Error {
   constructor() { super("Sua sessão expirou. Entre novamente para continuar."); this.name = "SessionExpiredError"; }
 }
 
-async function postJson(url: string, body: unknown, headers: Record<string, string> = {}): Promise<unknown> {
-  const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), cache: "no-store" });
+/** Thrown when the request never reached the server (offline, DNS, reset). */
+export class NetworkError extends Error {
+  constructor() { super("Sem conexão com o servidor. Verifique sua internet e tente novamente."); this.name = "NetworkError"; }
+}
+
+/** An error answer from our API, with its code. */
+export class ApiError extends Error {
+  constructor(message: string, readonly code: string | undefined, readonly status: number) { super(message); this.name = "ApiError"; }
+}
+
+export async function postJson(url: string, body: unknown, headers: Record<string, string> = {}, method = "POST"): Promise<unknown> {
+  let response: Response;
+  try {
+    response = await fetch(url, { method, headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body), cache: "no-store" });
+  } catch {
+    throw new NetworkError();
+  }
   const payload: unknown = await response.json().catch(() => null);
   if (response.status === 401) throw new SessionExpiredError();
   if (!response.ok) {
     const parsed = errorSchema.safeParse(payload);
-    throw new Error(parsed.success ? parsed.data.error.message : "Não foi possível concluir. Tente novamente.");
+    throw new ApiError(parsed.success ? parsed.data.error.message : "Não foi possível concluir. Tente novamente.", parsed.success ? parsed.data.error.code : undefined, response.status);
   }
   return payload;
 }
 
 /**
- * Coupon preview and payment for one selected plan. Prices shown come from the
- * server (POST billing/coupon/preview) and checkout recomputes them; nothing
- * here decides what is charged.
+ * Coupon preview for one selected plan, then the way to our own checkout page
+ * (NEX-52). Prices shown come from the server (POST billing/coupon/preview) and
+ * the checkout recomputes them; nothing here decides what is charged.
  */
 export function useCouponCheckout(plan: PublicBillingPlan | undefined, onSessionExpired?: (message: string) => void) {
   const [code, setCode] = useState("");
@@ -61,7 +67,6 @@ export function useCouponCheckout(plan: PublicBillingPlan | undefined, onSession
   const [applying, setApplying] = useState(false);
   const [paying, setPaying] = useState(false);
   const [payError, setPayError] = useState<string>();
-  const keys = useRef(new Map<string, string>());
   const locked = useRef(false);
   const appliedCode = preview?.valid ? preview.code : null;
 
@@ -100,29 +105,33 @@ export function useCouponCheckout(plan: PublicBillingPlan | undefined, onSession
 
   const clear = useCallback(() => { setPreview(null); setCode(""); setCouponError(undefined); }, []);
 
+  /** Applies a code that came from elsewhere (the checkout URL). */
+  const applyCode = useCallback(async (value: string) => {
+    if (!plan) return;
+    setCode(value);
+    await quote(plan.id as PaidPlanId, value);
+  }, [plan, quote]);
+
+  /** Shows a refusal that came from the payment step (the coupon stopped being valid). */
+  const reject = useCallback((message: string) => { setPreview(null); setCouponError(message); }, []);
+
+  // Coming back with the browser's Back button (page cache) unlocks the button.
+  useEffect(() => {
+    const reset = (event: PageTransitionEvent) => { if (event.persisted) { locked.current = false; setPaying(false); } };
+    window.addEventListener("pageshow", reset);
+    return () => window.removeEventListener("pageshow", reset);
+  }, []);
+
+  // The card is entered on our own page: /checkout keeps the plan and the applied coupon.
   const pay = useCallback(async () => {
     if (locked.current || !plan) return;
     locked.current = true;
     setPaying(true);
     setPayError(undefined);
-    try {
-      // One key per plan and coupon, reused on retries, so a double click never opens two sessions.
-      const keyName = `${plan.id}:${appliedCode ?? ""}`;
-      const key = keys.current.get(keyName) ?? crypto.randomUUID();
-      keys.current.set(keyName, key);
-      const body = await postJson("/api/dashboard/billing/checkout", appliedCode ? { planId: plan.id, promotionCode: appliedCode } : { planId: plan.id }, { "idempotency-key": key });
-      const destination = safeStripeRedirect(body);
-      if (!destination) throw new Error("Não foi possível abrir o pagamento.");
-      window.location.assign(destination);
-      return; // Keep the button busy while the browser leaves.
-    } catch (cause) {
-      fail(cause, setPayError);
-    }
-    locked.current = false;
-    setPaying(false);
-  }, [appliedCode, fail, plan]);
+    window.location.assign(checkoutPath(plan.id as PaidPlanId, { coupon: appliedCode }));
+  }, [appliedCode, plan]);
 
-  return { code, setCode, preview, couponError, applying, apply, clear, changePlan, pay, paying, payError, appliedCode };
+  return { code, setCode, preview, couponError, applying, apply, applyCode, reject, clear, changePlan, pay, paying, payError, appliedCode };
 }
 
 export type CouponCheckout = ReturnType<typeof useCouponCheckout>;
@@ -208,5 +217,5 @@ export function PriceBreakdown({ plan, preview }: { plan: PublicBillingPlan; pre
 }
 
 export function SecurePaymentNote() {
-  return <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-[var(--color-muted)]"><Lock size={12} aria-hidden="true" /> Pagamento seguro pela Stripe. Cancele quando quiser.</p>;
+  return <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-[var(--color-muted)]"><Lock size={12} aria-hidden="true" /> Pagamento processado pela Stripe. Cancele quando quiser.</p>;
 }

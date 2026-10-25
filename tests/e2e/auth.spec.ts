@@ -22,7 +22,7 @@ test("registration signs in straight to checkout, session, logout and password r
   await page.getByRole("button", { name: "Criar conta" }).click();
   // No e-mail confirmation step (NEX-42): the new account lands on checkout with the chosen plan.
   await expect(page).toHaveURL(/\/checkout\?plan=pro/);
-  await expect(page.getByRole("heading", { name: "Escolha o ritmo da sua expedição." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Finalize sua assinatura" })).toBeVisible();
   await expect(page.getByRole("radio", { name: /Pro/ })).toBeChecked();
   await page.getByRole("link", { name: "Continuar no plano grátis" }).click();
   await expect(page.getByRole("heading", { name: "Olá, Operador" })).toBeVisible();
