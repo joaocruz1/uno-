@@ -3,6 +3,8 @@
 import { useReducedMotion } from "motion/react";
 import { useState } from "react";
 
+import { useHydrated } from "@/lib/use-hydrated";
+
 import { LabelScanner } from "./label-scanner";
 import { LabelStage, type StageStatus } from "./label-stage";
 
@@ -14,13 +16,15 @@ import { LabelStage, type StageStatus } from "./label-stage";
 export function HeroStage() {
   const reduced = useReducedMotion();
   const [status, setStatus] = useState<StageStatus | "loading">("loading");
-
-  if (reduced) return <LabelScanner />;
-  const live = status === "ready";
+  // The motion preference only exists in the browser: the first render (server
+  // and hydration) is always the scanner, and the scene mounts afterwards.
+  const hydrated = useHydrated();
+  const showStage = hydrated && !reduced;
+  const live = showStage && status === "ready";
 
   return (
     <div className="relative aspect-[4/5] w-full max-w-[460px]">
-      {status !== "failed" ? (
+      {showStage && status !== "failed" ? (
         <div className={`absolute inset-0 transition-opacity duration-700 ${live ? "opacity-100" : "opacity-0"}`}>
           <div className="neon-stage h-full w-full overflow-hidden rounded-[30px]">
             <LabelStage mode="loop" onStatus={setStatus} label="Duas páginas se fundem em uma etiqueta 10×15 conferida" className="absolute inset-0" />
