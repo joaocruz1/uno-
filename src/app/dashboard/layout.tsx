@@ -4,8 +4,8 @@ import Image from "next/image";
 import { Layers3 } from "lucide-react";
 
 import { LogoutButton } from "@/components/auth";
+import { MobileMenu } from "@/components/mobile-menu";
 import { Sidebar } from "@/components/sidebar";
-import { ThemeToggle } from "@/components/theme-toggle";
 import { AppError } from "@/lib/errors";
 import { getPlanCatalog } from "@/lib/plans";
 import { isPlatformAdmin } from "@/server/auth/actor";
@@ -13,20 +13,6 @@ import { requireActor } from "@/server/http";
 
 // Authenticated area: never prerender at build time, when no database is available.
 export const dynamic = "force-dynamic";
-
-const MOBILE_LINKS = [
-  ["Início", "/dashboard"],
-  ["Nova conversão", "/dashboard/process"],
-  ["Lote de marketplace", "/dashboard/marketplace"],
-  ["Histórico", "/dashboard/history"],
-  ["Assinatura", "/dashboard/billing"],
-  ["Lotes", "/dashboard/batches"],
-  ["Uso", "/dashboard/usage"],
-  ["Indicações", "/dashboard/indicacoes"],
-  ["API", "/dashboard/api"],
-  ["Webhooks", "/dashboard/webhooks"],
-  ["Configurações", "/dashboard/settings"],
-] as const;
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   let actor;
@@ -49,22 +35,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b border-[var(--color-line)] bg-[color-mix(in_srgb,var(--color-canvas)_82%,transparent)] px-4 backdrop-blur-md sm:px-6 lg:px-8">
           <div className="flex min-w-0 items-center gap-3">
-            <details className="relative lg:hidden">
-              <summary aria-label="Abrir menu" className="grid size-9 cursor-pointer list-none place-items-center rounded-lg border border-[var(--color-line)] text-[var(--color-ink)]">
-                <span className="flex flex-col gap-[3px]"><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /><i className="h-px w-4 bg-current" /></span>
-              </summary>
-              <nav aria-label="Menu" className="card-soft absolute left-0 top-11 z-30 w-60 rounded-2xl p-2">
-                {MOBILE_LINKS.map(([label, href]) => (
-                  <Link key={href} href={href} className="block rounded-lg px-3 py-2 text-sm font-medium text-[var(--color-ink)] hover:bg-[var(--hover-ink)]">
-                    {label}
-                  </Link>
-                ))}
-                <div className="mt-1 flex items-center justify-between border-t border-[var(--color-line)] px-3 pt-2">
-                  <span className="text-xs text-[var(--color-muted)]">Tema</span>
-                  <ThemeToggle className="grid size-8 place-items-center rounded-lg text-[var(--color-muted)] hover:bg-[var(--hover-ink)]" />
-                </div>
-              </nav>
-            </details>
+            <MobileMenu showAdmin={isPlatformAdmin(actor)} />
 
             <Link href="/dashboard" className="flex items-center gap-2 lg:hidden">
               <Image src="/uno-icon.png" width={24} height={24} alt="" />

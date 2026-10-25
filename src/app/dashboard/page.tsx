@@ -89,7 +89,7 @@ export default async function DashboardPage() {
 
       <section className="mt-8">
         <h2 className="font-heading text-base font-bold text-[var(--color-ink)]">Canais</h2>
-        <p className="mt-1 text-sm text-[var(--color-muted)]">O Mercado Livre já está no ar; os demais entram em breve.</p>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">Mercado Livre, Shopee e TikTok Shop já estão no ar; os demais entram em breve.</p>
         <ChannelStrip className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3" />
       </section>
     </div>
