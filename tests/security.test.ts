@@ -20,6 +20,8 @@ function directive(policy: string, name: string): string[] {
   return entry ? entry.split(" ").slice(1) : [];
 }
 
+const STRIPE_CONNECT = ["https://api.stripe.com", "https://m.stripe.network", "https://q.stripe.com"];
+
 describe("HTTP security headers", () => {
   const production = { NODE_ENV: "production", S3_ENDPOINT: "https://storage.example.test", S3_BUCKET: "uno-private" };
 
@@ -42,7 +44,7 @@ describe("HTTP security headers", () => {
     const policy = contentSecurityPolicy({ NODE_ENV: "development", S3_ENDPOINT: "http://localhost:4568" });
     expect(policy).not.toContain("upgrade-insecure-requests");
     expect(directive(policy, "script-src")).toContain("'unsafe-eval'");
-    expect(directive(policy, "connect-src")).toEqual(["'self'", "http://localhost:4568", "ws:", "wss:"]);
+    expect(directive(policy, "connect-src")).toEqual(["'self'", "http://localhost:4568", ...STRIPE_CONNECT, "ws:", "wss:"]);
   });
 
   it("limits production fetches to the app, the private storage origin and configured analytics", () => {
@@ -53,8 +55,8 @@ describe("HTTP security headers", () => {
     expect(directive(policy, "base-uri")).toEqual(["'self'"]);
     expect(directive(policy, "form-action")).toEqual(["'self'"]);
     expect(directive(policy, "worker-src")).toEqual(["'self'", "blob:"]);
-    expect(directive(policy, "script-src")).toEqual(["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'"]);
-    expect(directive(policy, "connect-src")).toEqual(["'self'", "https://storage.example.test", "https://uno-private.storage.example.test"]);
+    expect(directive(policy, "script-src")).toEqual(["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "https://js.stripe.com", "https://*.js.stripe.com"]);
+    expect(directive(policy, "connect-src")).toEqual(["'self'", "https://storage.example.test", "https://uno-private.storage.example.test", ...STRIPE_CONNECT]);
     expect(policy.endsWith("upgrade-insecure-requests")).toBe(true);
     expect(policy).not.toContain("posthog");
 
@@ -64,10 +66,18 @@ describe("HTTP security headers", () => {
     expect(untrusted).not.toContain("collector.example.test");
   });
 
+  it("allows Stripe.js, the Payment Element iframes and 3D Secure, and nothing else is framed (NEX-52)", () => {
+    const policy = contentSecurityPolicy(production);
+    expect(directive(policy, "frame-src")).toEqual(["https://js.stripe.com", "https://*.js.stripe.com", "https://hooks.stripe.com", "https://*.stripe.com"]);
+    expect(directive(policy, "img-src")).toEqual(["'self'", "data:", "blob:", "https://*.stripe.com"]);
+    expect(directive(policy, "frame-ancestors")).toEqual(["'none'"]);
+    expect(policy).not.toMatch(/frame-src[^;]*\*(\s|;|$)/);
+  });
+
   it("stays functional without a build-time storage origin and rejects invalid overrides explicitly", () => {
-    expect(directive(contentSecurityPolicy({ NODE_ENV: "production" }), "connect-src")).toEqual(["'self'", "https:"]);
+    expect(directive(contentSecurityPolicy({ NODE_ENV: "production" }), "connect-src")).toEqual(["'self'", "https:", ...STRIPE_CONNECT]);
     expect(directive(contentSecurityPolicy({ NODE_ENV: "production", UNO_CSP_CONNECT_SRC: "https://cdn.example.test" }), "connect-src"))
-      .toEqual(["'self'", "https://cdn.example.test"]);
+      .toEqual(["'self'", "https://cdn.example.test", ...STRIPE_CONNECT]);
     for (const value of ["*", "http://storage.example.test", "https://storage.example.test/path", "https://user:secret@storage.example.test", "javascript:alert(1)"]) {
       expect(() => contentSecurityPolicy({ NODE_ENV: "production", UNO_CSP_CONNECT_SRC: value })).toThrowError(/UNO_CSP_CONNECT_SRC/);
     }

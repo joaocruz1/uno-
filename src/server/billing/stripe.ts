@@ -4,6 +4,8 @@ import Stripe from "stripe";
 
 import { requiredEnv } from "@/lib/env";
 
+import { cancelUnpaidSubscription, type UnpaidInvoiceView } from "./cancel-unpaid";
+
 export type StripePriceSnapshot = {
   id: string;
   active: boolean;
@@ -25,6 +27,52 @@ export type StripeSubscriptionSnapshot = {
   currentPeriodEnd: Date | null;
   /** Promotion Codes behind the subscription's discounts (NEX-51). Absent means none were read. */
   promotionCodeIds?: string[];
+  /** The checkout intent that created it on our own checkout (NEX-52, metadata uno_checkout_intent). */
+  checkoutIntentId?: string | null;
+  /** The card that pays this subscription, when it has its own default. */
+  defaultPaymentMethodId?: string | null;
+};
+
+/**
+ * What the browser must confirm for a subscription created by our own checkout
+ * (NEX-52): the first invoice's PaymentIntent, a SetupIntent when nothing is due
+ * today (100% coupon), or nothing (already paid). The client secret is handed
+ * to the buyer's browser only, never stored.
+ */
+export type SubscriptionPaymentSnapshot = {
+  id: string;
+  customerId: string;
+  status: Stripe.Subscription.Status;
+  priceIds: string[];
+  confirmation: "payment" | "setup" | "none";
+  clientSecret: string | null;
+  /** The first invoice's amount due, in cents. */
+  amountDue: number;
+  currency: string;
+};
+
+/** A card attached to the organization's Stripe Customer. Display fields only: Stripe keeps the card. */
+export type SavedCardSnapshot = {
+  id: string;
+  customerId: string | null;
+  brand: string;
+  last4: string;
+  expMonth: number;
+  expYear: number;
+};
+
+export type SubscriptionCreateInput = {
+  customerId: string;
+  priceId: string;
+  organizationId: string;
+  /** Our billing_checkout_intents.id, stored as metadata uno_checkout_intent. */
+  checkoutIntentId: string;
+  /** Marks the subscription as the API add-on instead of a plan. */
+  addon?: "API";
+  /** One-time coupon for the first invoice (the first-month promo). */
+  couponId?: string | null;
+  /** A Promotion Code chosen by the server instead of the first-month coupon. Never both. */
+  promotionCodeId?: string | null;
 };
 
 /** Live state of a Promotion Code and its Coupon, as Stripe enforces them. */
@@ -62,8 +110,6 @@ export type CouponCreateInput = {
   productIds: string[];
 };
 
-export type CheckoutSnapshot = { id: string; url: string; expiresAt: Date };
-
 /** A paid invoice of a subscription and the PaymentIntents that paid it. */
 export type PaidInvoiceSnapshot = {
   id: string;
@@ -79,21 +125,38 @@ export interface BillingProvider {
   /** `phone` is the buyer's E.164 phone (NEX-51), sent to the Customer when known. */
   createCustomer(input: { organizationId: string; organizationName: string; phone?: string | null }, idempotencyKey: string): Promise<{ id: string }>;
   retrievePrice(priceId: string): Promise<StripePriceSnapshot>;
-  createCheckout(input: {
-    customerId: string;
-    priceId: string;
-    organizationId: string;
-    /** Marks the resulting subscription as the API add-on instead of a plan. */
-    addon?: "API";
-    /** One-time coupon for the first invoice (the first-month promo); recurring invoices stay full price. */
-    couponId?: string | null;
-    /** A Promotion Code chosen by the server instead of the first-month coupon. Never both. */
-    promotionCodeId?: string | null;
-    successUrl: string;
-    cancelUrl: string;
-    integrationIdentifier: string;
-  }, idempotencyKey: string): Promise<CheckoutSnapshot>;
-  /** Expires an open Checkout Session. "complete" when it was already paid and cannot be expired. */
+  /**
+   * Own checkout (NEX-52): creates the subscription incomplete
+   * (payment_behavior default_incomplete, card only, saving the card on the
+   * subscription) and returns what the browser must confirm.
+   */
+  createSubscription(input: SubscriptionCreateInput, idempotencyKey: string): Promise<SubscriptionPaymentSnapshot>;
+  /** The same snapshot for an existing subscription, or null when it does not exist. */
+  retrieveSubscriptionPayment(subscriptionId: string): Promise<SubscriptionPaymentSnapshot | null>;
+  /**
+   * Cancels a subscription that was never paid, voiding its first invoice first
+   * so a payment cannot slip in (see cancel-unpaid.ts). "paid" when it was paid
+   * meanwhile and was left alone.
+   */
+  cancelIncompleteSubscription(subscriptionId: string, idempotencyKey: string): Promise<"canceled" | "paid">;
+  /** A short-lived CustomerSession for the Payment Element (saved cards, save checkbox). */
+  createCustomerSession(customerId: string): Promise<{ clientSecret: string; expiresAt: Date }>;
+  /** The Customer's cards and its invoice default. */
+  listCards(customerId: string): Promise<{ defaultPaymentMethodId: string | null; cards: SavedCardSnapshot[] }>;
+  /** Makes a card the Customer's invoice default and the default of the given subscriptions. */
+  setDefaultCard(input: { customerId: string; paymentMethodId: string; subscriptionIds: string[] }, idempotencyKey: string): Promise<void>;
+  /** Removes a card from the Customer (Stripe detaches it). */
+  detachCard(paymentMethodId: string, idempotencyKey: string): Promise<void>;
+  /**
+   * After the first payment: when the buyer chose to keep the card (allow_redisplay
+   * "always"), it becomes the Customer's invoice default, so the add-on and later
+   * purchases charge the same card. Never overwrites an existing default.
+   */
+  adoptSubscriptionCard(customerId: string, subscriptionId: string): Promise<void>;
+  /**
+   * Expires an open hosted Checkout Session left by the flow before NEX-52.
+   * "complete" when it was already paid and cannot be expired.
+   */
   expireCheckout(sessionId: string, idempotencyKey: string): Promise<"expired" | "complete">;
   /** The Promotion Code and its Coupon, or null when it does not exist. */
   retrievePromotionCode(promotionCodeId: string): Promise<PromotionCodeSnapshot | null>;
@@ -158,35 +221,131 @@ class StripeGateway implements BillingProvider {
     };
   }
 
-  async createCheckout(input: {
-    customerId: string;
-    priceId: string;
-    organizationId: string;
-    addon?: "API";
-    couponId?: string | null;
-    promotionCodeId?: string | null;
-    successUrl: string;
-    cancelUrl: string;
-    integrationIdentifier: string;
-  }, idempotencyKey: string): Promise<CheckoutSnapshot> {
-    if (input.couponId && input.promotionCodeId) throw new Error("stripe_checkout_single_discount");
-    const metadata = { organizationId: input.organizationId, ...(input.addon ? { uno_addon: input.addon } : {}) };
-    const session = await stripe().checkout.sessions.create({
-      mode: "subscription",
+  async createSubscription(input: SubscriptionCreateInput, idempotencyKey: string): Promise<SubscriptionPaymentSnapshot> {
+    if (input.couponId && input.promotionCodeId) throw new Error("stripe_subscription_single_discount");
+    const metadata = { organizationId: input.organizationId, uno_checkout_intent: input.checkoutIntentId, ...(input.addon ? { uno_addon: input.addon } : {}) };
+    const subscription = await stripe().subscriptions.create({
       customer: input.customerId,
-      line_items: [{ price: input.priceId, quantity: 1 }],
-      client_reference_id: input.organizationId,
+      items: [{ price: input.priceId, quantity: 1 }],
       metadata,
-      subscription_data: { metadata },
-      // A one-time coupon only touches the first invoice; renewals stay at the recurring price.
-      // Stripe Checkout accepts a single discount: the server already chose the better one.
+      // Nothing is charged until the browser confirms; Stripe expires it after 23 h unpaid.
+      payment_behavior: "default_incomplete",
+      payment_settings: { save_default_payment_method: "on_subscription", payment_method_types: ["card"] },
+      // A single discount, already chosen by the server (best of coupon and first-month promo).
       ...(input.promotionCodeId ? { discounts: [{ promotion_code: input.promotionCodeId }] } : input.couponId ? { discounts: [{ coupon: input.couponId }] } : {}),
-      success_url: input.successUrl,
-      cancel_url: input.cancelUrl,
-      integration_identifier: input.integrationIdentifier,
+      expand: ["latest_invoice.confirmation_secret", "pending_setup_intent"],
     }, { idempotencyKey });
-    if (!session.url) throw new Error("stripe_checkout_url_missing");
-    return { id: session.id, url: session.url, expiresAt: new Date(session.expires_at * 1_000) };
+    return paymentSnapshot(subscription);
+  }
+
+  async retrieveSubscriptionPayment(subscriptionId: string): Promise<SubscriptionPaymentSnapshot | null> {
+    try {
+      const subscription = await stripe().subscriptions.retrieve(subscriptionId, { expand: ["latest_invoice.confirmation_secret", "pending_setup_intent"] });
+      return paymentSnapshot(subscription);
+    } catch (error) {
+      if (error instanceof Stripe.errors.StripeInvalidRequestError && error.statusCode === 404) return null;
+      throw error;
+    }
+  }
+
+  async cancelIncompleteSubscription(subscriptionId: string, idempotencyKey: string): Promise<"canceled" | "paid"> {
+    const invoiceView = (invoice: Stripe.Invoice): UnpaidInvoiceView => ({
+      id: invoice.id!,
+      status: invoice.status,
+      paymentIntentIds: (invoice.payments?.data ?? []).flatMap((payment) => {
+        const paymentIntentId = payment.payment.type === "payment_intent" ? id(payment.payment.payment_intent ?? null) : null;
+        return payment.status === "paid" && paymentIntentId ? [paymentIntentId] : [];
+      }),
+    });
+    return cancelUnpaidSubscription({
+      retrieve: async (subscription) => {
+        const current = await stripe().subscriptions.retrieve(subscription);
+        const invoiceId = id(current.latest_invoice);
+        const invoice = invoiceId ? await stripe().invoices.retrieve(invoiceId, { expand: ["payments"] }) : null;
+        return { status: current.status, organizationId: current.metadata?.organizationId ?? null, invoice: invoice ? invoiceView(invoice) : null };
+      },
+      retrieveInvoice: async (invoiceId) => invoiceView(await stripe().invoices.retrieve(invoiceId, { expand: ["payments"] })),
+      voidInvoice: async (invoiceId, key) => {
+        try {
+          await stripe().invoices.voidInvoice(invoiceId, {}, { idempotencyKey: key });
+          return "voided";
+        } catch (error) {
+          if (error instanceof Stripe.errors.StripeInvalidRequestError) return "refused";
+          throw error;
+        }
+      },
+      cancel: async (subscription, key) => {
+        await stripe().subscriptions.cancel(subscription, { invoice_now: false, prorate: false }, { idempotencyKey: key });
+      },
+      refund: async (paymentIntentId, metadata, key) => {
+        await stripe().refunds.create({ payment_intent: paymentIntentId, reason: "requested_by_customer", metadata }, { idempotencyKey: key });
+      },
+      log: (entry) => console.log(JSON.stringify(entry)),
+    }, subscriptionId, idempotencyKey);
+  }
+
+  async createCustomerSession(customerId: string): Promise<{ clientSecret: string; expiresAt: Date }> {
+    const session = await stripe().customerSessions.create({
+      customer: customerId,
+      components: {
+        payment_element: {
+          enabled: true,
+          features: {
+            // Returning buyers see their kept cards; new ones get the "save" checkbox.
+            payment_method_redisplay: "enabled",
+            payment_method_save: "enabled",
+            payment_method_save_usage: "off_session",
+            // Removal goes through the UNO (Assinatura), which refuses to remove
+            // the only card paying an active subscription.
+            payment_method_remove: "disabled",
+          },
+        },
+      },
+    });
+    return { clientSecret: session.client_secret, expiresAt: new Date(session.expires_at * 1_000) };
+  }
+
+  async listCards(customerId: string): Promise<{ defaultPaymentMethodId: string | null; cards: SavedCardSnapshot[] }> {
+    const [customer, methods] = await Promise.all([
+      stripe().customers.retrieve(customerId),
+      stripe().customers.listPaymentMethods(customerId, { type: "card", limit: 100 }).autoPagingToArray({ limit: 100 }),
+    ]);
+    const defaultPaymentMethodId = "deleted" in customer && customer.deleted ? null : id((customer as Stripe.Customer).invoice_settings?.default_payment_method ?? null);
+    return {
+      defaultPaymentMethodId,
+      cards: methods.flatMap((method) => method.card ? [{
+        id: method.id,
+        customerId: id(method.customer ?? null),
+        brand: method.card.brand,
+        last4: method.card.last4,
+        expMonth: method.card.exp_month,
+        expYear: method.card.exp_year,
+      }] : []),
+    };
+  }
+
+  async setDefaultCard(input: { customerId: string; paymentMethodId: string; subscriptionIds: string[] }, idempotencyKey: string): Promise<void> {
+    await stripe().customers.update(input.customerId, { invoice_settings: { default_payment_method: input.paymentMethodId } }, { idempotencyKey: `${idempotencyKey}-customer` });
+    for (const subscriptionId of input.subscriptionIds) {
+      await stripe().subscriptions.update(subscriptionId, { default_payment_method: input.paymentMethodId }, { idempotencyKey: `${idempotencyKey}-${subscriptionId}` });
+    }
+  }
+
+  async detachCard(paymentMethodId: string, idempotencyKey: string): Promise<void> {
+    await stripe().paymentMethods.detach(paymentMethodId, {}, { idempotencyKey });
+  }
+
+  async adoptSubscriptionCard(customerId: string, subscriptionId: string): Promise<void> {
+    const [customer, subscription] = await Promise.all([
+      stripe().customers.retrieve(customerId),
+      stripe().subscriptions.retrieve(subscriptionId, { expand: ["default_payment_method"] }),
+    ]);
+    if ("deleted" in customer && customer.deleted) return;
+    if (id(subscription.customer) !== customerId) return;
+    if ((customer as Stripe.Customer).invoice_settings?.default_payment_method) return;
+    const method = subscription.default_payment_method;
+    if (!method || typeof method === "string" || method.allow_redisplay !== "always") return;
+    await stripe().customers.update(customerId, { invoice_settings: { default_payment_method: method.id } }, { idempotencyKey: `uno-adopt-card-${subscriptionId}-${method.id}` });
   }
 
   async expireCheckout(sessionId: string, idempotencyKey: string): Promise<"expired" | "complete"> {
@@ -276,6 +435,8 @@ class StripeGateway implements BillingProvider {
           const promotionCode = typeof discount === "object" ? id(discount.promotion_code) : null;
           return promotionCode ? [promotionCode] : [];
         }),
+        checkoutIntentId: subscription.metadata?.uno_checkout_intent ?? null,
+        defaultPaymentMethodId: id(subscription.default_payment_method),
       };
     });
   }
@@ -350,6 +511,33 @@ class StripeGateway implements BillingProvider {
   constructEvent(rawBody: Buffer, signature: string, secret: string) {
     return stripe().webhooks.constructEvent(rawBody, signature, secret);
   }
+}
+
+function paymentSnapshot(subscription: Stripe.Subscription): SubscriptionPaymentSnapshot {
+  const invoice = subscription.latest_invoice && typeof subscription.latest_invoice === "object" ? subscription.latest_invoice : null;
+  const setup = subscription.pending_setup_intent && typeof subscription.pending_setup_intent === "object" ? subscription.pending_setup_intent : null;
+  const amountDue = invoice?.amount_due ?? 0;
+  const paymentSecret = invoice?.confirmation_secret?.client_secret ?? null;
+  let confirmation: SubscriptionPaymentSnapshot["confirmation"] = "none";
+  let clientSecret: string | null = null;
+  if (subscription.status === "incomplete" && amountDue > 0 && paymentSecret) {
+    confirmation = "payment";
+    clientSecret = paymentSecret;
+  } else if (setup?.client_secret && setup.status !== "succeeded" && setup.status !== "canceled") {
+    // Nothing due today (100% coupon): the card is still collected for renewals.
+    confirmation = "setup";
+    clientSecret = setup.client_secret;
+  }
+  return {
+    id: subscription.id,
+    customerId: id(subscription.customer)!,
+    status: subscription.status,
+    priceIds: subscription.items.data.map((item) => item.price.id),
+    confirmation,
+    clientSecret,
+    amountDue,
+    currency: invoice?.currency ?? subscription.currency,
+  };
 }
 
 const gateway = new StripeGateway();

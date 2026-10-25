@@ -35,15 +35,49 @@ para continuar gerenciável pelo portal. Preço padrão 5000 centavos/mês,
 configurável por UNO_API_ADDON_PRICE_BRL_CENTS (inteiro positivo). O limite de
 requisições continua sendo o do plano. A negação mantém o código plan_required.
 
-POST dashboard billing/checkout exige OWNER/ADMIN, mesma origem, plano pago
-permitido e chave idempotente. Server escolhe Price mensal BRL configurado,
-valida recorrência/valor/moeda no Stripe, cria Customer associado à organização
-e Checkout subscription. Persistir Customer e intenção de Checkout antes da
-abertura; uma intenção aberta por organização reutiliza a sessão mesmo com
-chaves diferentes, recuperando respostas perdidas. Concorrência usa
-idempotência Stripe/lock por organização. Não criar segundo contrato pago
-quando já existe assinatura gerenciável: direcionar ao portal.
-O mesmo POST aceita exatamente um alvo: {planId} ou {addon:"API"}. O adicional
+Checkout próprio (NEX-52). POST dashboard billing/subscribe exige OWNER/ADMIN,
+mesma origem, plano pago permitido e chave idempotente; limite por usuário
+(UNO_SUBSCRIBE_RATE_LIMIT, padrão 20/min). Server escolhe Price mensal BRL
+configurado, valida recorrência/valor/moeda no Stripe, cria Customer associado
+à organização e a assinatura com payment_behavior default_incomplete,
+payment_settings {save_default_payment_method: on_subscription,
+payment_method_types: [card]}, metadata organizationId + uno_checkout_intent e
+expand latest_invoice.confirmation_secret e pending_setup_intent. Responde
+{intentId, confirmation (payment|setup|none), clientSecret | null,
+amountDueBrlCents, recurringBrlCents}: payment confirma o PaymentIntent da 1ª
+fatura, setup coleta o cartão quando nada é devido hoje, none nada a confirmar
+(já paga; o server reconcilia na hora). O client secret não é persistido.
+Persistir Customer e intenção antes da criação; a intenção grava
+stripe_subscription_id, fica OPEN por 23 h e uma intenção aberta por
+organização e alvo devolve a mesma assinatura e client secret mesmo com chaves
+diferentes. Assinatura da intenção expirada/cancelada sem pagamento → nova
+tentativa (provider_attempt + 1). Alvo diferente com chave nova cancela a
+incompleta antiga (paga → 409 checkout_in_progress); chave de intenção
+substituída → 409. Incompletas de intenções perdidas do mesmo tipo são
+canceladas antes de criar. Sessão hospedada aberta antes do NEX-52 é expirada.
+Concorrência usa idempotência Stripe (uno-subscribe-<intenção>-<tentativa>) e
+lock por organização. Não criar segundo contrato pago: assinatura de plano
+viva local ou no Stripe → 409 subscription_exists. A confirmação no navegador
+nunca concede direito: só o webhook/reconciliação. Assinatura incomplete é
+ignorada pela reconciliação (não concede, não substitui a vigente, não é
+gravada); incomplete_expired é terminal. Reconciliação marca a intenção
+COMPLETED quando a assinatura dela fica active/trialing/past_due/unpaid/paused e
+EXPIRED quando expira ou é cancelada sem pagamento.
+Cartão salvo: POST billing/payment-session (OWNER/ADMIN, mesma origem, limite
+UNO_PAYMENT_SESSION_RATE_LIMIT) cria CustomerSession só do Customer da
+organização (payment_method_save/redisplay enabled, save_usage off_session,
+remove disabled) e devolve {customerSessionClientSecret, cards}. GET
+billing/cards (OWNER/ADMIN) → {cards: [{id, brand, last4, expMonth, expYear,
+isDefault, inUse}]}, lidos da Stripe; nada do cartão é gravado. DELETE
+billing/cards {paymentMethodId} (OWNER/ADMIN, mesma origem): cartão de outro
+Customer → 404 card_not_found; único cartão que paga assinatura viva → 409
+card_in_use; com outro cartão, ele vira o padrão do Customer e dessas
+assinaturas antes do detach. Após a 1ª fatura paga, cartão com
+allow_redisplay always vira invoice_settings.default_payment_method do Customer
+se não houver um (melhor esforço). Chave publicável
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY lida no servidor por pedido; ausente ou de
+outro modo → checkout indisponível.
+O mesmo POST aceita exatamente um alvo: {planId, promotionCode?} ou {addon:"API"}. O adicional
 exige OWNER/ADMIN, plano pago efetivo e cobrado pela Stripe (409
 paid_plan_required; plano concedido sem assinatura Stripe não contrata, pois a
 reconciliação o rebaixaria), nenhum adicional
@@ -84,17 +118,15 @@ desconto no Checkout, então o servidor calcula o 1º pagamento com o cupom e co
 a promoção do 1º mês (só quando STRIPE_COUPON_<PLANO> existe) e aplica o MENOR;
 empate fica com a promoção, salvo se o cupom também descontar meses seguintes.
 Cupom percentual arredonda o desconto ao centavo; valor fixo nunca deixa o
-preço negativo. POST billing/checkout aceita {planId, promotionCode?} (mesmo
+preço negativo. POST billing/subscribe aceita {planId, promotionCode?} (mesmo
 limite por usuário quando há código), recalcula tudo no servidor (nunca
 confia em preço do cliente), recusa código inválido com 400 invalid_coupon e a
-mensagem, e cria a sessão com exatamente um desconto: discounts
+mensagem, e cria a assinatura com exatamente um desconto: discounts
 [{promotion_code}] quando o cupom vence ou [{coupon: STRIPE_COUPON_<PLANO>}]
 caso contrário. O hash da intenção inclui o código (sem código o hash é o de
 antes); a intenção grava promotion_code, applied_discount
-(COUPON|FIRST_MONTH|NONE) e coupon_id. Uma intenção de plano OPEN para outro
-plano ou outro cupom é substituída: a sessão antiga é expirada na Stripe
-(checkout.sessions.expire) e a intenção vira EXPIRED; se a sessão já foi paga
-→ 409 checkout_in_progress. A reconciliação lê subscription.discounts
+(COUPON|FIRST_MONTH|NONE) e coupon_id. Uma intenção OPEN para outro plano ou
+outro cupom é substituída como descrito no checkout próprio. A reconciliação lê subscription.discounts
 (expand) e grava em subscriptions applied_promotion_code_id,
 applied_coupon_id e applied_coupon_code; um desconto de uso único some da
 Stripe após a 1ª fatura, então o valor visto é mantido até a assinatura do
@@ -111,7 +143,8 @@ assinaturas que o carregam agora.
 O Customer é criado com o telefone E.164 de quem compra, quando existe.
 
 POST billing/portal exige OWNER/ADMIN/mesma origem, usa exclusivamente Customer
-da organização, returnURL fixo.
+da organização, returnURL fixo; segue para troca de cartão, cancelamento só do
+adicional e faturas.
 GET billing inclui estado/plano/período/cancelamento e disponibilidade real,
 e apiAddon {name, priceBrlCents, active, status, currentPeriodEnd, available,
 inactiveWithoutPaidPlan}, management {changePlan, cancel, resume} (OWNER/ADMIN,
@@ -179,7 +212,12 @@ Operações aceitas antes de downgrade continuam com reservas/retenção fixadas
 perda de plano só impede novas operações. Resolver direitos igualmente em
 uploads, criação, reprocessamento, lotes, API e webhooks.
 
-Tests: cupom (válido, inválido, inativo, expirado local e na Stripe, plano
+Tests: checkout próprio (uma assinatura incompleta por intenção, retry com o
+mesmo client secret, troca de alvo cancela a incompleta, paga nunca é
+cancelada, valor zero, MEMBER, isolamento entre organizações, nada de cartão
+gravado), reconciliação ignorando incomplete/incomplete_expired e ativando ao
+pagar, CustomerSession só do próprio Customer, remoção de cartão (autorização,
+isolamento, único cartão em uso), cupom (válido, inválido, inativo, expirado local e na Stripe, plano
 errado, esgotado, melhor entre cupom e promoção, empate, sem promoção
 configurada), checkout com o desconto certo e substituição de sessão aberta,
 admin de cupons restrito ao admin da plataforma com auditoria, reconciliação

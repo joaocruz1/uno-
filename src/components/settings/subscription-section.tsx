@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 
+import { SavedCards } from "@/components/billing/saved-cards";
 import { SubscriptionManager } from "@/components/billing/subscription-manager";
 import { ButtonLink, LoadingState } from "@/components/ui";
 import { billingStateSchema, type BillingView } from "@/lib/billing-model";
@@ -52,6 +53,7 @@ export function SubscriptionSection({ canManage }: { canManage: boolean }) {
           : !billing ? <LoadingState label="Consultando assinatura" />
           : <SubscriptionManager billing={billing} canManage={canManage} onChanged={() => setRefresh((value) => value + 1)} />}
         {billing && !hasCard && !billing.prepaid ? <p className="text-sm text-[var(--color-muted)]">Sem assinatura no cartão. Escolha um plano pago na página de planos.</p> : null}
+        {billing && canManage && billing.billingConfigured ? <SavedCards portalAvailable={billing.portalAvailable} /> : null}
       </div>
     </section>
   );

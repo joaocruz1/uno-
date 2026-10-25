@@ -29,8 +29,9 @@ requisições por minuto continua sendo o do plano.
 
 O adicional é uma assinatura Stripe separada (um único item) no mesmo Customer:
 o portal do cliente não altera assinaturas com vários produtos, e a troca de
-plano é feita por ele. A contratação é POST /api/dashboard/billing/checkout com
-{"addon":"API"} (OWNER/ADMIN, Idempotency-Key); o cancelamento acompanha o do
+plano é feita por ele. A contratação é pelo checkout próprio, em
+`/checkout?addon=API` (POST /api/dashboard/billing/subscribe com
+{"addon":"API"}, OWNER/ADMIN, Idempotency-Key); o cancelamento acompanha o do
 plano (abaixo) ou é feito sozinho no portal ("Gerenciar no portal"). Na reconciliação cada assinatura do Customer é
 classificada pelos seus Prices (plano, adicional ou ambos).
 
@@ -45,10 +46,10 @@ conta na hora (NEX-42).
   landing, o botão de um plano pago abre um diálogo sobre os planos: "Criar
   conta" ou "Já tenho conta", com o plano escolhido visível; depois, no mesmo
   diálogo, o resumo (plano, cupom, valor de hoje e dos meses seguintes) e "Ir
-  para o pagamento", que chama POST /api/dashboard/billing/checkout e vai para a
-  Stripe. Com sessão, o diálogo abre direto no resumo. `/register`, `/login` e
-  `/checkout` continuam funcionando por link direto, e `/checkout` também tem o
-  campo de cupom.
+  para o pagamento", que leva ao checkout próprio (`/checkout?plan=pro`, com
+  `&coupon=CODIGO` quando há cupom aplicado; NEX-52, abaixo). Com sessão, o
+  diálogo abre direto no resumo. `/register`, `/login` e `/checkout` continuam
+  funcionando por link direto, e `/checkout` também tem o campo de cupom.
 - **Telefone obrigatório.** O cadastro por e-mail exige telefone brasileiro
   (DDD válido + celular de 9 dígitos começando com 9 ou fixo de 8 dígitos
   começando com 2 a 5), com máscara, gravado em E.164 em `user.phone`. Contas
@@ -64,7 +65,7 @@ conta na hora (NEX-42).
   cupom em `coupons` e registra a criação e a troca de estado em `audit_logs`.
   Os planos aplicáveis são conferidos pela UNO (prévia e checkout); validade e
   limite de usos também ficam na Promotion Code, então a Stripe os aplica.
-- **Melhor desconto.** O Checkout da Stripe aceita um único desconto. O
+- **Melhor desconto.** A assinatura leva um único desconto. O
   servidor calcula o primeiro pagamento com o cupom e com a promoção do 1º mês
   (cupom `STRIPE_COUPON_<PLANO>`) e aplica o que deixar o primeiro pagamento
   menor. A tela informa "Cupom X aplicado" ou "Promoção do 1º mês mantida, que
@@ -78,12 +79,12 @@ conta na hora (NEX-42).
   desconto de uso único acaba. O Financeiro mostra os cupons usados, os
   pagamentos dos últimos 30 dias por tipo de desconto e o cupom de cada
   assinatura paga.
-- **Voltar com outro cupom.** Se já existe um Checkout aberto para outro plano
-  ou outro cupom, a sessão antiga é expirada na Stripe e uma nova é criada; se
-  ela já foi paga, a resposta é 409 `checkout_in_progress` e o webhook conclui.
-  Só um pedido com chave de idempotência nova substitui a sessão: a repetição
-  de uma aba antiga, cuja intenção já foi substituída, recebe 409 e não expira
-  a sessão mais nova.
+- **Voltar com outro cupom.** Se já existe uma contratação aberta para outro
+  plano ou outro cupom, a assinatura incompleta antiga é cancelada na Stripe e
+  uma nova é criada; se ela já foi paga, a resposta é 409
+  `checkout_in_progress` e o webhook conclui. Só um pedido com chave de
+  idempotência nova substitui a anterior: a repetição de uma aba antiga, cuja
+  intenção já foi substituída, recebe 409 e não cancela a mais nova.
 - A prévia e o checkout com código têm limite por usuário
   (`UNO_COUPON_RATE_LIMIT`, padrão 10 por minuto) e por endereço
   (`UNO_COUPON_IP_RATE_LIMIT`, padrão 30 por minuto) contra enumeração de
@@ -111,6 +112,102 @@ conta na hora (NEX-42).
   Promotion Code e leitura de `subscription.discounts`. Os testes usam um
   provedor simulado.
 
+## Checkout próprio com o Payment Element (NEX-52)
+
+**Decisões do dono:** o cartão é digitado na nossa página `/checkout` (duas
+colunas), não no Checkout hospedado da Stripe; o diálogo de planos (NEX-51)
+continua cuidando de conta, plano e cupom e leva para lá. O "+ API" também é
+comprado nela (`/checkout?addon=API`), como assinatura própria. Nenhuma compra
+nova vai para o Checkout hospedado; sessões hospedadas abertas antes desta
+versão são expiradas quando a organização volta a comprar, e os eventos
+`checkout.session.*` continuam reconciliando.
+
+- **Página.** Desktop: à esquerda, conta, plano, Payment Element (iframe da
+  Stripe, só cartão), cupom e botão com valor e período ("Assinar Pro · R$ 15,99
+  no 1º mês", "Assinar Pro · R$ 49,00/mês", "Contratar + API · R$ 50,00/mês";
+  com cartão salvo selecionado, "Pagar com Visa •••• 4242 · …"); à direita, o
+  resumo (plano, mensalidade, desconto, total de hoje e valor depois). No
+  celular, uma coluna com o resumo recolhível no topo. Os valores vêm do
+  servidor (`quoteCheckout`), nunca do navegador. O Appearance do Payment
+  Element é lido dos tokens CSS (`--color-*`) e acompanha o tema claro/escuro.
+- **Fluxo.** O Elements começa em modo diferido (`mode: subscription` com o
+  valor de hoje, ou `setup` quando nada é cobrado hoje). Ao enviar:
+  `elements.submit()`; POST /api/dashboard/billing/subscribe
+  `{planId, promotionCode?}` ou `{addon:"API"}` com Idempotency-Key (OWNER/ADMIN,
+  mesma origem, limite `UNO_SUBSCRIBE_RATE_LIMIT` por usuário e os limites de
+  cupom quando há código); o servidor cria a assinatura com
+  `payment_behavior: default_incomplete`, `payment_settings`
+  `{save_default_payment_method: on_subscription, payment_method_types: [card]}`,
+  o desconto escolhido (`discounts: [{promotion_code}]` ou `[{coupon}]`) e
+  metadata `organizationId`, `uno_checkout_intent` (e `uno_addon=API`), e
+  devolve `{intentId, confirmation: payment|setup|none, clientSecret,
+  amountDueBrlCents, recurringBrlCents}` a partir de
+  `latest_invoice.confirmation_secret` ou `pending_setup_intent`. O navegador
+  confirma com `stripe.confirmPayment`/`confirmSetup` e `redirect:
+  "if_required"`; o 3D Secure abre na própria página. Recusa e erro de
+  validação aparecem na hora, com a mensagem da Stripe, e a nova tentativa usa
+  a mesma chave: mesma assinatura, mesmo PaymentIntent.
+- **Promoção do 1º mês em toda assinatura nova.** O cupom do 1º mês
+  (`STRIPE_COUPON_<PLANO>`) é aplicado a toda assinatura de plano nova,
+  inclusive a quem cancelou e assina de novo, que ganha a promoção outra vez.
+  Limitar a promoção à primeira assinatura da organização é decisão de negócio
+  pendente do dono.
+- **Teste de cartões.** O caminho `setup` valida um cartão sem cobrar, e a
+  página pode ser usada para testar cartões roubados. A UNO limita
+  `/subscribe` por usuário, mas não conta recusas (os eventos
+  `payment_intent.payment_failed`/`setup_intent.setup_failed` não são tratados
+  pelo webhook). Ative as proteções de teste de cartão do Stripe Radar e regras
+  de bloqueio por recusas repetidas (veja `docs/security.md`).
+- **Valor zero.** Cupom de 100% ou nada devido hoje: `confirmation: setup`
+  (o cartão é coletado para as renovações) ou `none`; o servidor reconcilia na
+  hora, sem esperar o webhook.
+- **Fonte da verdade.** A confirmação no navegador não concede nada. A página
+  mostra "Pagamento recebido, ativando seu plano…" e consulta GET
+  /api/dashboard/billing até o servidor dizer que o plano (ou o adicional) está
+  ativo; só então mostra o sucesso e leva para Assinatura. Passados 45 s, avisa
+  que a confirmação está demorando e continua consultando.
+- **Assinatura incompleta.** A reconciliação ignora assinaturas `incomplete`
+  (primeira fatura não paga): não concedem plano, não ocupam o lugar da
+  assinatura vigente e não bloqueiam uma nova compra. Stripe as expira em 23 h
+  (`incomplete_expired`, terminal). A intenção grava `stripe_subscription_id`
+  (migração `0019_strange_songbird`), fica OPEN por 23 h e segue a assinatura:
+  paga (`invoice.paid`/`customer.subscription.updated`) → COMPLETED (o que
+  também conta o cupom como usado); expirada/cancelada sem pagamento → EXPIRED.
+- **Idempotência.** Uma intenção por organização e alvo: repetição, refresh e
+  outra aba recebem a mesma assinatura e o mesmo client secret (lido de novo na
+  Stripe; o segredo não é gravado). Alvo diferente com chave nova cancela a
+  incompleta antiga antes de criar outra; se ela já foi paga, 409
+  `checkout_in_progress`. O cancelamento nunca corre contra o pagamento: a
+  primeira fatura é anulada antes (`invoices.voidInvoice`, que cancela o
+  PaymentIntent e é recusado se o pagamento já foi feito ou está em
+  processamento; recusa = "paga", nada é cancelado) e só então a assinatura é
+  cancelada. Se mesmo assim a fatura aparecer paga depois, o pagamento é
+  estornado (chave `uno-supersede-refund-<fatura>`) e o log registra
+  `billing.checkout.paid_after_cancel`. Assinaturas incompletas de intenções perdidas do
+  mesmo tipo (plano ou adicional) são canceladas antes de criar uma nova.
+  Assinatura de plano viva no Stripe ou localmente → 409 `subscription_exists`
+  (troca de plano é em Assinatura).
+- **Cartão salvo.** O cartão fica só na Stripe (PaymentMethod no Customer da
+  organização). POST /api/dashboard/billing/payment-session cria um
+  CustomerSession desse Customer (salvar, reexibir; remoção desligada no
+  elemento) e devolve os cartões (marca, final, validade, lidos da Stripe na
+  hora). Quem volta vê o cartão salvo selecionado e paga com um clique; quem
+  compra pela primeira vez vê a caixa "Salvar" da Stripe (desmarcada por
+  padrão: a Stripe não permite pré-marcá-la). Depois do primeiro pagamento, se
+  o cartão foi salvo (`allow_redisplay: always`), ele vira o padrão de cobrança
+  do Customer (`invoice_settings.default_payment_method`) quando ainda não há
+  um. Em Configurações → Assinatura: o cartão salvo, "Trocar cartão" (portal) e
+  "Remover" (DELETE /api/dashboard/billing/cards, OWNER/ADMIN; o único cartão
+  de uma assinatura viva não é removido, e com outro cartão ele assume como
+  padrão do Customer e dessas assinaturas).
+- **Chave publicável.** `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, lida pelo
+  servidor a cada pedido. Sem ela (ou de outro modo que a secreta), a página
+  mostra "A cobrança ainda não está configurada" e não aceita pagamento.
+- **Não verificado** com a Stripe real nesta entrega: pagamento, 3D Secure,
+  recusa, cartão salvo e webhooks. Os testes usam provedor simulado; os e2e com
+  a Stripe em modo de teste (`tests/e2e/checkout-payment.spec.ts`,
+  `UNO_LOCAL_STRIPE_E2E=1` com `stripe listen`) ainda não rodaram.
+
 ## Gestão da assinatura na área do cliente
 
 Em Configurações → Assinatura e na página Assinatura, OWNER/ADMIN gerenciam a
@@ -128,7 +225,7 @@ cartão, dados de cobrança, faturas e cancelamento só do adicional.
   (`proration_behavior: none`) e desfaz um cancelamento agendado. Recusa o plano
   atual (409 `same_plan`) e assinatura inadimplente (409 `payment_pending`).
   O Price de destino é validado como no checkout. Sem assinatura no cartão a
-  resposta é `{checkout:true}` e a tela abre o Checkout normal.
+  resposta é `{checkout:true}` e a tela abre o checkout próprio (`/checkout`).
 - **Cancelamento** — POST /api/dashboard/billing/cancel `{alsoAddon?}`:
   `cancel_at_period_end=true`; os direitos seguem até o fim do período. Por
   padrão (`alsoAddon` omitido ou `true`) o "+ API" também é agendado para
@@ -169,7 +266,8 @@ Usar uma conta de testes separada; dados reais de pagamento não entram nos test
 O endpoint de eventos é POST /api/stripe/webhook. A assinatura é verificada sobre
 os bytes originais. Eventos repetidos são deduplicados, e a assinatura atual é
 consultada no Stripe antes de aplicar direitos. A reconciliação periódica recupera
-eventos perdidos; não confiar em querystrings de retorno do Checkout.
+eventos perdidos; não confiar em querystrings de retorno nem na confirmação do
+pagamento no navegador.
 
 Preços e limites podem ser definidos por UNO_PLAN_<FREE|STARTER|PRO|BUSINESS>_
 PRICE_BRL_CENTS, MONTHLY_LIMIT, MAX_FILE_MB, BATCH_LIMIT, RETENTION_DAYS e RATE_LIMIT.

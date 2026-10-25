@@ -19,11 +19,11 @@ import {
 } from "@/db";
 import { billingCheckoutRequestSchema } from "@/lib/billing-model";
 import { formatBrlCents, getApiAddon, getPlanCatalog, PlanConfigurationError } from "@/lib/plans";
-import { createApiAddonCheckout, createBillingCheckout, processStripeWebhook, readBillingState, readUsageState, reconcileStaleSubscriptions, reconcileStripeCustomer } from "@/server/billing";
+import { createApiAddonCheckout, createBillingCheckout, createPaymentSession, listSavedCards, removeSavedCard, processStripeWebhook, readBillingState, readUsageState, reconcileStaleSubscriptions, reconcileStripeCustomer } from "@/server/billing";
 import type { CheckoutDependencies } from "@/server/billing/checkout";
 import { apiAddonConfigured, billingProviderConfigured } from "@/server/billing/config";
 import { effectivePlanFromSubscription, effectivePlanId, hasApiEntitlement, type SubscriptionEntitlement } from "@/server/billing/entitlements";
-import { getBillingProvider, type BillingProvider, type StripeSubscriptionSnapshot } from "@/server/billing/stripe";
+import { getBillingProvider, type BillingProvider, type SavedCardSnapshot, type StripeSubscriptionSnapshot, type SubscriptionPaymentSnapshot } from "@/server/billing/stripe";
 
 const USER = "00000000-0000-4000-8000-000000000001";
 const ORG = "00000000-0000-4000-8000-000000000101";
@@ -34,26 +34,57 @@ const pglite = new PGlite();
 const database = drizzle(pglite, { schema }) as unknown as UnoDatabase;
 
 class FakeProvider implements BillingProvider {
-  checkoutCalls: Array<{ idempotencyKey: string; input: Parameters<BillingProvider["createCheckout"]>[0] }> = [];
+  subscriptionCalls: Array<{ idempotencyKey: string; input: Parameters<BillingProvider["createSubscription"]>[0] }> = [];
+  /** Subscriptions created by our checkout, as Stripe would return them. */
+  created = new Map<string, SubscriptionPaymentSnapshot>();
+  cancelCalls: string[] = [];
+  adoptCalls: string[] = [];
+  sessionCalls: string[] = [];
+  /** What the next created subscription looks like: due today (default), nothing due, or a setup. */
+  nextPayment: Pick<SubscriptionPaymentSnapshot, "status" | "confirmation" | "amountDue"> = { status: "incomplete", confirmation: "payment", amountDue: 4_900 };
+  paidMeanwhile = new Set<string>();
   portalCalls = 0;
   subscriptions: StripeSubscriptionSnapshot[] = [];
   subscriptionsByCustomer = new Map<string, StripeSubscriptionSnapshot[]>();
+  cards: SavedCardSnapshot[] = [];
+  defaultCard: string | null = null;
   event: Stripe.Event = { id: "evt_default", type: "ping", created: Math.floor(NOW.getTime() / 1000), data: { object: {} } } as unknown as Stripe.Event;
 
-  async createCustomer() { return { id: "cus_org" }; }
+  async createCustomer(input: { organizationId: string }) { return { id: input.organizationId === OTHER_ORG ? "cus_other" : "cus_org" }; }
   prices: Record<string, number> = { price_starter: 1_900, price_pro: 4_900, price_business: 13_900, price_addon: 5_000 };
   priceActive = true;
   async retrievePrice(priceId: string) {
     return { id: priceId, active: this.priceActive, currency: "brl", unitAmount: this.prices[priceId] ?? null, recurringInterval: "month", recurringIntervalCount: 1 };
   }
-  async createCheckout(input: Parameters<BillingProvider["createCheckout"]>[0], idempotencyKey: string) {
-    this.checkoutCalls.push({ input, idempotencyKey });
-    return {
-      id: `cs_${this.checkoutCalls.length}`,
-      url: `https://checkout.stripe.com/c/pay/${this.checkoutCalls.length}`,
-      expiresAt: new Date(NOW.getTime() + 60 * 60_000),
+  async createSubscription(input: Parameters<BillingProvider["createSubscription"]>[0], idempotencyKey: string) {
+    // Stripe answers a repeated idempotency key with the same object.
+    const repeated = this.subscriptionCalls.find((call) => call.idempotencyKey === idempotencyKey);
+    if (repeated) return [...this.created.values()][this.subscriptionCalls.indexOf(repeated)]!;
+    this.subscriptionCalls.push({ input, idempotencyKey });
+    const id = `sub_${this.subscriptionCalls.length}`;
+    const snapshot: SubscriptionPaymentSnapshot = {
+      id, customerId: input.customerId, priceIds: [input.priceId], currency: "brl",
+      ...this.nextPayment,
+      clientSecret: this.nextPayment.confirmation === "none" ? null : `${this.nextPayment.confirmation === "setup" ? "seti" : "pi"}_${this.subscriptionCalls.length}_secret_synthetic`,
     };
+    this.created.set(id, snapshot);
+    return snapshot;
   }
+  async retrieveSubscriptionPayment(subscriptionId: string) { return this.created.get(subscriptionId) ?? null; }
+  async cancelIncompleteSubscription(subscriptionId: string): Promise<"canceled" | "paid"> {
+    if (this.paidMeanwhile.has(subscriptionId)) return "paid";
+    this.cancelCalls.push(subscriptionId);
+    const current = this.created.get(subscriptionId);
+    if (current) this.created.set(subscriptionId, { ...current, status: "canceled", confirmation: "none", clientSecret: null });
+    return "canceled";
+  }
+  async createCustomerSession(customerId: string) { this.sessionCalls.push(customerId); return { clientSecret: `cuss_${customerId}_secret_synthetic`, expiresAt: new Date(NOW.getTime() + 30 * 60_000) }; }
+  async listCards() { return { defaultPaymentMethodId: this.defaultCard, cards: this.cards }; }
+  defaultCalls: Array<Parameters<BillingProvider["setDefaultCard"]>[0]> = [];
+  detached: string[] = [];
+  async setDefaultCard(input: Parameters<BillingProvider["setDefaultCard"]>[0]) { this.defaultCalls.push(input); this.defaultCard = input.paymentMethodId; }
+  async detachCard(paymentMethodId: string) { this.detached.push(paymentMethodId); this.cards = this.cards.filter((card) => card.id !== paymentMethodId); }
+  async adoptSubscriptionCard(_customerId: string, subscriptionId: string) { this.adoptCalls.push(subscriptionId); }
   async createPortal() { this.portalCalls += 1; return { url: "https://billing.stripe.com/p/session/test" }; }
   async listSubscriptions(customerId: string) { return this.subscriptionsByCustomer.get(customerId) ?? this.subscriptions; }
   // Plan management is covered by tests/billing-manage.test.ts with a stateful fake.
@@ -184,47 +215,124 @@ describe("billing entitlements and configuration", () => {
   });
 });
 
-describe("billing checkout", () => {
-  function dependencies(provider: FakeProvider): CheckoutDependencies {
+describe("own checkout: incomplete subscription confirmed in the browser (NEX-52)", () => {
+  function dependencies(provider: FakeProvider, reconciled: string[] = []): CheckoutDependencies {
     let id = 0;
-    return { database, provider, now: () => NOW, randomId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}` };
+    return {
+      database, provider, now: () => NOW,
+      randomId: () => `00000000-0000-4000-8000-${String(++id).padStart(12, "0")}`,
+      reconcile: async (customerId) => { reconciled.push(customerId); },
+    };
   }
 
   const actor = { organizationId: ORG, organizationName: "Billing Org", userId: USER, membershipRole: "OWNER" as const };
 
-  it("persists and reuses one open Checkout across idempotency keys", async () => {
+  it("creates one incomplete subscription per intent and returns the same client secret on retries and other keys", async () => {
     const provider = new FakeProvider();
     const deps = dependencies(provider);
     const first = await createBillingCheckout(actor, "PRO", "checkout-idempotency-0001", deps);
     const sameKey = await createBillingCheckout(actor, "PRO", "checkout-idempotency-0001", deps);
     const otherKey = await createBillingCheckout(actor, "PRO", "checkout-idempotency-0002", deps);
+    expect(first).toMatchObject({ confirmation: "payment", clientSecret: "pi_1_secret_synthetic", amountDueBrlCents: 4_900, recurringBrlCents: 4_900 });
     expect(sameKey).toEqual(first);
     expect(otherKey).toEqual(first);
-    expect(provider.checkoutCalls).toHaveLength(1);
-    expect(provider.checkoutCalls[0]?.input.integrationIdentifier).toMatch(/^uno_checkout_[a-z]{8}$/);
-    expect((await database.select().from(billingCheckoutIntents))).toHaveLength(1);
+    expect(provider.subscriptionCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls[0]).toMatchObject({
+      idempotencyKey: expect.stringMatching(/^uno-subscribe-.+-1$/),
+      input: { customerId: "cus_org", priceId: "price_pro", organizationId: ORG, checkoutIntentId: first.intentId, couponId: null, promotionCodeId: null },
+    });
+    const intents = await database.select().from(billingCheckoutIntents);
+    expect(intents).toHaveLength(1);
+    expect(intents[0]).toMatchObject({ id: first.intentId, status: "OPEN", stripeSubscriptionId: "sub_1", stripeSessionId: null, checkoutUrl: null });
+    // Stripe expires an unpaid subscription after 23 h; the intent follows it.
+    expect(intents[0]?.expiresAt?.getTime()).toBe(NOW.getTime() + 23 * 3_600_000);
   });
 
-  it("uses a new provider attempt after a Checkout expires", async () => {
+  it("never stores the client secret or any card data", async () => {
+    const provider = new FakeProvider();
+    await createBillingCheckout(actor, "PRO", "checkout-idempotency-nostore", dependencies(provider));
+    const rows = JSON.stringify([await database.select().from(billingCheckoutIntents), await database.select().from(subscriptions)]);
+    expect(rows).not.toContain("secret");
+    expect(rows).not.toMatch(/pm_|card|4242/i);
+  });
+
+  it("replaces a subscription that expired unpaid with a new provider attempt", async () => {
     const provider = new FakeProvider();
     const deps = dependencies(provider);
     await createBillingCheckout(actor, "PRO", "checkout-idempotency-0003", deps);
+    provider.created.set("sub_1", { ...provider.created.get("sub_1")!, status: "incomplete_expired", confirmation: "none", clientSecret: null });
+    const again = await createBillingCheckout(actor, "PRO", "checkout-idempotency-0003", deps);
+    expect(again.clientSecret).toBe("pi_2_secret_synthetic");
+    expect(provider.subscriptionCalls.map((call) => call.idempotencyKey)).toEqual([expect.stringMatching(/-1$/), expect.stringMatching(/-2$/)]);
+    // The same happens when the local 23 h window ends first.
     await database.update(billingCheckoutIntents).set({ expiresAt: new Date(NOW.getTime() - 1) });
     await createBillingCheckout(actor, "PRO", "checkout-idempotency-0003", deps);
-    expect(provider.checkoutCalls.map((call) => call.idempotencyKey)).toEqual([
-      expect.stringMatching(/-1$/), expect.stringMatching(/-2$/),
-    ]);
-    expect(provider.checkoutCalls[0]?.input.integrationIdentifier).not.toBe(provider.checkoutCalls[1]?.input.integrationIdentifier);
+    expect(provider.subscriptionCalls.at(-1)?.idempotencyKey).toMatch(/-3$/);
+  });
+
+  it("cancels the stale incomplete subscription when the target changes, and never a paid one", async () => {
+    const provider = new FakeProvider();
+    const deps = dependencies(provider);
+    const pro = await createBillingCheckout(actor, "PRO", "checkout-idempotency-target-1", deps);
+    const business = await createBillingCheckout(actor, "BUSINESS", "checkout-idempotency-target-2", deps);
+    expect(provider.cancelCalls).toEqual(["sub_1"]);
+    expect(business.clientSecret).toBe("pi_2_secret_synthetic");
+    const intents = await database.select().from(billingCheckoutIntents);
+    expect(intents.find((intent) => intent.id === pro.intentId)?.status).toBe("EXPIRED");
+    expect(intents.find((intent) => intent.id === business.intentId)).toMatchObject({ planId: "BUSINESS", status: "OPEN", stripeSubscriptionId: "sub_2" });
+    // A retry from the old tab cannot cancel the newer subscription back.
+    await expect(createBillingCheckout(actor, "PRO", "checkout-idempotency-target-1", deps)).rejects.toMatchObject({ code: "checkout_in_progress" });
+    expect(provider.cancelCalls).toEqual(["sub_1"]);
+    // Paid in the meantime (another tab confirmed it): the webhook completes it; no second contract.
+    provider.paidMeanwhile.add("sub_2");
+    await expect(createBillingCheckout(actor, "STARTER", "checkout-idempotency-target-3", deps)).rejects.toMatchObject({ code: "checkout_in_progress" });
+    expect(provider.subscriptionCalls).toHaveLength(2);
+  });
+
+  it("cancels unpaid leftovers of lost intents before creating a new subscription", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    provider.subscriptions = [{ id: "sub_lost", customerId: "cus_org", status: "incomplete", cancelAtPeriodEnd: false, priceIds: ["price_pro"], currentPeriodStart: null, currentPeriodEnd: null, checkoutIntentId: "intent-from-a-lost-request" }];
+    await createBillingCheckout(actor, "PRO", "checkout-idempotency-lost", dependencies(provider));
+    expect(provider.cancelCalls).toEqual(["sub_lost"]);
+    expect(provider.subscriptionCalls).toHaveLength(1);
+  });
+
+  it("skips the confirmation when nothing is due and applies the plan without waiting for the webhook", async () => {
+    const provider = new FakeProvider();
+    provider.nextPayment = { status: "active", confirmation: "none", amountDue: 0 };
+    const reconciled: string[] = [];
+    const deps = dependencies(provider, reconciled);
+    const result = await createBillingCheckout(actor, "PRO", "checkout-idempotency-free", deps);
+    expect(result).toMatchObject({ confirmation: "none", clientSecret: null, amountDueBrlCents: 0 });
+    expect(reconciled).toEqual(["cus_org"]);
+    // A 100% first invoice still collects the card for the renewals.
+    provider.nextPayment = { status: "active", confirmation: "setup", amountDue: 0 };
+    await database.delete(billingCheckoutIntents);
+    const setup = await createBillingCheckout(actor, "STARTER", "checkout-idempotency-setup", deps);
+    expect(setup).toMatchObject({ confirmation: "setup", clientSecret: "seti_2_secret_synthetic", amountDueBrlCents: 0 });
   });
 
   it("blocks members before calling the provider", async () => {
     const provider = new FakeProvider();
     await expect(createBillingCheckout({ ...actor, membershipRole: "MEMBER" }, "PRO", "checkout-idempotency-0004", dependencies(provider)))
-      .rejects.toMatchObject({ code: "forbidden" });
-    expect(provider.checkoutCalls).toHaveLength(0);
+      .rejects.toMatchObject({ code: "forbidden", status: 403 });
+    expect(provider.subscriptionCalls).toHaveLength(0);
   });
 
-  it("opens the portal when Stripe already has a manageable contract missing from local state", async () => {
+  it("keeps each organization's intent, customer and subscription apart", async () => {
+    const provider = new FakeProvider();
+    const deps = dependencies(provider);
+    const own = await createBillingCheckout(actor, "PRO", "checkout-idempotency-shared", deps);
+    const other = await createBillingCheckout({ ...actor, organizationId: OTHER_ORG, organizationName: "Other" }, "PRO", "checkout-idempotency-shared", deps);
+    expect(other.intentId).not.toBe(own.intentId);
+    expect(other.clientSecret).not.toBe(own.clientSecret);
+    expect(provider.subscriptionCalls.map((call) => [call.input.customerId, call.input.organizationId])).toEqual([["cus_org", ORG], ["cus_other", OTHER_ORG]]);
+    const rows = await database.select().from(billingCheckoutIntents);
+    expect(rows.map((row) => row.organizationId).sort()).toEqual([ORG, OTHER_ORG].sort());
+  });
+
+  it("refuses a second paid contract that only Stripe knows about", async () => {
     await database.update(subscriptions).set({ stripeCustomerId: "cus_org", status: "CANCELED" })
       .where(eq(subscriptions.organizationId, ORG));
     const provider = new FakeProvider();
@@ -232,11 +340,87 @@ describe("billing checkout", () => {
       id: "sub_remote", customerId: "cus_org", status: "active", cancelAtPeriodEnd: false,
       priceIds: ["price_unknown_legacy"], currentPeriodStart: new Date("2026-10-01"), currentPeriodEnd: new Date("2026-11-01"),
     }];
-    const result = await createBillingCheckout(actor, "PRO", "checkout-idempotency-0005", dependencies(provider));
-    expect(result.url).toContain("billing.stripe.com");
-    expect(provider.portalCalls).toBe(1);
-    expect(provider.checkoutCalls).toHaveLength(0);
-    expect((await database.select().from(billingCheckoutIntents))[0]?.status).toBe("COMPLETED");
+    await expect(createBillingCheckout(actor, "PRO", "checkout-idempotency-0005", dependencies(provider))).rejects.toMatchObject({ code: "subscription_exists", status: 409 });
+    expect(provider.subscriptionCalls).toHaveLength(0);
+    expect((await database.select().from(billingCheckoutIntents))[0]?.status).toBe("FAILED");
+  });
+
+  it("refuses when the organization already has a live card subscription", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org", stripeSubscriptionId: "sub_live", status: "ACTIVE", planId: "PRO" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    await expect(createBillingCheckout(actor, "BUSINESS", "checkout-idempotency-live", dependencies(provider))).rejects.toMatchObject({ code: "subscription_exists" });
+    expect(provider.subscriptionCalls).toHaveLength(0);
+  });
+
+  it("replaces a hosted Checkout left open by the flow before NEX-52", async () => {
+    await database.insert(billingCheckoutIntents).values({
+      id: "00000000-0000-4000-8000-00000000aaaa", organizationId: ORG, planId: "PRO", idempotencyKey: "legacy-hosted-checkout-key",
+      requestHash: "0".repeat(64), status: "OPEN", stripeSessionId: "cs_legacy", checkoutUrl: "https://checkout.stripe.com/c/pay/legacy", expiresAt: new Date(NOW.getTime() + 3_600_000),
+    });
+    const provider = new FakeProvider();
+    const result = await createBillingCheckout(actor, "PRO", "checkout-idempotency-after-legacy", dependencies(provider));
+    expect(result.clientSecret).toBe("pi_1_secret_synthetic");
+    const legacy = (await database.select().from(billingCheckoutIntents)).find((intent) => intent.stripeSessionId === "cs_legacy");
+    expect(legacy?.status).toBe("EXPIRED");
+  });
+});
+
+describe("payment session and saved cards (NEX-52)", () => {
+  const actor = { organizationId: ORG, organizationName: "Billing Org", userId: USER, membershipRole: "OWNER" as const };
+  const card = (id: string, customerId = "cus_org"): SavedCardSnapshot => ({ id, customerId, brand: "visa", last4: "4242", expMonth: 12, expYear: 2034 });
+
+  it("creates the CustomerSession only for the organization's own customer, and lists its cards for display", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    provider.cards = [card("pm_own"), card("pm_foreign", "cus_someone_else")];
+    provider.defaultCard = "pm_own";
+    const session = await createPaymentSession(actor, { database, provider, now: () => NOW });
+    expect(provider.sessionCalls).toEqual(["cus_org"]);
+    expect(session.customerSessionClientSecret).toBe("cuss_cus_org_secret_synthetic");
+    // A card attached to another Customer never shows up.
+    expect(session.cards).toEqual([{ id: "pm_own", brand: "visa", last4: "4242", expMonth: 12, expYear: 2034, isDefault: true, inUse: false }]);
+    // Another organization gets its own customer, created on first use.
+    await createPaymentSession({ ...actor, organizationId: OTHER_ORG }, { database, provider, now: () => NOW });
+    expect(provider.sessionCalls).toEqual(["cus_org", "cus_other"]);
+    await expect(createPaymentSession({ ...actor, membershipRole: "MEMBER" }, { database, provider, now: () => NOW })).rejects.toMatchObject({ code: "forbidden" });
+    await expect(listSavedCards({ ...actor, membershipRole: "MEMBER" }, { database, provider, now: () => NOW })).rejects.toMatchObject({ code: "forbidden" });
+    // Nothing about the cards is written to our database.
+    expect(JSON.stringify(await database.select().from(subscriptions))).not.toMatch(/pm_|4242|visa/i);
+  });
+
+  it("removes a card only for an owner or admin of the organization that holds it", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_other" }).where(eq(subscriptions.organizationId, OTHER_ORG));
+    const provider = new FakeProvider();
+    provider.cards = [card("pm_spare")];
+    provider.subscriptionsByCustomer.set("cus_other", []);
+    const deps = { database, provider, now: () => NOW };
+    await expect(removeSavedCard({ ...actor, membershipRole: "MEMBER" }, "pm_spare", deps)).rejects.toMatchObject({ code: "forbidden" });
+    // Another organization's customer does not hold it: not found, nothing detached.
+    provider.subscriptionsByCustomer.set("cus_other", []);
+    const otherProvider = new FakeProvider();
+    otherProvider.cards = [];
+    await expect(removeSavedCard({ ...actor, organizationId: OTHER_ORG }, "pm_spare", { ...deps, provider: otherProvider })).rejects.toMatchObject({ code: "card_not_found", status: 404 });
+    await expect(removeSavedCard(actor, "pm_unknown", deps)).rejects.toMatchObject({ code: "card_not_found" });
+    expect(provider.detached).toEqual([]);
+    expect(await removeSavedCard({ ...actor, membershipRole: "ADMIN" }, "pm_spare", deps)).toEqual({ removed: true, replacedBy: null });
+    expect(provider.detached).toEqual(["pm_spare"]);
+  });
+
+  it("never removes the only card paying a live subscription, and hands it over to another card", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    provider.cards = [card("pm_main")];
+    provider.defaultCard = null;
+    provider.subscriptions = [{ id: "sub_plan", customerId: "cus_org", status: "active", cancelAtPeriodEnd: false, priceIds: ["price_pro"], currentPeriodStart: null, currentPeriodEnd: null, defaultPaymentMethodId: "pm_main" }];
+    const deps = { database, provider, now: () => NOW };
+    expect((await listSavedCards(actor, deps)).cards[0]).toMatchObject({ id: "pm_main", inUse: true });
+    await expect(removeSavedCard(actor, "pm_main", deps)).rejects.toMatchObject({ code: "card_in_use", status: 409 });
+    expect(provider.detached).toEqual([]);
+    provider.cards = [card("pm_main"), card("pm_new")];
+    expect(await removeSavedCard(actor, "pm_main", deps)).toEqual({ removed: true, replacedBy: "pm_new" });
+    expect(provider.defaultCalls).toEqual([{ customerId: "cus_org", paymentMethodId: "pm_new", subscriptionIds: ["sub_plan"] }]);
+    expect(provider.detached).toEqual(["pm_main"]);
   });
 });
 
@@ -271,8 +455,47 @@ describe("Stripe reconciliation", () => {
       "checkout-idempotency-expired",
       { database, provider, now: () => NOW, randomId: () => "00000000-0000-4000-8000-000000000777" },
     );
-    expect(provider.checkoutCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls).toHaveLength(1);
     expect(provider.portalCalls).toBe(0);
+  });
+
+  it("ignores a subscription whose first invoice is unpaid and activates the plan when it is paid (NEX-52)", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    const deps = { database, provider, now: () => NOW, randomId: () => "00000000-0000-4000-8000-000000000999" };
+    const actor = { organizationId: ORG, organizationName: "Billing Org", userId: USER, membershipRole: "OWNER" as const };
+    const started = await createBillingCheckout(actor, "PRO", "checkout-incomplete-key-0001", deps);
+    const incomplete: StripeSubscriptionSnapshot = { id: "sub_1", customerId: "cus_org", status: "incomplete", cancelAtPeriodEnd: false, priceIds: ["price_pro"], currentPeriodStart: new Date("2026-10-07"), currentPeriodEnd: new Date("2026-11-07"), checkoutIntentId: started.intentId };
+    provider.subscriptions = [incomplete];
+    // customer.subscription.created arrives before the payment: nothing is granted or recorded.
+    provider.event = { id: "evt_created", type: "customer.subscription.created", created: Math.floor(NOW.getTime() / 1000), data: { object: { id: "sub_1", customer: "cus_org" } } } as unknown as Stripe.Event;
+    await processStripeWebhook(Buffer.from("created"), "sig", { database, provider, now: () => NOW });
+    let row = (await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!;
+    expect(row).toMatchObject({ planId: "FREE", stripeSubscriptionId: null });
+    expect((await readBillingState(actor, database, NOW)).checkoutAvailable).toBe(true);
+    expect((await database.select().from(billingCheckoutIntents))[0]?.status).toBe("OPEN");
+    // invoice.paid: the plan becomes active, the intent completes and the kept card is adopted.
+    provider.subscriptions = [{ ...incomplete, status: "active" }];
+    provider.event = { id: "evt_paid", type: "invoice.paid", created: Math.floor(NOW.getTime() / 1000), data: { object: { id: "in_1", customer: "cus_org" } } } as unknown as Stripe.Event;
+    await processStripeWebhook(Buffer.from("paid"), "sig", { database, provider, now: () => NOW });
+    row = (await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!;
+    expect(row).toMatchObject({ planId: "PRO", status: "ACTIVE", stripeSubscriptionId: "sub_1" });
+    expect(effectivePlanId(row, NOW)).toBe("PRO");
+    expect((await database.select().from(billingCheckoutIntents))[0]?.status).toBe("COMPLETED");
+    expect(provider.adoptCalls).toEqual(["sub_1"]);
+  });
+
+  it("expires the intent of a subscription Stripe expired unpaid and grants nothing", async () => {
+    await database.update(subscriptions).set({ stripeCustomerId: "cus_org" }).where(eq(subscriptions.organizationId, ORG));
+    const provider = new FakeProvider();
+    const actor = { organizationId: ORG, organizationName: "Billing Org", userId: USER, membershipRole: "OWNER" as const };
+    const started = await createBillingCheckout(actor, "PRO", "checkout-expired-key-00001", { database, provider, now: () => NOW, randomId: () => "00000000-0000-4000-8000-000000000998" });
+    provider.subscriptions = [{ id: "sub_1", customerId: "cus_org", status: "incomplete_expired", cancelAtPeriodEnd: false, priceIds: ["price_pro"], currentPeriodStart: null, currentPeriodEnd: null, checkoutIntentId: started.intentId }];
+    await reconcileStripeCustomer("cus_org", { database, provider, now: () => NOW });
+    expect((await database.select().from(billingCheckoutIntents))[0]?.status).toBe("EXPIRED");
+    const row = (await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!;
+    expect(effectivePlanId(row, NOW)).toBe("FREE");
+    expect(provider.adoptCalls).toEqual([]);
   });
 
   it("deduplicates exact webhook bytes and rejects an event ID with another hash", async () => {
@@ -428,16 +651,16 @@ describe("API add-on checkout", () => {
     const first = await createApiAddonCheckout(actor, "addon-idempotency-0001", deps);
     const again = await createApiAddonCheckout(actor, "addon-idempotency-0001", deps);
     const otherKey = await createApiAddonCheckout(actor, "addon-idempotency-0002", deps);
-    expect(first.url).toContain("checkout.stripe.com");
+    expect(first).toMatchObject({ confirmation: "payment", clientSecret: "pi_1_secret_synthetic" });
     expect(again).toEqual(first);
     expect(otherKey).toEqual(first);
     expect(provider.portalCalls).toBe(0);
-    expect(provider.checkoutCalls).toHaveLength(1);
-    expect(provider.checkoutCalls[0]?.input).toMatchObject({ customerId: "cus_org", priceId: "price_addon", organizationId: ORG, addon: "API" });
-    expect(provider.checkoutCalls[0]?.idempotencyKey).toMatch(/^uno-checkout-.+-1$/);
+    expect(provider.subscriptionCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls[0]?.input).toMatchObject({ customerId: "cus_org", priceId: "price_addon", organizationId: ORG, addon: "API" });
+    expect(provider.subscriptionCalls[0]?.idempotencyKey).toMatch(/^uno-subscribe-.+-1$/);
     const intents = await database.select().from(billingCheckoutIntents);
     expect(intents).toHaveLength(1);
-    expect(intents[0]).toMatchObject({ planId: null, addon: "API", status: "OPEN", stripeSessionId: "cs_1" });
+    expect(intents[0]).toMatchObject({ planId: null, addon: "API", status: "OPEN", stripeSubscriptionId: "sub_1" });
   });
 
   it("accepts exactly one checkout target in the request body", () => {
@@ -455,7 +678,7 @@ describe("API add-on checkout", () => {
       const provider = new FakeProvider();
       provider.subscriptions = [{ ...planSnapshot, priceIds: [`price_${planId.toLowerCase()}`] }];
       await createApiAddonCheckout({ ...actor, membershipRole: "ADMIN" }, `addon-idempotency-plan-${index}`, dependencies(provider));
-      expect(provider.checkoutCalls).toHaveLength(1);
+      expect(provider.subscriptionCalls).toHaveLength(1);
     }
   });
 
@@ -467,10 +690,10 @@ describe("API add-on checkout", () => {
     await expect(createApiAddonCheckout({ ...actor, membershipRole: "MEMBER" }, "addon-idempotency-0003", deps)).rejects.toMatchObject({ code: "forbidden", status: 403 });
     await expect(createApiAddonCheckout(actor, null, deps)).rejects.toMatchObject({ code: "invalid_idempotency_key" });
     await expect(createApiAddonCheckout(actor, "short", deps)).rejects.toMatchObject({ code: "invalid_idempotency_key" });
-    expect(provider.checkoutCalls).toHaveLength(0);
+    expect(provider.subscriptionCalls).toHaveLength(0);
     await createApiAddonCheckout(actor, "addon-idempotency-0004", deps);
     await expect(createBillingCheckout(actor, "PRO", "addon-idempotency-0004", deps)).rejects.toMatchObject({ code: "idempotency_conflict" });
-    expect(provider.checkoutCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls).toHaveLength(1);
   });
 
   it("requires a paid plan in force", async () => {
@@ -485,7 +708,7 @@ describe("API add-on checkout", () => {
     await setOrg({ ...paidPlan, stripeSubscriptionId: null });
     await expect(createApiAddonCheckout(actor, "addon-idempotency-0007b", deps)).rejects.toMatchObject({ code: "paid_plan_required" });
     expect((await readBillingState(actor, database, NOW)).apiAddon.available).toBe(false);
-    expect(provider.checkoutCalls).toHaveLength(0);
+    expect(provider.subscriptionCalls).toHaveLength(0);
     expect(await database.select().from(billingCheckoutIntents)).toHaveLength(0);
   });
 
@@ -503,13 +726,13 @@ describe("API add-on checkout", () => {
     provider.subscriptions = [planSnapshot, { ...planSnapshot, id: "sub_addon", priceIds: ["price_addon"] }];
     await expect(createApiAddonCheckout(actor, "addon-idempotency-0010", deps)).rejects.toMatchObject({ code: "addon_already_active" });
     expect((await database.select().from(billingCheckoutIntents))[0]).toMatchObject({ addon: "API", status: "FAILED" });
-    expect(provider.checkoutCalls).toHaveLength(0);
+    expect(provider.subscriptionCalls).toHaveLength(0);
     // After a cancellation the add-on can be bought again, reusing the same key.
     await setOrg({ apiAddonSubscriptionId: "sub_addon", apiAddonStatus: "CANCELED", apiAddonCurrentPeriodEnd: null });
     provider.subscriptions = [planSnapshot, { ...planSnapshot, id: "sub_addon", status: "canceled", priceIds: ["price_addon"] }];
     await createApiAddonCheckout(actor, "addon-idempotency-0010", deps);
-    expect(provider.checkoutCalls).toHaveLength(1);
-    expect(provider.checkoutCalls[0]?.idempotencyKey).toMatch(/-2$/);
+    expect(provider.subscriptionCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls[0]?.idempotencyKey).toMatch(/-2$/);
   });
 
   it("refuses to sell when the add-on price is missing or does not match the catalog", async () => {
@@ -530,7 +753,7 @@ describe("API add-on checkout", () => {
       mutate();
       await expect(createApiAddonCheckout(actor, `addon-idempotency-price-${index}`, deps)).rejects.toMatchObject({ code: "service_unavailable" });
     }
-    expect(provider.checkoutCalls).toHaveLength(0);
+    expect(provider.subscriptionCalls).toHaveLength(0);
     // Both catalog mismatches reached the price check and closed their own intent.
     expect(await failedIntents()).toBe(2);
     provider.priceActive = true;
@@ -538,7 +761,7 @@ describe("API add-on checkout", () => {
     await expect(createApiAddonCheckout(actor, "addon-idempotency-0013", deps)).rejects.toMatchObject({ code: "service_unavailable" });
     provider.prices.price_addon = 6_500;
     await createApiAddonCheckout(actor, "addon-idempotency-0014", deps);
-    expect(provider.checkoutCalls).toHaveLength(1);
+    expect(provider.subscriptionCalls).toHaveLength(1);
   });
 
   it("still sends a plan purchase to Checkout when only the add-on subscription is alive", async () => {
@@ -546,10 +769,10 @@ describe("API add-on checkout", () => {
     const provider = new FakeProvider();
     provider.subscriptions = [{ ...planSnapshot, id: "sub_addon", priceIds: ["price_addon"] }];
     const result = await createBillingCheckout(actor, "PRO", "addon-idempotency-0015", dependencies(provider));
-    expect(result.url).toContain("checkout.stripe.com");
+    expect(result.clientSecret).toBe("pi_1_secret_synthetic");
     expect(provider.portalCalls).toBe(0);
-    expect(provider.checkoutCalls[0]?.input).toMatchObject({ priceId: "price_pro" });
-    expect(provider.checkoutCalls[0]?.input.addon).toBeUndefined();
+    expect(provider.subscriptionCalls[0]?.input).toMatchObject({ priceId: "price_pro" });
+    expect(provider.subscriptionCalls[0]?.input.addon).toBeUndefined();
   });
 
   it("reports the add-on in the billing state", async () => {
@@ -703,10 +926,14 @@ describe("Stripe reconciliation of the API add-on", () => {
     provider.subscriptions = [snapshot("sub_plan", ["price_pro"])];
     const actor = { organizationId: ORG, organizationName: "Billing Org", userId: USER, membershipRole: "OWNER" as const };
     await createApiAddonCheckout(actor, "addon-webhook-key-0001", { database, provider, now: () => NOW, randomId: () => "00000000-0000-4000-8000-000000000888" });
-    provider.subscriptions = [snapshot("sub_plan", ["price_pro"]), snapshot("sub_addon", ["price_addon"])];
-    provider.event = { id: "evt_addon", type: "checkout.session.completed", created: Math.floor(NOW.getTime() / 1000), data: { object: { id: "cs_1", customer: "cus_org" } } } as unknown as Stripe.Event;
+    // While the add-on's first invoice is unpaid it neither grants nor blocks anything.
+    provider.subscriptions = [snapshot("sub_plan", ["price_pro"]), { ...snapshot("sub_1", ["price_addon"]), status: "incomplete" }];
+    await reconcile(provider);
+    expect(await row()).toMatchObject({ planId: "PRO", stripeSubscriptionId: "sub_plan", apiAddonSubscriptionId: null, apiAddonStatus: null });
+    provider.subscriptions = [snapshot("sub_plan", ["price_pro"]), snapshot("sub_1", ["price_addon"])];
+    provider.event = { id: "evt_addon", type: "invoice.paid", created: Math.floor(NOW.getTime() / 1000), data: { object: { id: "in_addon", customer: "cus_org" } } } as unknown as Stripe.Event;
     expect(await processStripeWebhook(Buffer.from("addon"), "sig", { database, provider, now: () => NOW })).toEqual({ duplicate: false });
-    expect(await row()).toMatchObject({ planId: "PRO", stripeSubscriptionId: "sub_plan", apiAddonSubscriptionId: "sub_addon", apiAddonStatus: "ACTIVE" });
-    expect((await database.select().from(billingCheckoutIntents))[0]).toMatchObject({ addon: "API", status: "COMPLETED" });
+    expect(await row()).toMatchObject({ planId: "PRO", stripeSubscriptionId: "sub_plan", apiAddonSubscriptionId: "sub_1", apiAddonStatus: "ACTIVE" });
+    expect((await database.select().from(billingCheckoutIntents))[0]).toMatchObject({ addon: "API", status: "COMPLETED", stripeSubscriptionId: "sub_1" });
   });
 });

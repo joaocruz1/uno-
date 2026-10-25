@@ -134,6 +134,13 @@
       "when": 1792939674605,
       "tag": "0018_rare_vance_astro",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1792967183150,
+      "tag": "0019_strange_songbird",
+      "breakpoints": true
     }
   ]
 }

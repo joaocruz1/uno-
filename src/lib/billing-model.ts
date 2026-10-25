@@ -51,6 +51,45 @@ export const billingCheckoutRequestSchema = z.union([
   z.object({ addon: apiAddonIdSchema }).strict(),
 ]);
 
+/**
+ * POST billing/subscribe answer (own checkout, NEX-52). `confirmation` says what
+ * the browser does with `clientSecret`: confirm the first payment, save the card
+ * for renewals when nothing is due today, or nothing (already paid). The plan is
+ * only ever granted by the webhook; this answer grants nothing.
+ */
+export const subscribeResultSchema = z.object({
+  intentId: z.string().min(1),
+  confirmation: z.enum(["payment", "setup", "none"]),
+  clientSecret: z.string().min(1).nullable(),
+  /** What the first invoice charges today, from Stripe. */
+  amountDueBrlCents: z.number().int().nonnegative(),
+  /** The monthly price after the first payment. */
+  recurringBrlCents: z.number().int().nonnegative(),
+});
+
+/** A card kept by Stripe on the organization's Customer: display fields only. */
+export const savedCardSchema = z.object({
+  id: z.string().min(1),
+  brand: z.string(),
+  last4: z.string().regex(/^\d{4}$/),
+  expMonth: z.number().int().min(1).max(12),
+  expYear: z.number().int(),
+  /** The Customer's default card (charged by the add-on and new subscriptions). */
+  isDefault: z.boolean(),
+  /** It pays a live subscription. */
+  inUse: z.boolean(),
+});
+
+export const savedCardsSchema = z.object({ cards: z.array(savedCardSchema) });
+
+/** POST billing/payment-session: Payment Element CustomerSession plus the kept cards. */
+export const paymentSessionSchema = z.object({
+  customerSessionClientSecret: z.string().min(1),
+  cards: z.array(savedCardSchema),
+});
+
+export const removeCardRequestSchema = z.object({ paymentMethodId: z.string().regex(/^pm_[A-Za-z0-9]{1,250}$/) }).strict();
+
 /** POST billing/coupon/preview: price a plan with a coupon before paying (NEX-51). */
 export const couponPreviewRequestSchema = z.object({ planId: paidPlanIdSchema, code: promotionCodeInputSchema }).strict();
 
@@ -82,7 +121,7 @@ export const billingPlanChangeRequestSchema = z.object({ planId: paidPlanIdSchem
 /** POST billing/cancel and billing/resume: the "+ API" add-on follows the plan by default. */
 export const billingCancelRequestSchema = z.object({ alsoAddon: z.boolean().optional() }).strict();
 
-/** Without a card subscription the plan is bought through the regular Checkout. */
+/** Without a card subscription the plan is bought through the checkout page (/checkout). */
 export const billingPlanChangeResultSchema = z.union([
   z.object({ checkout: z.literal(true) }),
   z.object({
@@ -182,3 +221,6 @@ export type BillingPlanChangeResult = z.infer<typeof billingPlanChangeResultSche
 export type RefundEligibility = z.infer<typeof refundEligibilitySchema>;
 export type RefundResult = z.infer<typeof refundResultSchema>;
 export type BillingRedirect = z.infer<typeof billingRedirectSchema>;
+export type SubscribeResult = z.infer<typeof subscribeResultSchema>;
+export type SavedCard = z.infer<typeof savedCardSchema>;
+export type PaymentSession = z.infer<typeof paymentSessionSchema>;

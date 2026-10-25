@@ -96,6 +96,9 @@ async function claimReconciliation(customerId: string, deps: ReconcileDependenci
 
 const isLive = (snapshot: StripeSubscriptionSnapshot) => snapshot.status !== "canceled" && snapshot.status !== "incomplete_expired";
 
+/** Statuses a subscription only reaches after its first invoice was paid. */
+const PAID_STATUSES = new Set<StripeSubscriptionSnapshot["status"]>(["active", "trialing", "past_due", "unpaid", "paused"]);
+
 /** The prices of a subscription that are not the API add-on, i.e. its plan side. */
 function planPriceIds(snapshot: StripeSubscriptionSnapshot, addonPriceId: string | null): string[] {
   return snapshot.priceIds.filter((priceId) => priceId !== addonPriceId);
@@ -149,10 +152,15 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
     stripeSubscriptionId: subscriptions.stripeSubscriptionId,
     apiAddonSubscriptionId: subscriptions.apiAddonSubscriptionId,
   }).from(subscriptions).where(eq(subscriptions.id, claim.subscriptionId)).limit(1);
-  const snapshots = await dependencies.provider.listSubscriptions(customerId);
-  if (snapshots.some((snapshot) => snapshot.customerId !== customerId)) {
+  const allSnapshots = await dependencies.provider.listSubscriptions(customerId);
+  if (allSnapshots.some((snapshot) => snapshot.customerId !== customerId)) {
     throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   }
+  // A subscription whose first invoice was never paid (own checkout, NEX-52:
+  // created incomplete and confirmed in the browser) does not exist for rights:
+  // it neither grants nor takes the place of the one in force. Stripe expires it
+  // after 23 h (incomplete_expired), which is terminal like canceled.
+  const snapshots = allSnapshots.filter((snapshot) => snapshot.status !== "incomplete");
   const prices = pricePlanMap();
   const addonPriceId = apiAddonPriceId();
   if (addonPriceId && prices.has(addonPriceId)) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
@@ -166,6 +174,7 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
   if (selected && !recognizedPlan) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   const addon = addonPriceId ? chooseAddonSubscription(local[0]?.apiAddonSubscriptionId ?? null, snapshots, addonPriceId) : null;
   const now = dependencies.now();
+  const completedSubscriptionIds: string[] = [];
   await dependencies.database.transaction(async (transaction) => {
     await lockOrganizationBilling(claim.organizationId, transaction);
     const rows = await transaction.select().from(subscriptions).where(and(
@@ -231,7 +240,33 @@ export async function reconcileStripeCustomer(customerId: string, dependencies: 
     await lockCurrentUsagePeriod(claim.organizationId, entitlement, now, transaction, {
       alignPeriodEnd: !current.stripeSubscriptionId && Boolean(selected),
     });
+    // Own-checkout intents follow their subscription: paid → COMPLETED (which also
+    // counts the coupon as used), expired or canceled unpaid → EXPIRED.
+    const paidIds = allSnapshots.filter((snapshot) => PAID_STATUSES.has(snapshot.status)).map((snapshot) => snapshot.id);
+    const goneIds = allSnapshots.filter((snapshot) => !isLive(snapshot)).map((snapshot) => snapshot.id);
+    if (paidIds.length) {
+      const completed = await transaction.update(billingCheckoutIntents).set({ status: "COMPLETED", updatedAt: now }).where(and(
+        eq(billingCheckoutIntents.organizationId, claim.organizationId),
+        inArray(billingCheckoutIntents.stripeSubscriptionId, paidIds),
+        inArray(billingCheckoutIntents.status, ["CREATING", "OPEN", "EXPIRED"]),
+      )).returning({ subscriptionId: billingCheckoutIntents.stripeSubscriptionId });
+      for (const row of completed) if (row.subscriptionId) completedSubscriptionIds.push(row.subscriptionId);
+    }
+    if (goneIds.length) {
+      await transaction.update(billingCheckoutIntents).set({ status: "EXPIRED", updatedAt: now }).where(and(
+        eq(billingCheckoutIntents.organizationId, claim.organizationId),
+        inArray(billingCheckoutIntents.stripeSubscriptionId, goneIds),
+        inArray(billingCheckoutIntents.status, ["CREATING", "OPEN"]),
+      ));
+    }
   });
+  // The card the buyer chose to keep becomes the Customer's default for later
+  // purchases. Best effort: the purchase itself is already applied.
+  for (const subscriptionId of completedSubscriptionIds) {
+    await dependencies.provider.adoptSubscriptionCard(customerId, subscriptionId).catch(() => {
+      console.log(JSON.stringify({ event: "billing.card.adopt_failed", organizationId: claim.organizationId }));
+    });
+  }
   return claim.organizationId;
 }
 

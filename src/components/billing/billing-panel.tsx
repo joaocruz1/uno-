@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { z } from "zod";
 import { Button, Modal } from "@/components/ui";
 import { billingPlanChangeResultSchema, billingStateSchema, type PaidPlanId } from "@/lib/billing-model";
+import { addonCheckoutPath, checkoutPath } from "@/lib/checkout-intent";
 import { formatBrlCents } from "@/lib/plans";
 
 import { postBilling, SubscriptionManager } from "./subscription-manager";
@@ -56,19 +57,24 @@ export function BillingPanel({ canManage }: { canManage: boolean }) {
     return () => controller.abort();
   }, [refresh]);
 
-  // `target` is a paid plan id, the "addon:API" checkout, or nothing for the customer portal.
+  // A paid plan or "addon:API" opens our own checkout page (NEX-52); nothing opens the customer portal.
   const openBilling = async (target?: string) => {
     if (locked.current || !canManage) return;
     const operation = target ?? "portal";
+    if (target) {
+      locked.current = true; setBusy(operation);
+      window.location.assign(target === ADDON_OPERATION ? addonCheckoutPath() : checkoutPath(target as PaidPlanId));
+      return;
+    }
     locked.current = true; setBusy(operation); setError(undefined);
     try {
       const key = operationKeys.current.get(operation) ?? crypto.randomUUID();
       operationKeys.current.set(operation, key);
-      const response = await fetch(`/api/dashboard/billing/${target ? "checkout" : "portal"}`, { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: JSON.stringify(target === ADDON_OPERATION ? { addon: "API" } : target ? { planId: target } : {}) });
+      const response = await fetch("/api/dashboard/billing/portal", { method: "POST", headers: { "content-type": "application/json", "idempotency-key": key }, body: "{}" });
       const body = await response.json();
       if (!response.ok) throw new Error(typeof body.error?.message === "string" ? body.error.message : "Não foi possível abrir a cobrança.");
       const destination = new URL(z.object({ url: z.url() }).parse(body).url);
-      if (destination.protocol !== "https:" || destination.username || destination.password || !["checkout.stripe.com", "billing.stripe.com"].includes(destination.hostname)) throw new Error("Não foi possível abrir a cobrança.");
+      if (destination.protocol !== "https:" || destination.username || destination.password || destination.hostname !== "billing.stripe.com") throw new Error("Não foi possível abrir a cobrança.");
       window.location.assign(destination.href);
     } catch (cause) { setError(cause instanceof z.ZodError ? "Não foi possível abrir a cobrança." : cause instanceof Error ? cause.message : "Não foi possível abrir a cobrança."); }
     finally { locked.current = false; setBusy(undefined); }

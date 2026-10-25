@@ -61,6 +61,32 @@ table and the coupon columns of `billing_checkout_intents` and
 app. Coupons are created from Admin → Cupons and need Stripe configured;
 `UNO_COUPON_RATE_LIMIT` (default 10 per user per minute) limits coupon lookups.
 
+Own checkout (NEX-52): the card is typed on `/checkout`, in Stripe's Payment
+Element. Set `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` (the `pk_test_`/`pk_live_`
+key of the same account and mode as `STRIPE_SECRET_KEY`) in the web app
+service. The server reads it at request time (dynamic lookup), so it works as a
+runtime variable too; Easypanel also passes it as a build argument, which is
+harmless because it is public. Without it, or with a mode mismatch, `/checkout`
+shows "A cobrança ainda não está configurada" and no payment is possible.
+Migration `0019_strange_songbird` adds `billing_checkout_intents.stripe_subscription_id`
+and relaxes the OPEN check (an intent is open with a hosted session or with an
+incomplete subscription). Deploy the worker (migrations) before the web app.
+The webhook endpoint must receive at least `invoice.paid`,
+`invoice.payment_failed` and `customer.subscription.*` (the add-on and plans
+are activated by them; `checkout.session.*` stays for sessions opened before
+this version). The CSP always allows Stripe.js (`js.stripe.com`), its frames
+and 3D Secure (`hooks.stripe.com`, `*.stripe.com`) and `api.stripe.com`,
+`m.stripe.network`, `q.stripe.com`; it is fixed at build, so this version must
+be rebuilt (not only restarted) for the checkout to load.
+Rollback of `0019`: the old `billing_checkout_intents_open_ck` requires a
+hosted session on every OPEN intent. Before restoring it, expire the intents
+opened by the own checkout:
+`update billing_checkout_intents set status = 'EXPIRED', updated_at = now() where status = 'OPEN' and stripe_session_id is null and stripe_subscription_id is not null;`
+(their incomplete subscriptions expire on their own in Stripe after 23 h).
+Before opening the checkout to the public, enable Stripe Radar's card-testing
+protections and a rule that blocks repeated declines per customer/IP (see
+`docs/security.md`): the app does not count declines itself.
+
 Google sign-in is optional: set both `GOOGLE_CLIENT_ID` and
 `GOOGLE_CLIENT_SECRET` (web app service only; the worker does not need them)
 and the "Continuar com Google" button appears on `/login` and `/register`.
@@ -90,8 +116,11 @@ the build environment or `connect-src` falls back to `https:`.
 - R2: private bucket, CORS limited to the dashboard origin (PUT/GET/HEAD),
   lifecycle rules that abort incomplete multipart uploads and expire
   `*/api-staging/*` and batch staging prefixes. See `docs/security.md`.
-- Stripe: three monthly prices, Customer Portal, webhook endpoint
-  `/api/stripe/webhook`. See `docs/billing.md`.
+- Stripe: three monthly prices, Customer Portal (card update, cancellation,
+  invoices), webhook endpoint `/api/stripe/webhook` with `invoice.*` and
+  `customer.subscription.*`, publishable key in the web app, Radar
+  card-testing protections and decline rules enabled. See
+  `docs/billing.md`.
 - Resend: verified sending domain for `EMAIL_FROM`.
 - Sentry/PostHog: optional; PostHog only sends after the user opts in.
 - Backups for PostgreSQL; alerts on worker liveness, queue depth, outbox and
@@ -142,6 +171,7 @@ Everything can also run on one server next to PostgreSQL and Redis. Still
    to `ADMIN_EMAILS` in both apps, then in the worker console run
    `node --import tsx scripts/create-local-admin.ts you@example.com` and redeploy.
 6. **Stripe**: add `https://<domain>/api/stripe/webhook` as an endpoint and set
-   `STRIPE_WEBHOOK_SECRET`.
+   `STRIPE_WEBHOOK_SECRET`; set `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` in the web
+   app and rebuild it (the CSP that allows Stripe.js is fixed at build).
 7. **Template release**: publish it in `/admin/templates`; until then every
    conversion is refused in production.

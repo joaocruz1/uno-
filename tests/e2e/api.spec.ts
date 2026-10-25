@@ -53,7 +53,12 @@ test("paid API key is shown once, authenticates usage, and revokes", async ({ pa
     try {
       await page.goto("/dashboard/api");
       const nameInput = page.getByLabel("Nome da integração", { exact: true });
-      await nameInput.fill("syntheticERP");
+      // Typing before hydration finishes can be reset by React, so retype
+      // until the form reflects the name.
+      await expect(async () => {
+        await nameInput.fill("syntheticERP");
+        await expect(page.getByRole("button", { name: "Criar chave", exact: true })).toBeEnabled({ timeout: 1_000 });
+      }).toPass({ timeout: 20_000 });
       await page.getByRole("button", { name: "Criar chave", exact: true }).click();
       await expect(page.getByRole("dialog")).toBeVisible();
       const secretInput = page.getByLabel("Chave de API criada", { exact: true });
