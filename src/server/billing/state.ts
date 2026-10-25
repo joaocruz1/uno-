@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 
-import { getDb, subscriptions, type UnoDatabase } from "@/db";
+import { coupons, getDb, subscriptions, type UnoDatabase } from "@/db";
 import type { BillingView, UsageView } from "@/lib/billing-model";
 import { getApiAddon } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
@@ -25,6 +25,9 @@ export async function readBillingState(
     .where(eq(subscriptions.organizationId, actor.organizationId)).limit(1);
   const subscription = rows[0];
   const entitlement = subscription ?? FREE_ENTITLEMENT;
+  const couponRows = subscription?.appliedCouponId
+    ? await database.select({ code: coupons.code, planIds: coupons.planIds }).from(coupons).where(eq(coupons.id, subscription.appliedCouponId)).limit(1)
+    : [];
   const canManage = actor.membershipRole === "OWNER" || actor.membershipRole === "ADMIN";
   const configured = billingProviderConfigured();
   const manageableSubscription = Boolean(subscription?.stripeSubscriptionId) && entitlement.status !== "CANCELED";
@@ -44,6 +47,8 @@ export async function readBillingState(
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd ?? false,
     checkoutAvailable: canManage && configured && !manageableSubscription,
     portalAvailable: canManage && configured && Boolean(subscription?.stripeCustomerId),
+    canManage,
+    billingConfigured: configured,
     plans: publicBillingPlans(),
     apiAddon: {
       name: getApiAddon().name,
@@ -59,6 +64,7 @@ export async function readBillingState(
       cancel: canManage && configured && cardPlanLive && !(subscription?.cancelAtPeriodEnd ?? false),
       resume: canManage && configured && cardPlanLive && (subscription?.cancelAtPeriodEnd ?? false),
     },
+    appliedCoupon: couponRows[0] ?? null,
     prepaid: subscription?.prepaidPlanId && subscription.prepaidPeriodEnd && subscription.prepaidPeriodEnd > now
       ? { planId: subscription.prepaidPlanId, periodEnd: subscription.prepaidPeriodEnd.toISOString() }
       : null,

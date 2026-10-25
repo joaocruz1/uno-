@@ -9,7 +9,7 @@ test("private dashboard conversion validates, processes and downloads a syntheti
   test.skip(process.env.UNO_LOCAL_UPLOAD_E2E !== "1", "Requires local PostgreSQL, Redis, S3 and worker");
   const origin = "http://127.0.0.1:3100";
   const email = `uno-upload-e2e-${crypto.randomUUID()}@example.test`;
-  const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, { headers: { origin }, data: { name: "Operador Upload", email, password: "Synthetic-upload-password" } });
+  const signup = await page.request.post(`${origin}/api/auth/sign-up/email`, { headers: { origin }, data: { name: "Operador Upload", email, password: "Synthetic-upload-password", phone: "(11) 98765-4321" } });
   expect(signup.status()).toBe(200);
   // Sign-up signs in at once (NEX-42): the session cookie is already in this context.
   await page.goto("/dashboard/process");

@@ -31,19 +31,22 @@ export function MobileMenu({ showAdmin }: { showAdmin: boolean }) {
   const pathname = usePathname();
   const links = showAdmin ? [...LINKS, ["Administração", "/admin"] as const] : LINKS;
 
+  // Listen for the whole lifetime and read the element's own state: the native
+  // `toggle` event is async, so a tap right after opening could otherwise land
+  // before an "only while open" listener exists.
   useEffect(() => {
-    if (!open) return;
+    const close = () => { if (root.current?.open) { root.current.open = false; setOpen(false); } };
     const closeOutside = (event: PointerEvent) => {
-      if (root.current && !root.current.contains(event.target as Node)) setOpen(false);
+      if (root.current?.open && !root.current.contains(event.target as Node)) close();
     };
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === "Escape") close(); };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
     return () => {
       document.removeEventListener("pointerdown", closeOutside);
       document.removeEventListener("keydown", closeOnEscape);
     };
-  }, [open]);
+  }, []);
 
   return (
     <details ref={root} open={open} onToggle={(event) => setOpen(event.currentTarget.open)} className="relative lg:hidden">

@@ -85,6 +85,9 @@ export const user = pgTable(
     email: text("email").notNull(),
     emailVerified: boolean("email_verified").notNull().default(false),
     image: text("image"),
+    // Brazilian phone in E.164 (+55DDNNNNNNNNN). Required at e-mail sign-up (NEX-51);
+    // null for older accounts and Google sign-ups until the person fills it in.
+    phone: text("phone"),
     platformRole: platformRoleEnum("platform_role").notNull().default("USER"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
@@ -214,6 +217,12 @@ export const subscriptions = pgTable(
     // Reconciliation never writes these.
     refundStartedAt: timestamp("refund_started_at", { withTimezone: true }),
     refundedAt: timestamp("refunded_at", { withTimezone: true }),
+    // Discount coupon seen on the plan subscription (NEX-51), written by reconciliation
+    // from the Stripe subscription's discounts. Kept after a one-time discount ends,
+    // and cleared only when the plan subscription itself changes.
+    appliedCouponId: text("applied_coupon_id").references(() => coupons.id, { onDelete: "set null" }),
+    appliedCouponCode: text("applied_coupon_code"),
+    appliedPromotionCodeId: text("applied_promotion_code_id"),
     reconciliationVersion: integer("reconciliation_version").notNull().default(0),
     lastReconciledAt: timestamp("last_reconciled_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
@@ -333,6 +342,43 @@ export const referrals = pgTable(
   ],
 );
 
+/**
+ * Discount coupons created in the UNO admin (NEX-51). Each one is a Stripe Coupon
+ * plus a Promotion Code with the same customer-facing code. Plan applicability is
+ * enforced by UNO (preview and checkout); expiry and maximum redemptions are also
+ * set on the Promotion Code so Stripe enforces them too.
+ */
+export const coupons = pgTable(
+  "coupons",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    code: text("code").notNull(),
+    stripeCouponId: text("stripe_coupon_id").notNull(),
+    stripePromotionCodeId: text("stripe_promotion_code_id").notNull(),
+    discountType: text("discount_type").notNull(),
+    percentOff: integer("percent_off"),
+    amountOffBrlCents: integer("amount_off_brl_cents"),
+    duration: text("duration").notNull(),
+    durationInMonths: integer("duration_in_months"),
+    // Empty means every paid plan.
+    planIds: jsonb("plan_ids").notNull().default([]).$type<Array<"STARTER" | "PRO" | "BUSINESS">>(),
+    maxRedemptions: integer("max_redemptions"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    active: boolean("active").notNull().default(true),
+    createdByUserId: text("created_by_user_id").references(() => user.id, { onDelete: "set null" }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("coupons_code_uq").on(table.code),
+    uniqueIndex("coupons_stripe_promotion_code_uq").on(table.stripePromotionCodeId),
+    check("coupons_code_ck", sql`${table.code} ~ '^[A-Z0-9_-]{3,40}$'`),
+    check("coupons_discount_ck", sql`(${table.discountType} = 'PERCENT' and ${table.percentOff} between 1 and 100 and ${table.amountOffBrlCents} is null) or (${table.discountType} = 'AMOUNT' and ${table.amountOffBrlCents} > 0 and ${table.percentOff} is null)`),
+    check("coupons_duration_ck", sql`(${table.duration} in ('once', 'forever') and ${table.durationInMonths} is null) or (${table.duration} = 'repeating' and ${table.durationInMonths} between 1 and 36)`),
+    check("coupons_max_redemptions_ck", sql`${table.maxRedemptions} is null or ${table.maxRedemptions} > 0`),
+  ],
+);
+
 export const billingCheckoutIntents = pgTable(
   "billing_checkout_intents",
   {
@@ -349,10 +395,17 @@ export const billingCheckoutIntents = pgTable(
     checkoutUrl: text("checkout_url"),
     status: billingCheckoutStatusEnum("status").notNull().default("CREATING"),
     expiresAt: timestamp("expires_at", { withTimezone: true }),
+    // Coupon audit (NEX-51): the code the buyer typed, the discount the server chose
+    // (best of the coupon and the first-month promo) and, when it won, the coupon.
+    promotionCode: text("promotion_code"),
+    appliedDiscount: text("applied_discount"),
+    couponId: text("coupon_id").references(() => coupons.id, { onDelete: "set null" }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().default(now),
   },
   (table) => [
+    index("billing_checkout_intents_coupon_idx").on(table.couponId),
+    check("billing_checkout_intents_discount_ck", sql`${table.appliedDiscount} is null or ${table.appliedDiscount} in ('COUPON', 'FIRST_MONTH', 'NONE')`),
     unique("billing_checkout_intents_org_id_uq").on(table.organizationId, table.id),
     uniqueIndex("billing_checkout_intents_org_idempotency_uq").on(table.organizationId, table.idempotencyKey),
     uniqueIndex("billing_checkout_intents_stripe_session_uq").on(table.stripeSessionId).where(sql`${table.stripeSessionId} is not null`),

@@ -22,7 +22,8 @@ async function main(): Promise<void> {
   if (!existing[0] && production) throw new Error("Account not found. Register through the site first; production never generates credentials.");
   if (!existing[0]) {
     const password = randomBytes(18).toString("base64url");
-    await getAuth().api.signUpEmail({ body: { name: "Administrador UNO", email, password } });
+    // A synthetic local number: e-mail sign-up requires a phone (NEX-51).
+    await getAuth().api.signUpEmail({ body: { name: "Administrador UNO", email, password, phone: "+5511900000000" } });
     await mkdir(".tmp", { recursive: true });
     await writeFile(".tmp/local-admin.txt", `URL: ${process.env.APP_URL ?? "http://127.0.0.1:3100"}/admin\nE-mail: ${email}\nSenha: ${password}\n`, { mode: 0o600 });
     created = true;

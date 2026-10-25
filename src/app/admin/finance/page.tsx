@@ -10,7 +10,7 @@ export default async function AdminFinancePage() {
   const finance = await adminFinance(await requireAdminPage());
   return (
     <div>
-      <PageHeader kicker="Financeiro" title="Receita e assinaturas" description="Receita recorrente estimada pelo preço de catálogo das assinaturas de plano e do adicional de API vinculadas à Stripe. Planos pagos sem vínculo de cobrança (cortesia ou dados de teste) não entram na receita. O valor efetivamente cobrado (descontos, impostos, estornos) está no painel da Stripe." />
+      <PageHeader kicker="Financeiro" title="Receita e assinaturas" description="Receita recorrente estimada pelo preço de catálogo das assinaturas de plano e do adicional de API vinculadas à Stripe. Planos pagos sem vínculo de cobrança (cortesia ou dados de teste) não entram na receita. O valor efetivamente cobrado (descontos, cupons, impostos, estornos) está no painel da Stripe." />
       <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Stat accent label="MRR estimado" value={brl(finance.estimatedMrrBrlCents)} hint={`ARR estimado ${brl(finance.estimatedMrrBrlCents * 12)}`} />
         <Stat label="Organizações pagantes" value={integer(finance.payingOrganizations)} hint={`${integer(finance.freeOrganizations)} no plano Free · ${integer(finance.unbilledPaidOrganizations)} com plano pago sem cobrança`} />
@@ -21,6 +21,10 @@ export default async function AdminFinancePage() {
         <Panel title="Receita por plano e adicional" note="Assinaturas pagantes × preço mensal">
           <Bars empty="Nenhuma assinatura paga ainda." rows={[...finance.byPlan.map((plan) => ({ ...plan, name: `Plano ${plan.name}` })), { ...finance.apiAddon, name: `Adicional + ${finance.apiAddon.name}` }].filter((line) => line.subscriptions > 0).map((line) => ({ label: `${line.name} · ${brl(line.priceBrlCents)}/mês`, value: line.subscriptions, detail: brl(line.mrrBrlCents) }))} />
         </Panel>
+        <Panel title="Cupons" note="Pagamentos de plano concluídos com cupom · assinaturas com o cupom agora">
+          <Bars empty="Nenhum cupom usado ainda." rows={finance.coupons.filter((coupon) => coupon.checkoutsCompleted > 0 || coupon.subscriptions > 0).map((coupon) => ({ label: `${coupon.code}${coupon.active ? "" : " (inativo)"}`, value: coupon.checkoutsCompleted, detail: `${integer(coupon.subscriptions)} ${coupon.subscriptions === 1 ? "assinatura" : "assinaturas"}` }))} />
+          <p className="mt-4 text-xs text-zinc-500">Últimos 30 dias: {integer(finance.discountedCheckouts30d.coupon)} com cupom · {integer(finance.discountedCheckouts30d.firstMonth)} com a promoção do 1º mês · {integer(finance.discountedCheckouts30d.none)} sem desconto.</p>
+        </Panel>
         <Panel title="Conversão para pago">
           <p className="font-heading text-3xl font-bold tabular-nums">{finance.payingOrganizations + finance.freeOrganizations > 0 ? `${((finance.payingOrganizations / (finance.payingOrganizations + finance.freeOrganizations)) * 100).toFixed(1).replace(".", ",")}%` : "—"}</p>
           <p className="mt-2 text-sm text-zinc-500">{integer(finance.payingOrganizations)} de {integer(finance.payingOrganizations + finance.freeOrganizations)} organizações têm plano pago ativo.</p>
@@ -28,10 +32,11 @@ export default async function AdminFinancePage() {
       </div>
       <h2 className="mt-10 font-heading text-lg font-semibold">Assinaturas pagas</h2>
       <div className="mt-4">
-        <DataTable empty="Nenhuma assinatura paga registrada." columns={["Organização", "Plano", "Adicional", "Estado", "Cobrança", "Renova em", "Atualizada"]} rows={finance.recentPaid.map((row) => [
+        <DataTable empty="Nenhuma assinatura paga registrada." columns={["Organização", "Plano", "Adicional", "Cupom", "Estado", "Cobrança", "Renova em", "Atualizada"]} rows={finance.recentPaid.map((row) => [
           <span key="o" className="font-medium text-white">{row.organizationName}</span>,
           row.planId,
           row.apiAddon ? "+ API" : "—",
+          row.couponCode ? <span key="c" className="font-mono text-xs">{row.couponCode}</span> : "—",
           <Pill key="s" tone={row.status === "ACTIVE" || row.status === "TRIALING" ? "good" : row.status === "PAST_DUE" ? "warn" : "muted"}>{STATUS[row.status] ?? row.status}{row.cancelAtPeriodEnd ? " · cancela no fim" : ""}</Pill>,
           <Pill key="b" tone={row.billingLinked ? "good" : "muted"}>{row.billingLinked ? "Stripe vinculada" : "Sem vínculo Stripe"}</Pill>,
           date(row.currentPeriodEnd),

@@ -7,7 +7,8 @@ import { assertPlatformAdmin, type AdminIdentity } from "./access";
 
 /*
  * Owner-facing business views. Still metadata only: organization names,
- * counters, plan and key labels. Never documents, file names, key secrets or
+ * counters, plan and key labels, plus the owner's e-mail and phone on the
+ * customers view (NEX-51), which the platform admin needs to reach them. Never documents, file names, key secrets or
  * provider identifiers.
  */
 
@@ -29,7 +30,11 @@ export type AdminFinance = {
   byPlan: Array<{ planId: PlanId; name: string; priceBrlCents: number; subscriptions: number; mrrBrlCents: number }>;
   /** Paying API add-on subscriptions linked to the provider; its own revenue line. */
   apiAddon: { name: string; priceBrlCents: number; subscriptions: number; mrrBrlCents: number };
-  recentPaid: Array<{ organizationId: string; organizationName: string; planId: PlanId; status: string; billingLinked: boolean; apiAddon: boolean; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; updatedAt: string }>;
+  recentPaid: Array<{ organizationId: string; organizationName: string; planId: PlanId; status: string; billingLinked: boolean; apiAddon: boolean; currentPeriodEnd: string | null; cancelAtPeriodEnd: boolean; updatedAt: string; couponCode: string | null }>;
+  /** Coupon usage (NEX-51): completed plan Checkouts with the coupon applied and subscriptions carrying it now. */
+  coupons: Array<{ code: string; active: boolean; checkoutsCompleted: number; subscriptions: number }>;
+  /** Plan Checkouts completed in 30 days by the discount the server applied. */
+  discountedCheckouts30d: { coupon: number; firstMonth: number; none: number };
 };
 
 export async function adminFinance(identity: AdminIdentity, database: Database = getDb(), now = new Date()): Promise<AdminFinance> {
@@ -66,9 +71,20 @@ export async function adminFinance(identity: AdminIdentity, database: Database =
   const recent = await database.execute<Record<string, unknown>>(sql`
     select s.organization_id, o.name, s.plan_id::text, s.status::text, (s.stripe_subscription_id is not null) as linked,
            (s.api_addon_subscription_id is not null and s.api_addon_status::text in ('ACTIVE', 'TRIALING', 'PAST_DUE')) as api_addon,
-           s.current_period_end, s.cancel_at_period_end, s.updated_at
+           s.current_period_end, s.cancel_at_period_end, s.updated_at, s.applied_coupon_code
     from subscriptions s join organizations o on o.id = s.organization_id
     where s.plan_id <> 'FREE' order by s.updated_at desc limit 50`);
+  const couponRows = await database.execute<Record<string, unknown>>(sql`
+    select c.code, c.active,
+      (select count(*) from billing_checkout_intents i where i.coupon_id = c.id and i.status = 'COMPLETED') as completed,
+      (select count(*) from subscriptions s where s.applied_coupon_id = c.id) as subscriptions
+    from coupons c order by c.created_at desc limit 50`);
+  const discounts = await database.execute<Record<string, unknown>>(sql`
+    select count(*) filter (where applied_discount = 'COUPON') as coupon,
+           count(*) filter (where applied_discount = 'FIRST_MONTH') as first_month,
+           count(*) filter (where applied_discount = 'NONE' or applied_discount is null) as none
+    from billing_checkout_intents
+    where status = 'COMPLETED' and plan_id is not null and updated_at > ${now.toISOString()}::timestamptz - interval '30 days'`);
   return {
     estimatedMrrBrlCents: plans.reduce((total, plan) => total + plan.mrrBrlCents, 0) + apiAddon.mrrBrlCents,
     payingOrganizations: plans.reduce((total, plan) => total + plan.subscriptions, 0),
@@ -83,7 +99,10 @@ export async function adminFinance(identity: AdminIdentity, database: Database =
       organizationId: String(row.organization_id), organizationName: String(row.name), planId: planIdSchema.parse(row.plan_id),
       status: String(row.status), billingLinked: Boolean(row.linked), apiAddon: Boolean(row.api_addon), currentPeriodEnd: iso(row.current_period_end),
       cancelAtPeriodEnd: Boolean(row.cancel_at_period_end), updatedAt: iso(row.updated_at)!,
+      couponCode: row.applied_coupon_code ? String(row.applied_coupon_code) : null,
     })),
+    coupons: couponRows.rows.map((row) => ({ code: String(row.code), active: Boolean(row.active), checkoutsCompleted: number(row.completed), subscriptions: number(row.subscriptions) })),
+    discountedCheckouts30d: { coupon: number(discounts.rows[0]?.coupon), firstMonth: number(discounts.rows[0]?.first_month), none: number(discounts.rows[0]?.none) },
   };
 }
 
@@ -91,6 +110,8 @@ export type AdminCustomer = {
   organizationId: string; organizationName: string; planId: PlanId; status: string; members: number;
   periodLimit: number; periodConfirmed: number; conversions30d: number; completed30d: number; failed30d: number;
   viaApi30d: number; viaDashboard30d: number; activeApiKeys: number; lastConversionAt: string | null; createdAt: string;
+  /** The owner's contact (NEX-51): phone in E.164, null for accounts that have not filled it in. */
+  ownerEmail: string | null; ownerPhone: string | null;
 };
 
 /** Organizations ranked by labels produced in the last 30 days. */
@@ -104,8 +125,10 @@ export async function adminCustomers(identity: AdminIdentity, database: Database
       coalesce((select p.confirmed from usage_periods p where p.organization_id = o.id and p.period_end > ${at}::timestamptz order by p.period_start desc limit 1), 0) as period_confirmed,
       coalesce(c.total, 0) as total, coalesce(c.completed, 0) as completed, coalesce(c.failed, 0) as failed,
       coalesce(c.via_api, 0) as via_api, coalesce(c.via_dashboard, 0) as via_dashboard, c.last_at,
-      (select count(*) from api_keys k where k.organization_id = o.id and k.revoked_at is null and (k.expires_at is null or k.expires_at > ${at}::timestamptz)) as active_keys
+      (select count(*) from api_keys k where k.organization_id = o.id and k.revoked_at is null and (k.expires_at is null or k.expires_at > ${at}::timestamptz)) as active_keys,
+      owner.email as owner_email, owner.phone as owner_phone
     from organizations o
+    left join "user" owner on owner.id = o.owner_user_id
     left join subscriptions s on s.organization_id = o.id
     left join (
       select organization_id, count(*) as total,
@@ -123,6 +146,7 @@ export async function adminCustomers(identity: AdminIdentity, database: Database
     conversions30d: number(row.total), completed30d: number(row.completed), failed30d: number(row.failed),
     viaApi30d: number(row.via_api), viaDashboard30d: number(row.via_dashboard), activeApiKeys: number(row.active_keys),
     lastConversionAt: iso(row.last_at), createdAt: iso(row.created_at)!,
+    ownerEmail: row.owner_email ? String(row.owner_email) : null, ownerPhone: row.owner_phone ? String(row.owner_phone) : null,
   }));
 }
 

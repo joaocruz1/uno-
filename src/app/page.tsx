@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ArrowRight, BadgeCheck, Braces, Lock, Package } from "lucide-react";
 
 import { Footer, Navbar } from "@/components";
+import { PlanPurchaseButton } from "@/components/checkout/purchase-dialog";
 import { ButtonLink } from "@/components/ui";
 import { HeroStage } from "@/components/marketing/hero-stage";
 import { HowItWorks } from "@/components/marketing/how-it-works";
@@ -9,6 +10,7 @@ import { Magnetic, SpotlightCard } from "@/components/marketing/interactive";
 import { Reveal } from "@/components/marketing/reveal";
 import { TrialStudio } from "@/components/marketing/trial-studio";
 import { formatBrlCents, getApiAddon, getPlanCatalog, hasFirstMonthPromo } from "@/lib/plans";
+import { publicPlans } from "@/lib/public-plans";
 
 const GUTTER = "px-[clamp(1.25rem,5vw,6rem)]";
 
@@ -23,6 +25,7 @@ export default function Home() {
   const plans = getPlanCatalog();
   const order = ["FREE", "STARTER", "PRO", "BUSINESS"] as const;
   const addon = getApiAddon();
+  const purchasable = publicPlans().filter((plan) => plan.id !== "FREE");
 
   return (
     <main className="site-shell">
@@ -122,7 +125,9 @@ export default function Home() {
                     </p>
                   )}
                   <p className="mt-3 text-sm text-[var(--color-muted)]">{plan.monthlyLimit.toLocaleString("pt-BR")} etiquetas/mês</p>
-                  <ButtonLink href="/register" variant={highlight ? "primary" : "secondary"} size="sm" className="mt-5 w-full">Começar</ButtonLink>
+                  {id === "FREE"
+                    ? <ButtonLink href="/register?plan=free" variant="secondary" size="sm" className="mt-5 w-full">Começar</ButtonLink>
+                    : <PlanPurchaseButton planId={id} plans={purchasable} variant={highlight ? "primary" : "secondary"} size="sm" className="mt-5 w-full">{`Assinar ${plan.name}`}</PlanPurchaseButton>}
                 </SpotlightCard>
                 </Reveal>
               );

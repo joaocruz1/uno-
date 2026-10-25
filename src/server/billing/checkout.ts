@@ -2,13 +2,14 @@ import { createHash, randomUUID } from "node:crypto";
 
 import { and, eq, inArray, isNotNull, lte } from "drizzle-orm";
 
-import { billingCheckoutIntents, getDb, subscriptions, type UnoDatabase } from "@/db";
+import { billingCheckoutIntents, getDb, subscriptions, user, type UnoDatabase } from "@/db";
 import type { PaidPlanId } from "@/lib/billing-model";
 import { AppError } from "@/lib/errors";
 import { getApiAddon, getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
 
-import { apiAddonConfigured, apiAddonPriceId, billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripeCouponId, stripePriceId } from "./config";
+import { apiAddonConfigured, apiAddonPriceId, billingProviderConfigured, billingUrls, PAID_PLAN_IDS, stripePriceId } from "./config";
+import { quoteCheckout } from "./coupons";
 import { effectivePlanId, lockOrganizationBilling } from "./entitlements";
 import { checkoutIntegrationIdentifier, getBillingProvider, type BillingProvider } from "./stripe";
 
@@ -46,15 +47,20 @@ function assertBillingUrl(url: string): string {
   }
 }
 
-/** What a checkout buys: a paid plan, or the API add-on on top of one. */
-type CheckoutTarget = { planId: PaidPlanId; addon: null } | { planId: null; addon: "API" };
+/** What a checkout buys: a paid plan (with the coupon the buyer typed, if any), or the API add-on on top of one. */
+type CheckoutTarget = { planId: PaidPlanId; addon: null; promotionCode: string | null } | { planId: null; addon: "API"; promotionCode: null };
+
+/** The discount the server chose for a plan checkout, recorded on the intent for audit. */
+type ChosenDiscount = { appliedDiscount: "COUPON" | "FIRST_MONTH" | "NONE" | null; couponId: string | null };
 
 function requestHash(target: CheckoutTarget): string {
-  return createHash("sha256").update(JSON.stringify(target.addon ? { addon: target.addon } : { planId: target.planId })).digest("hex");
+  // Without a coupon the hash stays exactly what it was before coupons existed.
+  const subject = target.addon ? { addon: target.addon } : target.promotionCode ? { planId: target.planId, promotionCode: target.promotionCode } : { planId: target.planId };
+  return createHash("sha256").update(JSON.stringify(subject)).digest("hex");
 }
 
-function sameTarget(intent: Pick<typeof billingCheckoutIntents.$inferSelect, "planId" | "addon">, target: CheckoutTarget): boolean {
-  return intent.planId === target.planId && intent.addon === target.addon;
+function sameTarget(intent: Pick<typeof billingCheckoutIntents.$inferSelect, "planId" | "addon" | "promotionCode">, target: CheckoutTarget): boolean {
+  return intent.planId === target.planId && intent.addon === target.addon && (intent.promotionCode ?? null) === target.promotionCode;
 }
 
 type PreparedCheckout = {
@@ -64,6 +70,8 @@ type PreparedCheckout = {
   completedUrl?: string;
   portalInstead: boolean;
   providerAttempt: number;
+  /** An open plan Checkout for another plan or coupon that must be expired before a new one. */
+  supersede?: { intentId: string; sessionId: string };
 };
 
 async function prepareCheckout(
@@ -71,6 +79,7 @@ async function prepareCheckout(
   target: CheckoutTarget,
   idempotencyKey: string,
   deps: CheckoutDependencies,
+  discount: ChosenDiscount = { appliedDiscount: null, couponId: null },
 ): Promise<PreparedCheckout> {
   const hash = requestHash(target);
   return deps.database.transaction(async (transaction) => {
@@ -130,6 +139,14 @@ async function prepareCheckout(
     )).limit(1).for("update");
     const reusable = existingByKey?.status === "CREATING" ? existingByKey : active[0];
     if (reusable && !sameTarget(reusable, target)) {
+      // A buyer who left an open plan Checkout and came back for another plan or
+      // coupon gets a new one; the old session is expired first (NEX-51).
+      // Only a new request (a key never seen) may do it: a retry from an old tab,
+      // whose key belongs to an intent that was itself superseded, must not
+      // expire the newer session (no ping-pong between tabs).
+      if (!existingByKey && reusable.status === "OPEN" && reusable.stripeSessionId && reusable.addon === null && target.addon === null) {
+        return { intentId: reusable.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: reusable.providerAttempt, supersede: { intentId: reusable.id, sessionId: reusable.stripeSessionId } };
+      }
       throw new AppError("checkout_in_progress", "Já existe uma contratação em andamento.", 409);
     }
     if (reusable?.status === "OPEN" && reusable.expiresAt && reusable.expiresAt > now && reusable.checkoutUrl) {
@@ -139,6 +156,7 @@ async function prepareCheckout(
     if (existingByKey) {
       await transaction.update(billingCheckoutIntents).set({
         planId: target.planId, addon: target.addon, requestHash: hash, stripeSessionId: null, checkoutUrl: null,
+        promotionCode: target.promotionCode, appliedDiscount: discount.appliedDiscount, couponId: discount.couponId,
         status: "CREATING", expiresAt: null, providerAttempt: existingByKey.providerAttempt + 1, updatedAt: now,
       }).where(eq(billingCheckoutIntents.id, existingByKey.id));
       return { intentId: existingByKey.id, customerId: subscription.stripeCustomerId, organizationName: actor.organizationName, portalInstead: false, providerAttempt: existingByKey.providerAttempt + 1 };
@@ -152,6 +170,9 @@ async function prepareCheckout(
       addon: target.addon,
       idempotencyKey,
       requestHash: hash,
+      promotionCode: target.promotionCode,
+      appliedDiscount: discount.appliedDiscount,
+      couponId: discount.couponId,
       createdAt: now,
       updatedAt: now,
     });
@@ -159,9 +180,11 @@ async function prepareCheckout(
   });
 }
 
-async function ensureCustomer(actor: Pick<Actor, "organizationId" | "organizationName">, prepared: PreparedCheckout, deps: CheckoutDependencies): Promise<string> {
+async function ensureCustomer(actor: Pick<Actor, "organizationId" | "organizationName" | "userId">, prepared: PreparedCheckout, deps: CheckoutDependencies): Promise<string> {
   if (prepared.customerId) return prepared.customerId;
-  const created = await deps.provider.createCustomer({ organizationId: actor.organizationId, organizationName: actor.organizationName }, `uno-customer-${actor.organizationId}`);
+  // The buyer's phone (NEX-51) goes to the Stripe Customer when we have it.
+  const buyer = await deps.database.select({ phone: user.phone }).from(user).where(eq(user.id, actor.userId)).limit(1);
+  const created = await deps.provider.createCustomer({ organizationId: actor.organizationId, organizationName: actor.organizationName, phone: buyer[0]?.phone ?? null }, `uno-customer-${actor.organizationId}`);
   return deps.database.transaction(async (transaction) => {
     await lockOrganizationBilling(actor.organizationId, transaction);
     const rows = await transaction.select().from(subscriptions).where(eq(subscriptions.organizationId, actor.organizationId)).limit(1).for("update");
@@ -178,12 +201,32 @@ export async function createBillingCheckout(
   planId: PaidPlanId,
   idempotencyKey: string | null,
   dependencies: CheckoutDependencies = defaults(),
+  options: { promotionCode?: string | null } = {},
 ): Promise<{ url: string }> {
   assertManager(actor);
   if (!idempotencyKey || !IDEMPOTENCY_KEY.test(idempotencyKey)) throw new AppError("invalid_idempotency_key", "Idempotency-Key inválida.", 400);
   if (!billingProviderConfigured()) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
   try {
-    const prepared = await prepareCheckout(actor, { planId, addon: null }, idempotencyKey, dependencies);
+    // The server prices the checkout and picks the single Stripe discount
+    // (coupon or first-month promo, whichever makes the first payment lower).
+    const quote = await quoteCheckout(planId, options.promotionCode, actor.organizationId, dependencies);
+    if (!quote.preview.valid) throw new AppError("invalid_coupon", quote.preview.message, 400);
+    const target: CheckoutTarget = { planId, addon: null, promotionCode: quote.code };
+    const discount: ChosenDiscount = {
+      appliedDiscount: quote.promotionCodeId ? "COUPON" : quote.firstMonthCouponId ? "FIRST_MONTH" : "NONE",
+      couponId: quote.couponId,
+    };
+    let prepared = await prepareCheckout(actor, target, idempotencyKey, dependencies, discount);
+    if (prepared.supersede) {
+      const previous = prepared.supersede;
+      const outcome = await dependencies.provider.expireCheckout(previous.sessionId, `uno-checkout-expire-${previous.intentId}-${previous.sessionId}`);
+      // Already paid: the webhook will complete it; never open a second contract.
+      if (outcome === "complete") throw new AppError("checkout_in_progress", "Já existe uma contratação em andamento.", 409);
+      await dependencies.database.update(billingCheckoutIntents).set({ status: "EXPIRED", updatedAt: dependencies.now() })
+        .where(and(eq(billingCheckoutIntents.organizationId, actor.organizationId), eq(billingCheckoutIntents.id, previous.intentId), eq(billingCheckoutIntents.status, "OPEN")));
+      prepared = await prepareCheckout(actor, target, idempotencyKey, dependencies, discount);
+      if (prepared.supersede) throw new AppError("checkout_in_progress", "Já existe uma contratação em andamento.", 409);
+    }
     if (prepared.completedUrl) return { url: assertBillingUrl(prepared.completedUrl) };
     const customerId = await ensureCustomer(actor, prepared, dependencies);
     if (prepared.portalInstead) {
@@ -218,8 +261,10 @@ export async function createBillingCheckout(
     const urls = billingUrls();
     const checkout = await dependencies.provider.createCheckout({
       customerId, priceId, organizationId: actor.organizationId,
-      // First-month promo: a one-time coupon on the first invoice, if the plan has one.
-      couponId: stripeCouponId(planId),
+      // Exactly one discount: the coupon's Promotion Code when it won, else the
+      // first-month promo (a one-time coupon on the first invoice), if any.
+      couponId: quote.firstMonthCouponId,
+      promotionCodeId: quote.promotionCodeId,
       successUrl: urls.success, cancelUrl: urls.cancel,
       integrationIdentifier: checkoutIntegrationIdentifier(`${prepared.intentId}:${prepared.providerAttempt}`),
     }, `uno-checkout-${prepared.intentId}-${prepared.providerAttempt}`);
@@ -254,7 +299,7 @@ export async function createApiAddonCheckout(
   try {
     const priceId = apiAddonPriceId()!;
     if (PAID_PLAN_IDS.some((planId) => stripePriceId(planId) === priceId)) throw new AppError("service_unavailable", "Serviço temporariamente indisponível.", 503);
-    const prepared = await prepareCheckout(actor, { planId: null, addon: "API" }, idempotencyKey, dependencies);
+    const prepared = await prepareCheckout(actor, { planId: null, addon: "API", promotionCode: null }, idempotencyKey, dependencies);
     if (prepared.completedUrl) return { url: assertBillingUrl(prepared.completedUrl) };
     const customerId = await ensureCustomer(actor, prepared, dependencies);
     const closeIntent = () => dependencies.database.update(billingCheckoutIntents).set({ status: "FAILED", updatedAt: dependencies.now() })

@@ -55,6 +55,12 @@ before the web and API services run this version. No plan includes the API any
 more, so organizations that used it through Pro or Business need the add-on
 (or a manual grant in `subscriptions.api_addon_*`) to keep access.
 
+Migration `0018_rare_vance_astro` (NEX-51) adds `user.phone`, the `coupons`
+table and the coupon columns of `billing_checkout_intents` and
+`subscriptions`. Deploy the worker (which applies migrations) before the web
+app. Coupons are created from Admin → Cupons and need Stripe configured;
+`UNO_COUPON_RATE_LIMIT` (default 10 per user per minute) limits coupon lookups.
+
 Google sign-in is optional: set both `GOOGLE_CLIENT_ID` and
 `GOOGLE_CLIENT_SECRET` (web app service only; the worker does not need them)
 and the "Continuar com Google" button appears on `/login` and `/register`.

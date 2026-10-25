@@ -1,6 +1,6 @@
 import { and, eq, isNull } from "drizzle-orm";
 
-import { getDb, subscriptions } from "@/db";
+import { coupons, getDb, subscriptions } from "@/db";
 import type { BillingPlanChangeResult, PaidPlanId, RefundEligibility, RefundResult } from "@/lib/billing-model";
 import { AppError } from "@/lib/errors";
 import { getPlanCatalog } from "@/lib/plans";
@@ -142,12 +142,23 @@ export async function changeBillingPlan(
     }
     // An upgrade is charged now; a downgrade earns no credit for unused time.
     const upgrade = configured.priceBrlCents > getPlanCatalog()[context.planId].priceBrlCents;
+    // A coupon restricted to other plans must not follow the subscription to this one (NEX-51).
+    const coupon = row?.appliedCouponId
+      ? (await dependencies.database.select({ code: coupons.code, planIds: coupons.planIds }).from(coupons).where(eq(coupons.id, row.appliedCouponId)).limit(1))[0]
+      : undefined;
+    const removeDiscounts = Boolean(coupon && coupon.planIds.length > 0 && !coupon.planIds.includes(planId));
     await dependencies.provider.changeSubscriptionPrice(
-      { subscriptionId: context.plan.id, fromPriceId: context.planPriceId, toPriceId, upgrade },
+      { subscriptionId: context.plan.id, fromPriceId: context.planPriceId, toPriceId, upgrade, ...(removeDiscounts ? { removeDiscounts } : {}) },
       `uno-plan-${context.plan.id}-${planId}-${key}`,
     );
+    if (removeDiscounts) {
+      // The discount left the Stripe subscription; reconciliation keeps a vanished
+      // discount on the same subscription for audit, so clear it here.
+      await dependencies.database.update(subscriptions).set({ appliedCouponId: null, appliedCouponCode: null, appliedPromotionCodeId: null, updatedAt: dependencies.now() })
+        .where(eq(subscriptions.organizationId, actor.organizationId));
+    }
     await reconcile(context.customerId, dependencies);
-    return { checkout: false, planId };
+    return { checkout: false, planId, couponRemoved: removeDiscounts ? coupon!.code : null };
   } catch (error) {
     return safeProviderError(error);
   }

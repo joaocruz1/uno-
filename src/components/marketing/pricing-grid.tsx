@@ -1,5 +1,7 @@
 import { Check } from "lucide-react";
+import { PlanPurchaseButton } from "@/components/checkout/purchase-dialog";
 import { formatBrlCents, getApiAddon, getPlanCatalog, hasFirstMonthPromo, type PlanId } from "@/lib/plans";
+import { publicPlans } from "@/lib/public-plans";
 import { ButtonLink } from "../ui/button";
 import { Card } from "../ui/card";
 
@@ -7,6 +9,7 @@ const order: PlanId[] = ["FREE", "STARTER", "PRO", "BUSINESS"];
 
 export function PricingGrid({ compact = false }: { compact?: boolean }) {
   const addon = getApiAddon();
+  const purchasable = publicPlans().filter((plan) => plan.id !== "FREE");
   return (
     <div>
     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -32,7 +35,10 @@ export function PricingGrid({ compact = false }: { compact?: boolean }) {
               <li className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-uno-red" />Retenção por {plan.retentionDays} dias</li>
               {!compact && extras.map((item) => <li key={item} className="flex gap-2"><Check size={16} className="mt-0.5 shrink-0 text-uno-red" />{item}</li>)}
             </ul>
-            <ButtonLink href={`/register?plan=${id.toLowerCase()}`} variant={featured ? "primary" : "secondary"} className="mt-7 w-full">{id === "FREE" ? "Começar grátis" : `Escolher ${plan.name}`}</ButtonLink>
+            {id === "FREE"
+              ? <ButtonLink href="/register?plan=free" variant="secondary" className="mt-7 w-full">Começar grátis</ButtonLink>
+              // Opens sign-up and payment over the plans, without leaving the page (NEX-51).
+              : <PlanPurchaseButton planId={id} plans={purchasable} variant={featured ? "primary" : "secondary"} className="mt-7 w-full">{`Escolher ${plan.name}`}</PlanPurchaseButton>}
           </Card>
         );
       })}

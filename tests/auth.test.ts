@@ -153,17 +153,18 @@ describe("authentication foundation", () => {
     const response = await auth.handler(new Request("http://uno.test/api/auth/sign-up/email", {
       method: "POST",
       headers: { "content-type": "application/json", origin: "http://uno.test" },
-      body: JSON.stringify({ name: "Pessoa Teste", email: "OWNER@EXAMPLE.TEST", password: "correct-horse-battery", platformRole: "USER" }),
+      body: JSON.stringify({ name: "Pessoa Teste", email: "OWNER@EXAMPLE.TEST", password: "correct-horse-battery", phone: "(11) 98765-4321", platformRole: "USER" }),
     }));
     expect(response.status).toBe(200);
     // Auto sign-in: the sign-up response already carries the session.
     expect(response.headers.get("set-cookie")).toContain("better-auth.session_token");
     const signUpCookie = sessionCookie(response);
 
-    const users = await pglite.query<{ id: string; email: string; platform_role: string; email_verified: boolean }>("select id, email, platform_role, email_verified from \"user\"");
+    const users = await pglite.query<{ id: string; email: string; platform_role: string; email_verified: boolean; phone: string | null }>("select id, email, platform_role, email_verified, phone from \"user\"");
     const created = users.rows[0];
     expect(created?.id).toMatch(/^[0-9a-f-]{36}$/);
-    expect(created).toMatchObject({ email: "owner@example.test", platform_role: "ADMIN", email_verified: false });
+    // The phone is stored normalized to E.164 (NEX-51).
+    expect(created).toMatchObject({ email: "owner@example.test", platform_role: "ADMIN", email_verified: false, phone: "+5511987654321" });
     // Nothing is sent automatically any more.
     expect(sent.filter((message) => message.kind === "verification")).toHaveLength(0);
 
@@ -255,6 +256,44 @@ describe("authentication foundation", () => {
 
     if (previousAdmins === undefined) delete process.env.ADMIN_EMAILS;
     else process.env.ADMIN_EMAILS = previousAdmins;
+  });
+
+  it("requires a valid Brazilian phone at e-mail sign-up and normalizes later updates (NEX-51)", async () => {
+    const auth = testAuth();
+    authHolder.current = auth;
+    // Direct API calls skip Better Auth's per-IP sign-up limit (3 per 10 s), which the
+    // tests cannot isolate by address; the hook and validators run all the same.
+    const signUp = (body: Record<string, unknown>) => auth.api.signUpEmail({
+      body: { name: "Telefone Teste", password: "correct-horse-battery", ...body } as never,
+      headers: new Headers({ origin: "http://uno.test" }),
+      asResponse: true,
+    });
+    const missing = await signUp({ email: "phone-missing@example.test" });
+    expect(missing.status).toBe(400);
+    expect(await missing.json()).toMatchObject({ code: "PHONE_REQUIRED" });
+    for (const invalid of ["(10) 98765-4321", "(11) 88765-4321", "(11) 1234-5678", "123", "(11) 99999-9999"]) {
+      const response = await signUp({ email: "phone-invalid@example.test", phone: invalid });
+      expect(response.status).toBe(400);
+    }
+    const none = await pglite.query("select 1 from \"user\" where email in ('phone-missing@example.test', 'phone-invalid@example.test')");
+    expect(none.rows).toHaveLength(0);
+
+    const created = await signUp({ email: "phone-ok@example.test", phone: "+55 21 3456-7890" });
+    expect(created.status).toBe(200);
+    const duplicate = await signUp({ email: "phone-ok@example.test", phone: "(21) 3456-7890" });
+    expect(duplicate.status).toBe(422);
+    expect(friendlyAuthError(((await duplicate.json()) as { code: string }).code)).toBe("Já existe uma conta com este e-mail.");
+
+    const cookie = sessionCookie(created);
+    const update = (phone: unknown) => auth.handler(new Request("http://uno.test/api/auth/update-user", {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: "http://uno.test", cookie },
+      body: JSON.stringify({ phone }),
+    }));
+    expect((await update("abc")).status).toBe(400);
+    expect((await update("11 9 8765 4321")).status).toBe(200);
+    const stored = await pglite.query<{ phone: string }>("select phone from \"user\" where email = 'phone-ok@example.test'");
+    expect(stored.rows[0]?.phone).toBe("+5511987654321");
   });
 
   it("registers Google sign-in only when both credentials are configured", async () => {

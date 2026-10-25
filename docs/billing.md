@@ -34,6 +34,83 @@ plano é feita por ele. A contratação é POST /api/dashboard/billing/checkout 
 plano (abaixo) ou é feito sozinho no portal ("Gerenciar no portal"). Na reconciliação cada assinatura do Customer é
 classificada pelos seus Prices (plano, adicional ou ambos).
 
+## Compra pela tela de planos, telefone e cupons (NEX-51)
+
+**Decisão do dono: não há confirmação de e-mail de nenhum tipo no fluxo de
+compra** (nem link, nem código). "Validar" é só validação de formulário:
+formato, campos obrigatórios e e-mail já cadastrado. O cadastro já entra na
+conta na hora (NEX-42).
+
+- **Compra sem sair da tela de planos.** Em `/pricing` e na seção de planos da
+  landing, o botão de um plano pago abre um diálogo sobre os planos: "Criar
+  conta" ou "Já tenho conta", com o plano escolhido visível; depois, no mesmo
+  diálogo, o resumo (plano, cupom, valor de hoje e dos meses seguintes) e "Ir
+  para o pagamento", que chama POST /api/dashboard/billing/checkout e vai para a
+  Stripe. Com sessão, o diálogo abre direto no resumo. `/register`, `/login` e
+  `/checkout` continuam funcionando por link direto, e `/checkout` também tem o
+  campo de cupom.
+- **Telefone obrigatório.** O cadastro por e-mail exige telefone brasileiro
+  (DDD válido + celular de 9 dígitos começando com 9 ou fixo de 8 dígitos
+  começando com 2 a 5), com máscara, gravado em E.164 em `user.phone`. Contas
+  antigas e cadastros pelo Google veem um aviso no painel, uma vez por sessão do
+  navegador, sem bloquear o uso; o telefone também fica em Configurações →
+  Perfil. A área admin mostra o telefone do proprietário em Clientes. O
+  telefone de quem compra vai para o Customer da Stripe quando ele é criado.
+- **Cupons.** São criados e desativados na área admin (Admin → Cupons). Cada
+  cupom vira, pela API, um Coupon e uma Promotion Code com o mesmo código na
+  Stripe: percentual ou valor fixo em R$; duração "só o 1º mês" (`once`),
+  "por N meses" (`repeating`) ou "recorrente" (`forever`); planos aplicáveis
+  (nenhum marcado = todos); limite de usos e validade opcionais. A UNO grava o
+  cupom em `coupons` e registra a criação e a troca de estado em `audit_logs`.
+  Os planos aplicáveis são conferidos pela UNO (prévia e checkout); validade e
+  limite de usos também ficam na Promotion Code, então a Stripe os aplica.
+- **Melhor desconto.** O Checkout da Stripe aceita um único desconto. O
+  servidor calcula o primeiro pagamento com o cupom e com a promoção do 1º mês
+  (cupom `STRIPE_COUPON_<PLANO>`) e aplica o que deixar o primeiro pagamento
+  menor. A tela informa "Cupom X aplicado" ou "Promoção do 1º mês mantida, que
+  já é melhor que o cupom X". Em empate, fica a promoção, a não ser que o
+  cupom também desconte os meses seguintes. O preço nunca vem do navegador: a
+  prévia (POST /api/dashboard/billing/coupon/preview) é informativa e o
+  checkout recalcula tudo.
+- **Registro.** A intenção de checkout grava o código digitado, o desconto
+  aplicado (`COUPON`, `FIRST_MONTH`, `NONE`) e o cupom. A reconciliação grava em
+  `subscriptions` o cupom visto na assinatura do plano e o mantém depois que um
+  desconto de uso único acaba. O Financeiro mostra os cupons usados, os
+  pagamentos dos últimos 30 dias por tipo de desconto e o cupom de cada
+  assinatura paga.
+- **Voltar com outro cupom.** Se já existe um Checkout aberto para outro plano
+  ou outro cupom, a sessão antiga é expirada na Stripe e uma nova é criada; se
+  ela já foi paga, a resposta é 409 `checkout_in_progress` e o webhook conclui.
+  Só um pedido com chave de idempotência nova substitui a sessão: a repetição
+  de uma aba antiga, cuja intenção já foi substituída, recebe 409 e não expira
+  a sessão mais nova.
+- A prévia e o checkout com código têm limite por usuário
+  (`UNO_COUPON_RATE_LIMIT`, padrão 10 por minuto) e por endereço
+  (`UNO_COUPON_IP_RATE_LIMIT`, padrão 30 por minuto) contra enumeração de
+  códigos. Toda recusa responde a mesma mensagem ("Cupom inválido ou
+  indisponível para este plano."); o motivo (inexistente, inativo, expirado,
+  esgotado, plano errado) vai só para o log (`billing.coupon.rejected`). A
+  exceção é "Este cupom já foi usado nesta conta.", que só aparece para a
+  própria organização.
+- **Um uso por organização.** A Promotion Code é criada com
+  `first_time_transaction` (o Customer da Stripe é a organização) e a UNO
+  recusa o cupom se a organização já concluiu um pagamento com ele ou ainda o
+  carrega na assinatura.
+- **Cupom restrito a planos.** Além da conferência da UNO, o Coupon da Stripe é
+  criado com `applies_to.products` dos planos escolhidos, então não desconta
+  outro plano depois de uma troca ou pelo portal. Na troca de plano pela UNO,
+  se o cupom da assinatura não vale para o plano de destino, o desconto é
+  removido da assinatura, a confirmação avisa antes e a resposta informa
+  (`couponRemoved`).
+- **Criação sem órfãos.** Se a gravação local do cupom falhar depois de criado
+  na Stripe, a Promotion Code é desativada.
+- Migração `0018_rare_vance_astro`: `user.phone`, tabela `coupons` e colunas de
+  cupom em `billing_checkout_intents` e `subscriptions`. **Implante o worker
+  antes da aplicação** (é ele que aplica as migrações).
+- Não verificado com a Stripe real: criação de cupom pela API, Checkout com
+  Promotion Code e leitura de `subscription.discounts`. Os testes usam um
+  provedor simulado.
+
 ## Gestão da assinatura na área do cliente
 
 Em Configurações → Assinatura e na página Assinatura, OWNER/ADMIN gerenciam a

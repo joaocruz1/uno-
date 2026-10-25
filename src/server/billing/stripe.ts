@@ -11,6 +11,8 @@ export type StripePriceSnapshot = {
   unitAmount: number | null;
   recurringInterval: string | null;
   recurringIntervalCount: number | null;
+  /** The Product the price belongs to (used to restrict coupons to plans). */
+  productId?: string | null;
 };
 
 export type StripeSubscriptionSnapshot = {
@@ -21,6 +23,43 @@ export type StripeSubscriptionSnapshot = {
   priceIds: string[];
   currentPeriodStart: Date | null;
   currentPeriodEnd: Date | null;
+  /** Promotion Codes behind the subscription's discounts (NEX-51). Absent means none were read. */
+  promotionCodeIds?: string[];
+};
+
+/** Live state of a Promotion Code and its Coupon, as Stripe enforces them. */
+export type PromotionCodeSnapshot = {
+  id: string;
+  code: string;
+  active: boolean;
+  expiresAt: Date | null;
+  maxRedemptions: number | null;
+  timesRedeemed: number;
+  firstTimeTransaction: boolean;
+  coupon: {
+    id: string;
+    valid: boolean;
+    percentOff: number | null;
+    amountOff: number | null;
+    currency: string | null;
+    duration: "once" | "forever" | "repeating";
+    durationInMonths: number | null;
+  } | null;
+};
+
+export type CouponCreateInput = {
+  code: string;
+  /** Exactly one of percentOff (1–100) or amountOffBrlCents. */
+  percentOff: number | null;
+  amountOffBrlCents: number | null;
+  duration: "once" | "forever" | "repeating";
+  durationInMonths: number | null;
+  maxRedemptions: number | null;
+  expiresAt: Date | null;
+  /** Our coupons.id, stored as metadata on both Stripe objects. */
+  unoCouponId: string;
+  /** Stripe Products the coupon applies to (the restricted plans); empty = any. */
+  productIds: string[];
 };
 
 export type CheckoutSnapshot = { id: string; url: string; expiresAt: Date };
@@ -37,7 +76,8 @@ export type PaidInvoiceSnapshot = {
 };
 
 export interface BillingProvider {
-  createCustomer(input: { organizationId: string; organizationName: string }, idempotencyKey: string): Promise<{ id: string }>;
+  /** `phone` is the buyer's E.164 phone (NEX-51), sent to the Customer when known. */
+  createCustomer(input: { organizationId: string; organizationName: string; phone?: string | null }, idempotencyKey: string): Promise<{ id: string }>;
   retrievePrice(priceId: string): Promise<StripePriceSnapshot>;
   createCheckout(input: {
     customerId: string;
@@ -47,14 +87,26 @@ export interface BillingProvider {
     addon?: "API";
     /** One-time coupon for the first invoice (the first-month promo); recurring invoices stay full price. */
     couponId?: string | null;
+    /** A Promotion Code chosen by the server instead of the first-month coupon. Never both. */
+    promotionCodeId?: string | null;
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
   }, idempotencyKey: string): Promise<CheckoutSnapshot>;
+  /** Expires an open Checkout Session. "complete" when it was already paid and cannot be expired. */
+  expireCheckout(sessionId: string, idempotencyKey: string): Promise<"expired" | "complete">;
+  /** The Promotion Code and its Coupon, or null when it does not exist. */
+  retrievePromotionCode(promotionCodeId: string): Promise<PromotionCodeSnapshot | null>;
+  /** Creates a Coupon and its customer-facing Promotion Code. */
+  createCouponWithCode(input: CouponCreateInput, idempotencyKey: string): Promise<{ couponId: string; promotionCodeId: string }>;
+  setPromotionCodeActive(promotionCodeId: string, active: boolean, idempotencyKey: string): Promise<void>;
   createPortal(customerId: string, returnUrl: string, idempotencyKey: string): Promise<{ url: string }>;
   listSubscriptions(customerId: string): Promise<StripeSubscriptionSnapshot[]>;
-  /** Swaps the single item priced `fromPriceId` to `toPriceId`, prorating, and clears any scheduled cancellation. */
-  changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean }, idempotencyKey: string): Promise<void>;
+  /**
+   * Swaps the single item priced `fromPriceId` to `toPriceId`, prorating, and clears any scheduled cancellation.
+   * `removeDiscounts` drops the subscription's discounts (a coupon not valid for the new plan).
+   */
+  changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean; removeDiscounts?: boolean }, idempotencyKey: string): Promise<void>;
   /** Schedules (true) or withdraws (false) the cancellation at the end of the current period. */
   setCancelAtPeriodEnd(subscriptionId: string, cancel: boolean, idempotencyKey: string): Promise<void>;
   /** Ends the subscription right now, without proration credit. Canceling an already canceled one is a no-op. */
@@ -84,9 +136,10 @@ function id(value: string | { id: string } | null): string | null {
 }
 
 class StripeGateway implements BillingProvider {
-  async createCustomer(input: { organizationId: string; organizationName: string }, idempotencyKey: string) {
+  async createCustomer(input: { organizationId: string; organizationName: string; phone?: string | null }, idempotencyKey: string) {
     const customer = await stripe().customers.create({
       name: input.organizationName,
+      ...(input.phone ? { phone: input.phone } : {}),
       metadata: { organizationId: input.organizationId },
     }, { idempotencyKey });
     return { id: customer.id };
@@ -101,6 +154,7 @@ class StripeGateway implements BillingProvider {
       unitAmount: price.unit_amount,
       recurringInterval: price.recurring?.interval ?? null,
       recurringIntervalCount: price.recurring?.interval_count ?? null,
+      productId: typeof price.product === "string" ? price.product : price.product?.id ?? null,
     };
   }
 
@@ -110,10 +164,12 @@ class StripeGateway implements BillingProvider {
     organizationId: string;
     addon?: "API";
     couponId?: string | null;
+    promotionCodeId?: string | null;
     successUrl: string;
     cancelUrl: string;
     integrationIdentifier: string;
   }, idempotencyKey: string): Promise<CheckoutSnapshot> {
+    if (input.couponId && input.promotionCodeId) throw new Error("stripe_checkout_single_discount");
     const metadata = { organizationId: input.organizationId, ...(input.addon ? { uno_addon: input.addon } : {}) };
     const session = await stripe().checkout.sessions.create({
       mode: "subscription",
@@ -123,7 +179,8 @@ class StripeGateway implements BillingProvider {
       metadata,
       subscription_data: { metadata },
       // A one-time coupon only touches the first invoice; renewals stay at the recurring price.
-      ...(input.couponId ? { discounts: [{ coupon: input.couponId }] } : {}),
+      // Stripe Checkout accepts a single discount: the server already chose the better one.
+      ...(input.promotionCodeId ? { discounts: [{ promotion_code: input.promotionCodeId }] } : input.couponId ? { discounts: [{ coupon: input.couponId }] } : {}),
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       integration_identifier: input.integrationIdentifier,
@@ -132,13 +189,78 @@ class StripeGateway implements BillingProvider {
     return { id: session.id, url: session.url, expiresAt: new Date(session.expires_at * 1_000) };
   }
 
+  async expireCheckout(sessionId: string, idempotencyKey: string): Promise<"expired" | "complete"> {
+    const session = await stripe().checkout.sessions.retrieve(sessionId);
+    if (session.status === "complete") return "complete";
+    if (session.status === "expired") return "expired";
+    const expired = await stripe().checkout.sessions.expire(sessionId, {}, { idempotencyKey });
+    return expired.status === "complete" ? "complete" : "expired";
+  }
+
+  async retrievePromotionCode(promotionCodeId: string): Promise<PromotionCodeSnapshot | null> {
+    let promotion: Stripe.PromotionCode;
+    try {
+      promotion = await stripe().promotionCodes.retrieve(promotionCodeId, { expand: ["promotion.coupon"] });
+    } catch (error) {
+      if (error instanceof Stripe.errors.StripeInvalidRequestError && error.statusCode === 404) return null;
+      throw error;
+    }
+    const coupon = promotion.promotion.coupon && typeof promotion.promotion.coupon === "object" ? promotion.promotion.coupon : null;
+    return {
+      id: promotion.id,
+      code: promotion.code,
+      active: promotion.active,
+      expiresAt: promotion.expires_at ? new Date(promotion.expires_at * 1_000) : null,
+      maxRedemptions: promotion.max_redemptions,
+      timesRedeemed: promotion.times_redeemed,
+      firstTimeTransaction: promotion.restrictions.first_time_transaction,
+      coupon: coupon ? {
+        id: coupon.id,
+        valid: coupon.valid,
+        percentOff: coupon.percent_off,
+        amountOff: coupon.amount_off,
+        currency: coupon.currency,
+        // Any duration Stripe may add later is treated as a one-time discount.
+        duration: coupon.duration === "forever" ? "forever" : coupon.duration === "repeating" ? "repeating" : "once",
+        durationInMonths: coupon.duration_in_months,
+      } : null,
+    };
+  }
+
+  async createCouponWithCode(input: CouponCreateInput, idempotencyKey: string): Promise<{ couponId: string; promotionCodeId: string }> {
+    const metadata = { uno_coupon_id: input.unoCouponId };
+    const coupon = await stripe().coupons.create({
+      name: input.code,
+      ...(input.percentOff !== null ? { percent_off: input.percentOff } : { amount_off: input.amountOffBrlCents!, currency: "brl" }),
+      duration: input.duration,
+      ...(input.duration === "repeating" ? { duration_in_months: input.durationInMonths! } : {}),
+      // A plan-restricted coupon only discounts those plans' products, even after a plan swap or in the portal.
+      ...(input.productIds.length ? { applies_to: { products: input.productIds } } : {}),
+      metadata,
+    }, { idempotencyKey: `${idempotencyKey}-coupon` });
+    const promotion = await stripe().promotionCodes.create({
+      promotion: { type: "coupon", coupon: coupon.id },
+      code: input.code,
+      ...(input.maxRedemptions !== null ? { max_redemptions: input.maxRedemptions } : {}),
+      ...(input.expiresAt ? { expires_at: Math.floor(input.expiresAt.getTime() / 1_000) } : {}),
+      // Stripe's customer is the organization: one use per organization, enforced by Stripe too.
+      restrictions: { first_time_transaction: true },
+      metadata,
+    }, { idempotencyKey: `${idempotencyKey}-promotion` });
+    return { couponId: coupon.id, promotionCodeId: promotion.id };
+  }
+
+  async setPromotionCodeActive(promotionCodeId: string, active: boolean, idempotencyKey: string): Promise<void> {
+    await stripe().promotionCodes.update(promotionCodeId, { active }, { idempotencyKey });
+  }
+
   async createPortal(customerId: string, returnUrl: string, idempotencyKey: string) {
     const session = await stripe().billingPortal.sessions.create({ customer: customerId, return_url: returnUrl }, { idempotencyKey });
     return { url: session.url };
   }
 
   async listSubscriptions(customerId: string): Promise<StripeSubscriptionSnapshot[]> {
-    const response = await stripe().subscriptions.list({ customer: customerId, status: "all", limit: 100 }).autoPagingToArray({ limit: 100 });
+    const response = await stripe().subscriptions.list({ customer: customerId, status: "all", limit: 100, expand: ["data.discounts"] }).autoPagingToArray({ limit: 100 });
     return response.map((subscription) => {
       const starts = subscription.items.data.map((item) => item.current_period_start).filter(Number.isFinite);
       const ends = subscription.items.data.map((item) => item.current_period_end).filter(Number.isFinite);
@@ -150,11 +272,15 @@ class StripeGateway implements BillingProvider {
         priceIds: subscription.items.data.map((item) => item.price.id),
         currentPeriodStart: starts.length ? new Date(Math.min(...starts) * 1_000) : null,
         currentPeriodEnd: ends.length ? new Date(Math.max(...ends) * 1_000) : null,
+        promotionCodeIds: subscription.discounts.flatMap((discount) => {
+          const promotionCode = typeof discount === "object" ? id(discount.promotion_code) : null;
+          return promotionCode ? [promotionCode] : [];
+        }),
       };
     });
   }
 
-  async changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean }, idempotencyKey: string): Promise<void> {
+  async changeSubscriptionPrice(input: { subscriptionId: string; fromPriceId: string; toPriceId: string; upgrade: boolean; removeDiscounts?: boolean }, idempotencyKey: string): Promise<void> {
     const subscription = await stripe().subscriptions.retrieve(input.subscriptionId);
     const items = subscription.items.data.filter((item) => item.price.id === input.fromPriceId);
     if (items.length !== 1) throw new Error("stripe_subscription_item_mismatch");
@@ -167,6 +293,7 @@ class StripeGateway implements BillingProvider {
         : { proration_behavior: "none" as const }),
       cancel_at_period_end: false,
       ...(subscription.cancel_at ? { cancel_at: "" } : {}),
+      ...(input.removeDiscounts ? { discounts: "" as const } : {}),
     }, { idempotencyKey });
   }
 

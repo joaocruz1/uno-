@@ -87,7 +87,7 @@ export function BillingPanel({ canManage }: { canManage: boolean }) {
       operationKeys.current.delete(operation);
       setPlanDialog(undefined);
       if (result.checkout) checkout = true;
-      else { setNotice(`Plano alterado para ${billing?.plans.find(plan => plan.id === planId)?.name ?? planId}. Upgrade cobrado agora no cartão.`); setRefresh(value => value + 1); }
+      else { setNotice(`Plano alterado para ${billing?.plans.find(plan => plan.id === planId)?.name ?? planId}. Upgrade cobrado agora no cartão.${result.couponRemoved ? ` O cupom ${result.couponRemoved} não vale para este plano e foi removido.` : ""}`); setRefresh(value => value + 1); }
     } catch (cause) { setPlanDialog(undefined); setError(cause instanceof Error && !(cause instanceof z.ZodError) ? cause.message : "Não foi possível trocar de plano."); }
     finally { locked.current = false; setBusy(undefined); }
     if (checkout) await openBilling(planId);
@@ -111,6 +111,7 @@ export function BillingPanel({ canManage }: { canManage: boolean }) {
         <li>A cota passa a ser de {targetPlan?.monthlyLimit.toLocaleString("pt-BR")} etiquetas por mês; o que já foi usado no período continua contando.</li>
         <li>{targetPlan && currentPlanPrice !== undefined && targetPlan.priceBrlCents > currentPlanPrice ? "A diferença proporcional aos dias restantes do período é cobrada agora no cartão." : "A troca vale agora, sem crédito pelos dias restantes do período."} Depois, {targetPlan ? formatBrlCents(targetPlan.priceBrlCents) : ""}/mês a partir da renovação.</li>
         {billing?.cancelAtPeriodEnd ? <li>O cancelamento agendado é desfeito.</li> : null}
+        {billing?.appliedCoupon && billing.appliedCoupon.planIds.length > 0 && planDialog && !billing.appliedCoupon.planIds.includes(planDialog) ? <li>O cupom {billing.appliedCoupon.code} não vale para o plano {targetPlan?.name} e será removido da assinatura.</li> : null}
       </ul>
       <div className="mt-6 flex flex-wrap justify-end gap-3">
         <Button variant="ghost" onClick={() => setPlanDialog(undefined)}>Voltar</Button>

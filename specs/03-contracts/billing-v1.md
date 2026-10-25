@@ -54,6 +54,62 @@ valor do catálogo). Usa o mesmo Customer, a mesma intenção/idempotência e
 metadata organizationId + uno_addon=API na assinatura. Cancelamento do adicional
 acompanha o do plano (alsoAddon) ou é feito sozinho no portal. STRIPE_PRICE_API_ADDON é opcional: sem ele a cobrança dos
 planos funciona e o adicional apenas não é oferecido.
+Cupons (NEX-51). POST dashboard billing/coupon/preview {planId, code} exige
+sessão e mesma origem, limite por usuário (UNO_COUPON_RATE_LIMIT, padrão 10/min)
+e por endereço (UNO_COUPON_IP_RATE_LIMIT, padrão 30/min, primeiro hop do
+X-Forwarded-For, com hash), 429 rate_limit_exceeded, contra enumeração. Toda
+recusa usa a mesma mensagem "Cupom inválido ou indisponível para este plano."
+(motivo só no log billing.coupon.rejected), exceto uso anterior pela própria
+organização ("Este cupom já foi usado nesta conta.": checkout COMPLETED com o
+cupom ou subscriptions.applied_coupon_id igual). A Promotion Code é criada com
+restrictions.first_time_transaction; o Coupon de cupom restrito a planos leva
+applies_to.products dos Products dos Prices desses planos. Na troca de plano
+(billing/plan), cupom restrito que não inclui o destino é removido da
+assinatura (discounts vazios) e a resposta traz couponRemoved; GET billing traz
+appliedCoupon {code, planIds} | null para a confirmação avisar. Se a gravação
+local falhar após a criação na Stripe, a Promotion Code é desativada. Só um
+pedido com Idempotency-Key ainda não usada substitui uma sessão aberta; a chave
+de uma intenção já substituída recebe 409 checkout_in_progress. Responde {valid, message, code,
+appliedDiscount: coupon|first_month|none, firstPaymentBrlCents,
+recurringBrlCents (2º mês), regularBrlCents, discountedMonths (null = todos,
+0 = nenhum), label}. Código normalizado em maiúsculas, ^[A-Z0-9_-]{3,40}$.
+Inválido/inexistente/inativo, expirado, esgotado (times_redeemed >=
+max_redemptions na Stripe) ou fora dos planos do cupom → valid=false com
+a mensagem única acima e o preço sem cupom. Código desconhecido é respondido sem chamar
+a Stripe; sem cobrança configurada um código conhecido é recusado. O estado
+vivo (ativo, validade, usos, valor, duração) vem da Promotion Code/Coupon na
+Stripe; a aplicabilidade por plano vem do registro local (coupons.plan_ids,
+vazio = todos). Melhor desconto (decisão do dono): a Stripe aceita um único
+desconto no Checkout, então o servidor calcula o 1º pagamento com o cupom e com
+a promoção do 1º mês (só quando STRIPE_COUPON_<PLANO> existe) e aplica o MENOR;
+empate fica com a promoção, salvo se o cupom também descontar meses seguintes.
+Cupom percentual arredonda o desconto ao centavo; valor fixo nunca deixa o
+preço negativo. POST billing/checkout aceita {planId, promotionCode?} (mesmo
+limite por usuário quando há código), recalcula tudo no servidor (nunca
+confia em preço do cliente), recusa código inválido com 400 invalid_coupon e a
+mensagem, e cria a sessão com exatamente um desconto: discounts
+[{promotion_code}] quando o cupom vence ou [{coupon: STRIPE_COUPON_<PLANO>}]
+caso contrário. O hash da intenção inclui o código (sem código o hash é o de
+antes); a intenção grava promotion_code, applied_discount
+(COUPON|FIRST_MONTH|NONE) e coupon_id. Uma intenção de plano OPEN para outro
+plano ou outro cupom é substituída: a sessão antiga é expirada na Stripe
+(checkout.sessions.expire) e a intenção vira EXPIRED; se a sessão já foi paga
+→ 409 checkout_in_progress. A reconciliação lê subscription.discounts
+(expand) e grava em subscriptions applied_promotion_code_id,
+applied_coupon_id e applied_coupon_code; um desconto de uso único some da
+Stripe após a 1ª fatura, então o valor visto é mantido até a assinatura do
+plano mudar. Admin da plataforma (assertPlatformAdmin, mesma origem, limite
+admin): GET/POST /api/admin/coupons e PATCH /api/admin/coupons/:id {active}.
+Criar gera Coupon (percent_off ou amount_off em BRL; duration once, forever ou
+repeating com duration_in_months 1–36) e Promotion Code com o mesmo código,
+max_redemptions e expires_at opcionais, metadata uno_coupon_id; depois grava
+coupons e audit_logs (coupon.created, actor platform_admin). Código repetido →
+409 coupon_exists; validade passada → 400. Ativar/desativar altera a Promotion
+Code e grava coupon.activated/coupon.deactivated; repetir o mesmo estado não
+chama a Stripe. Uso exibido: pagamentos de plano COMPLETED com o cupom e
+assinaturas que o carregam agora.
+O Customer é criado com o telefone E.164 de quem compra, quando existe.
+
 POST billing/portal exige OWNER/ADMIN/mesma origem, usa exclusivamente Customer
 da organização, returnURL fixo.
 GET billing inclui estado/plano/período/cancelamento e disponibilidade real,
@@ -123,7 +179,11 @@ Operações aceitas antes de downgrade continuam com reservas/retenção fixadas
 perda de plano só impede novas operações. Resolver direitos igualmente em
 uploads, criação, reprocessamento, lotes, API e webhooks.
 
-Tests: assinatura válida/inválida, ID duplicado/hash divergente, eventos fora de
+Tests: cupom (válido, inválido, inativo, expirado local e na Stripe, plano
+errado, esgotado, melhor entre cupom e promoção, empate, sem promoção
+configurada), checkout com o desconto certo e substituição de sessão aberta,
+admin de cupons restrito ao admin da plataforma com auditoria, reconciliação
+gravando o cupom, assinatura válida/inválida, ID duplicado/hash divergente, eventos fora de
 ordem, relação Customer/organização, Price desconhecido, estados/períodos,
 cancelamento, upgrade/downgrade, cota concorrente, troca de plano no app,
 cancelamento/retomada com e sem adicional, reembolso de 7 dias (janela, único

@@ -62,6 +62,10 @@ class FakeProvider implements BillingProvider {
   async cancelSubscriptionNow() { throw new Error("unused"); }
   async listPaidInvoices() { return []; }
   async refundedAmount() { return 0; }
+  async expireCheckout(): Promise<"expired" | "complete"> { return "expired"; }
+  async retrievePromotionCode() { return null; }
+  async createCouponWithCode(): Promise<{ couponId: string; promotionCodeId: string }> { throw new Error("unused"); }
+  async setPromotionCodeActive() { throw new Error("unused"); }
   async createRefund(): Promise<{ id: string }> { throw new Error("unused"); }
   constructEvent() { return this.event; }
 }

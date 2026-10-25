@@ -14,6 +14,9 @@ test("registration signs in straight to checkout, session, logout and password r
   await page.goto("/register?plan=pro");
   await page.getByLabel("Nome", { exact: true }).fill("Operador Teste");
   await page.getByLabel("E-mail", { exact: true }).fill(email);
+  // Mandatory phone with a live mask (NEX-51).
+  await page.getByLabel("Telefone (com DDD)", { exact: true }).fill("11987654321");
+  await expect(page.getByLabel("Telefone (com DDD)", { exact: true })).toHaveValue("(11) 98765-4321");
   await page.getByLabel("Senha", { exact: true }).fill(password);
   await page.getByLabel("Confirmar senha", { exact: true }).fill(password);
   await page.getByRole("button", { name: "Criar conta" }).click();
