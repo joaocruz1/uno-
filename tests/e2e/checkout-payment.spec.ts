@@ -1,10 +1,12 @@
-import { expect, test, type Frame, type FrameLocator, type Page } from "@playwright/test";
+import { expect, test, type Frame, type FrameLocator, type Locator, type Page } from "@playwright/test";
 import { isolateClientIp } from "./helpers/client-ip";
 
 test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 /*
- * NEX-52: own checkout with Stripe's Payment Element. The Stripe tests need
+ * NEX-52: own checkout with Stripe's Payment Element, typed in the plans
+ * dialog (step "3 Pagamento", never leaving /pricing) or on /checkout for
+ * direct links and the "+ API" add-on. The Stripe tests need
  * UNO_LOCAL_STRIPE_E2E=1: Stripe in TEST mode (sk_test + pk_test + test price
  * ids in the app's env) and `stripe listen --forward-to
  * localhost:3100/api/stripe/webhook`, because the plan is only activated by the
@@ -66,6 +68,20 @@ async function completeThreeDSecure(page: Page): Promise<void> {
   }, { timeout: 45_000, intervals: [500, 1_000] }).toBe(true);
 }
 
+/** From /pricing, with a session: the plan's dialog, step 2, then the card step in the same dialog. */
+async function openPaymentInDialog(page: Page, planName: string): Promise<Locator> {
+  await page.goto("/pricing");
+  await page.getByRole("link", { name: `Escolher ${planName}`, exact: true }).click();
+  const summary = page.getByRole("dialog", { name: "Confirme sua assinatura" });
+  await expect(summary.getByRole("radio", { name: new RegExp(planName) })).toBeChecked();
+  await summary.getByRole("button", { name: /Ir para o pagamento/ }).click();
+  const dialog = page.getByRole("dialog", { name: "Pagamento" });
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(dialog.getByTestId("pay-button")).toContainText(new RegExp(`Assinar ${planName} · R\\$`), { timeout: 30_000 });
+  return dialog;
+}
+
 async function expectActivated(page: Page, title: RegExp): Promise<void> {
   // Success only appears after our server reports the plan active (webhook).
   await expect(page.getByRole("heading", { name: title })).toBeVisible({ timeout: 120_000 });
@@ -102,21 +118,21 @@ test.describe("checkout with Stripe test mode", () => {
   test.skip(!stripeE2E, "Requires Stripe TEST keys and `stripe listen` (UNO_LOCAL_STRIPE_E2E=1)");
   test.describe.configure({ mode: "serial" });
 
-  test("a declined card shows Stripe's message inline and a retry with another card succeeds", async ({ page }) => {
+  test("in the plans dialog, a declined card shows Stripe's message inline and a retry with another card succeeds", async ({ page }) => {
     test.setTimeout(240_000);
     await signUp(page, "decline");
-    await page.goto("/checkout?plan=starter");
-    await expect(page.getByTestId("pay-button")).toContainText(/Assinar Starter · R\$/);
+    const dialog = await openPaymentInDialog(page, "Starter");
     await fillCard(page, "4000000000000002");
-    await page.getByTestId("pay-button").click();
-    await expect(page.getByRole("alert").filter({ hasText: /recusad|declined/i })).toBeVisible({ timeout: 60_000 });
-    await expect(page.getByTestId("pay-button")).toBeEnabled();
+    await dialog.getByTestId("pay-button").click();
+    await expect(dialog.getByRole("alert").filter({ hasText: /recusad|declined/i })).toBeVisible({ timeout: 60_000 });
+    await expect(dialog.getByTestId("pay-button")).toBeEnabled();
+    await expect(page).toHaveURL(/\/pricing$/);
     await fillCard(page, "4242424242424242");
-    await page.getByTestId("pay-button").click();
+    await dialog.getByTestId("pay-button").click();
     await expectActivated(page, /Plano Starter/);
   });
 
-  test("an invalid coupon on /checkout is refused with the generic message", async ({ page }) => {
+  test("a direct link to /checkout still works: an invalid coupon is refused with the generic message", async ({ page }) => {
     test.setTimeout(120_000);
     await signUp(page, "coupon");
     await page.goto("/checkout?plan=pro&coupon=NAOEXISTE");
@@ -127,30 +143,33 @@ test.describe("checkout with Stripe test mode", () => {
     await expect(page.getByTestId("pay-button")).toContainText("Assinar Pro");
   });
 
-  test("3D Secure is completed on the page and the plan activates", async ({ page }) => {
+  test("3D Secure is completed over the plans dialog and the plan activates", async ({ page }) => {
     test.setTimeout(240_000);
     await signUp(page, "threeds");
-    await page.goto("/checkout?plan=business");
+    const dialog = await openPaymentInDialog(page, "Business");
     await fillCard(page, "4000002760003184");
-    await page.getByTestId("pay-button").click();
+    await dialog.getByTestId("pay-button").click();
+    // Stripe's challenge opens over our dialog and must be reachable from it.
     await completeThreeDSecure(page);
+    await expect(dialog).toBeVisible();
     await expectActivated(page, /Plano Business/);
   });
 
-  test("4242 activates the plan after the webhook, and the kept card buys + API in one click", async ({ page }) => {
+  test("4242 in the plans dialog activates the plan after the webhook, and the kept card buys + API in one click", async ({ page }) => {
     test.setTimeout(300_000);
     await signUp(page, "success");
-    await page.goto("/checkout?plan=pro");
-    await expect(page.getByText(/Pagamento processado pela Stripe/)).toBeVisible();
+    const dialog = await openPaymentInDialog(page, "Pro");
+    await expect(dialog.getByText(/Pagamento processado pela Stripe/)).toBeVisible();
+    await expect(dialog.getByTestId("total-today")).toHaveText(/15,99/);
     await fillCard(page, "4242424242424242");
     await keepCard(page);
-    const pay = page.getByTestId("pay-button");
-    await pay.click();
-    await expect(pay).toBeDisabled();
+    await dialog.getByTestId("pay-button").click();
+    await expect(dialog.getByTestId("pay-button")).toBeDisabled();
     await expectActivated(page, /Plano Pro/);
     await expect(page.getByRole("heading", { name: "Pro", exact: true })).toBeVisible({ timeout: 30_000 });
 
-    // The add-on: the card kept by Stripe is preselected; one click pays.
+    // The add-on (on /checkout): the card kept by Stripe is preselected; one click pays.
+    const pay = page.getByTestId("pay-button");
     await page.goto("/checkout?addon=API");
     await expect(page.getByRole("heading", { name: "Contratar + API" })).toBeVisible();
     await expect(pay).toContainText(/Pagar com Visa •••• 4242 · R\$ 50,00\/mês|Contratar \+ API · R\$ 50,00\/mês/, { timeout: 30_000 });

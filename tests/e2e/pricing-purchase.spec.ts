@@ -4,12 +4,14 @@ import { isolateClientIp } from "./helpers/client-ip";
 test.beforeEach(async ({ context }) => { await isolateClientIp(context); });
 
 /*
- * NEX-51: buying from the plans page never leaves it. Stripe is not configured
- * in e2e, so the flow is asserted up to the summary step and its "billing not
- * configured" state; a coupon that applies needs Stripe and is covered by
- * Vitest (tests/coupons.test.ts) with a fake provider.
+ * NEX-51/52: buying from the plans page never leaves it, the card included.
+ * Stripe is not configured in this e2e, so the flow is asserted up to the
+ * payment step and its "billing not configured" state; a coupon that applies
+ * needs Stripe and is covered by Vitest (tests/coupons.test.ts) with a fake
+ * provider, and a real card in the dialog by tests/e2e/checkout-payment.spec.ts
+ * (UNO_LOCAL_STRIPE_E2E=1).
  */
-test("sign-up inside the pricing dialog requires a phone and continues to the summary on /pricing", async ({ page }, info) => {
+test("sign-up inside the pricing dialog requires a phone and reaches the payment step on /pricing", async ({ page }, info) => {
   test.skip(process.env.UNO_LOCAL_AUTH_E2E !== "1", "Requires local PostgreSQL and Redis");
   test.setTimeout(120_000);
   const email = `uno-pricing-e2e-${info.project.name}-${crypto.randomUUID()}@example.test`;
@@ -39,8 +41,6 @@ test("sign-up inside the pricing dialog requires a phone and continues to the su
   await expect(summary).toBeVisible();
   await expect(page).toHaveURL(/\/pricing$/);
   await expect(summary.getByRole("radio", { name: /Pro/ })).toBeChecked();
-  await expect(summary.getByText("A cobrança ainda não está configurada para esta instalação.")).toBeVisible();
-  await expect(summary.getByRole("button", { name: /Ir para o pagamento/ })).toBeDisabled();
 
   // An invalid coupon gets a clear message and the price stays the plan's own.
   await summary.getByLabel("Cupom de desconto", { exact: true }).fill("naoexiste");
@@ -48,7 +48,32 @@ test("sign-up inside the pricing dialog requires a phone and continues to the su
   await expect(summary.getByRole("alert")).toHaveText("Cupom inválido ou indisponível para este plano.");
   await expect(summary.getByTestId("first-payment")).toHaveText(/15,99/);
 
-  // Closing and opening again goes straight to the summary: the session is kept.
+  // Step 3 opens in the same dialog: no navigation to /checkout.
+  await summary.getByRole("button", { name: /Ir para o pagamento/ }).click();
+  const payment = page.getByRole("dialog", { name: "Pagamento" });
+  await expect(payment).toBeVisible();
+  await expect(page).toHaveURL(/\/pricing$/);
+  await expect(payment.getByRole("listitem").filter({ hasText: "Pagamento" })).toHaveAttribute("aria-current", "step");
+  await expect(payment.getByTestId("billing-not-configured")).toContainText("A cobrança ainda não está configurada");
+  // A regular buyer never sees the admin diagnostics.
+  await expect(payment.getByTestId("checkout-admin-detail")).toHaveCount(0);
+  await expect(payment.getByTestId("total-today")).toHaveText(/15,99/);
+  await expect(payment.getByTestId("pay-button")).toBeDisabled();
+  await expect(payment.getByTestId("pay-button")).toContainText("Assinar Pro");
+
+  // Phones: a full-height sheet with no horizontal scroll.
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 375, height: 812 });
+  const box = await payment.boundingBox();
+  expect(box?.width).toBeLessThanOrEqual(375);
+  expect(box?.height).toBeGreaterThanOrEqual(800);
+  expect(await payment.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  if (viewport) await page.setViewportSize(viewport);
+
+  // Back to step 2 keeps the plan; closing and opening again goes straight to the summary.
+  await payment.getByRole("button", { name: "Alterar plano ou cupom" }).click();
+  await expect(summary.getByRole("radio", { name: /Pro/ })).toBeChecked();
   await page.keyboard.press("Escape");
   await expect(summary).toBeHidden();
   await page.getByRole("link", { name: "Escolher Business", exact: true }).click();

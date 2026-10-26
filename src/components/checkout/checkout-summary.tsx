@@ -1,12 +1,11 @@
 "use client";
 
 import { Check, Lock, Tag, X } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useState } from "react";
 import { z } from "zod";
 
 import { Button } from "@/components/ui";
 import { couponPreviewSchema, type CouponPreview, type PaidPlanId, type PublicBillingPlan } from "@/lib/billing-model";
-import { checkoutPath } from "@/lib/checkout-intent";
 import { formatBrlCents } from "@/lib/plans";
 
 const errorSchema = z.object({ error: z.object({ code: z.string().optional(), message: z.string() }) });
@@ -56,18 +55,15 @@ export async function postJson(url: string, body: unknown, headers: Record<strin
 }
 
 /**
- * Coupon preview for one selected plan, then the way to our own checkout page
- * (NEX-52). Prices shown come from the server (POST billing/coupon/preview) and
- * the checkout recomputes them; nothing here decides what is charged.
+ * Coupon preview for one selected plan. Prices shown come from the server
+ * (POST billing/coupon/preview) and the subscribe call recomputes them;
+ * nothing here decides what is charged.
  */
 export function useCouponCheckout(plan: PublicBillingPlan | undefined, onSessionExpired?: (message: string) => void) {
   const [code, setCode] = useState("");
   const [preview, setPreview] = useState<CouponPreview | null>(null);
   const [couponError, setCouponError] = useState<string>();
   const [applying, setApplying] = useState(false);
-  const [paying, setPaying] = useState(false);
-  const [payError, setPayError] = useState<string>();
-  const locked = useRef(false);
   const appliedCode = preview?.valid ? preview.code : null;
 
   const fail = useCallback((cause: unknown, set: (message: string) => void) => {
@@ -115,23 +111,7 @@ export function useCouponCheckout(plan: PublicBillingPlan | undefined, onSession
   /** Shows a refusal that came from the payment step (the coupon stopped being valid). */
   const reject = useCallback((message: string) => { setPreview(null); setCouponError(message); }, []);
 
-  // Coming back with the browser's Back button (page cache) unlocks the button.
-  useEffect(() => {
-    const reset = (event: PageTransitionEvent) => { if (event.persisted) { locked.current = false; setPaying(false); } };
-    window.addEventListener("pageshow", reset);
-    return () => window.removeEventListener("pageshow", reset);
-  }, []);
-
-  // The card is entered on our own page: /checkout keeps the plan and the applied coupon.
-  const pay = useCallback(async () => {
-    if (locked.current || !plan) return;
-    locked.current = true;
-    setPaying(true);
-    setPayError(undefined);
-    window.location.assign(checkoutPath(plan.id as PaidPlanId, { coupon: appliedCode }));
-  }, [appliedCode, plan]);
-
-  return { code, setCode, preview, couponError, applying, apply, applyCode, reject, clear, changePlan, pay, paying, payError, appliedCode };
+  return { code, setCode, preview, couponError, applying, apply, applyCode, reject, clear, changePlan, appliedCode };
 }
 
 export type CouponCheckout = ReturnType<typeof useCouponCheckout>;

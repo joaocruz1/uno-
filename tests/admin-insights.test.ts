@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import * as schema from "@/db/schema";
 import type { UnoDatabase } from "@/db";
@@ -74,6 +74,30 @@ describe("admin business insights", () => {
     expect(finance.apiAddon).toEqual({ name: "API", priceBrlCents: 5_000, subscriptions: 1, mrrBrlCents: 5_000 });
     expect(Object.fromEntries(finance.recentPaid.map((row) => [row.organizationName, row.apiAddon]))).toEqual({ "Loja Paga": true, "Loja Cortesia": false });
     expect(finance.recentPaid.map((row) => row.organizationName).sort()).toEqual(["Loja Cortesia", "Loja Paga"]);
+  });
+
+  it("shows the checkout's publishable key status in Conexões with the fix, never the values", async () => {
+    const names = ["STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO", "STRIPE_PRICE_BUSINESS", "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY"];
+    const saved = Object.fromEntries(names.map((name) => [name, process.env[name]]));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    try {
+      Object.assign(process.env, { STRIPE_SECRET_KEY: "sk_live_SyntheticSecretValue000", STRIPE_WEBHOOK_SECRET: "whsec_synthetic", STRIPE_PRICE_STARTER: "price_s", STRIPE_PRICE_PRO: "price_p", STRIPE_PRICE_BUSINESS: "price_b" });
+      delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
+      const row = async () => (await adminConnections({ userId: id(1) }, database)).find((connection) => connection.name === "Chave pública da Stripe (checkout)");
+      expect(await row()).toMatchObject({ configured: false, detail: "Ausente: defina NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_… no serviço uno e implante de novo." });
+      process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_test_SyntheticPublicValue00";
+      const mismatch = await row();
+      expect(mismatch).toMatchObject({ configured: false });
+      expect(mismatch?.detail).toContain("Modo diferente: a secreta é live e a pública é test");
+      process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = "pk_live_SyntheticPublicValue00";
+      const ok = await row();
+      expect(ok?.configured).toBe(true);
+      const everything = JSON.stringify(await adminConnections({ userId: id(1) }, database));
+      for (const secret of ["sk_live_SyntheticSecretValue000", "pk_live_SyntheticPublicValue00", "whsec_synthetic"]) expect(everything.includes(secret)).toBe(false);
+    } finally {
+      for (const name of names) { if (saved[name] === undefined) delete process.env[name]; else process.env[name] = saved[name]; }
+      warn.mockRestore();
+    }
   });
 
   it("ranks customers, lists keys without secrets and breaks activity down by channel", async () => {

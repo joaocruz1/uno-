@@ -31,13 +31,13 @@ export function publicBillingPlans(): PublicBillingPlan[] {
   return publicPlans();
 }
 
-export function billingProviderConfigured(): boolean {
+export function billingProviderConfigured(environment: Record<string, string | undefined> = process.env): boolean {
   return Boolean(
-    process.env.STRIPE_SECRET_KEY?.trim() &&
-    process.env.STRIPE_WEBHOOK_SECRET?.trim() &&
-    process.env.STRIPE_PRICE_STARTER?.trim() &&
-    process.env.STRIPE_PRICE_PRO?.trim() &&
-    process.env.STRIPE_PRICE_BUSINESS?.trim(),
+    environment.STRIPE_SECRET_KEY?.trim() &&
+    environment.STRIPE_WEBHOOK_SECRET?.trim() &&
+    environment.STRIPE_PRICE_STARTER?.trim() &&
+    environment.STRIPE_PRICE_PRO?.trim() &&
+    environment.STRIPE_PRICE_BUSINESS?.trim(),
   );
 }
 
@@ -51,6 +51,36 @@ export function billingUrls() {
 }
 
 const PUBLISHABLE_KEY_VARIABLE = "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY";
+const PUBLISHABLE_KEY_FORMAT = /^pk_(test|live)_[A-Za-z0-9]{10,}$/;
+
+export type StripeMode = "live" | "test";
+export type PublishableKeyReason = "ok" | "missing" | "malformed" | "mode_mismatch" | "billing_not_configured";
+
+/** Why the checkout can or cannot take a card. Never carries the secret key, only its mode. */
+export type PublishableKeyStatus = {
+  /** The publishable key (public by design), or null when the checkout cannot use it. */
+  key: string | null;
+  reason: PublishableKeyReason;
+  secretMode: StripeMode | null;
+  publishableMode: StripeMode | null;
+};
+
+function secretKeyMode(secret: string): StripeMode | null {
+  if (/^(sk|rk)_live_/.test(secret)) return "live";
+  if (/^(sk|rk)_test_/.test(secret)) return "test";
+  return null;
+}
+
+function publishableKeyCheck(environment: Record<string, string | undefined>): Omit<PublishableKeyStatus, "reason"> & { reason: Exclude<PublishableKeyReason, "billing_not_configured"> } {
+  const value = environment[PUBLISHABLE_KEY_VARIABLE]?.trim() ?? "";
+  const secret = environment.STRIPE_SECRET_KEY?.trim() ?? "";
+  const secretMode = secret ? secretKeyMode(secret) : null;
+  if (!value) return { key: null, reason: "missing", secretMode, publishableMode: null };
+  if (!PUBLISHABLE_KEY_FORMAT.test(value)) return { key: null, reason: "malformed", secretMode, publishableMode: null };
+  const publishableMode: StripeMode = value.startsWith("pk_live_") ? "live" : "test";
+  if (secret && secretMode !== publishableMode) return { key: null, reason: "mode_mismatch", secretMode, publishableMode };
+  return { key: value, reason: "ok", secretMode, publishableMode };
+}
 
 /**
  * The Stripe publishable key for the Payment Element (NEX-52), or null when it
@@ -60,10 +90,52 @@ const PUBLISHABLE_KEY_VARIABLE = "NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY";
  * `process.env.NEXT_PUBLIC_*` references at build time).
  */
 export function stripePublishableKey(environment: Record<string, string | undefined> = process.env): string | null {
-  const value = environment[PUBLISHABLE_KEY_VARIABLE]?.trim();
-  if (!value || !/^pk_(test|live)_[A-Za-z0-9]{10,}$/.test(value)) return null;
-  const secret = environment.STRIPE_SECRET_KEY?.trim() ?? "";
-  const mode = value.startsWith("pk_live_") ? "live" : "test";
-  if (secret && !(secret.startsWith(`sk_${mode}_`) || secret.startsWith(`rk_${mode}_`))) return null;
-  return value;
+  return publishableKeyCheck(environment).key;
+}
+
+/**
+ * Whether the own checkout can take a card in this installation and, if not,
+ * why: Stripe itself not configured, or the publishable key missing, malformed
+ * or in another mode than the secret key. Only modes leave this function, never
+ * key values other than the (public) publishable key.
+ */
+export function stripePublishableKeyStatus(environment: Record<string, string | undefined> = process.env): PublishableKeyStatus {
+  const check = publishableKeyCheck(environment);
+  if (!billingProviderConfigured(environment)) return { ...check, key: null, reason: "billing_not_configured" };
+  return check;
+}
+
+/** What a platform admin reads to fix the checkout (pt-BR), with variable names and modes only. */
+export function publishableKeyFix(status: PublishableKeyStatus): string {
+  const expected = status.secretMode === "test" ? "pk_test_" : "pk_live_";
+  switch (status.reason) {
+    case "ok":
+      return `Configurada (modo ${status.publishableMode ?? "desconhecido"}, igual à chave secreta).`;
+    case "billing_not_configured":
+      return "Cobrança não configurada: defina STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e os três STRIPE_PRICE_* no serviço uno.";
+    case "missing":
+      return `Ausente: defina ${PUBLISHABLE_KEY_VARIABLE}=${expected}… no serviço uno e implante de novo.`;
+    case "malformed":
+      return `Inválida: ${PUBLISHABLE_KEY_VARIABLE} precisa ser a chave publicável (${expected}…) da mesma conta, não a secreta. Corrija no serviço uno.`;
+    case "mode_mismatch":
+      return status.secretMode
+        ? `Modo diferente: a secreta é ${status.secretMode} e a pública é ${status.publishableMode ?? "desconhecida"}. Use a ${expected}… da mesma conta no serviço uno.`
+        : `Modo diferente: a chave secreta não é sk_live_/sk_test_, então a pública (${status.publishableMode ?? "desconhecida"}) não pode ser conferida. Revise STRIPE_SECRET_KEY no serviço uno.`;
+  }
+}
+
+let unusableKeyReported = false;
+
+/**
+ * The checkout's publishable key status, logging once per process when the key
+ * cannot be used: {"event":"billing.config.publishable_key_unusable",...},
+ * with the reason and modes only (no values).
+ */
+export function checkoutPublishableKeyStatus(environment: Record<string, string | undefined> = process.env): PublishableKeyStatus {
+  const status = stripePublishableKeyStatus(environment);
+  if (status.reason !== "ok" && !unusableKeyReported) {
+    unusableKeyReported = true;
+    console.warn(JSON.stringify({ event: "billing.config.publishable_key_unusable", reason: status.reason, secretMode: status.secretMode, publishableMode: status.publishableMode }));
+  }
+  return status;
 }

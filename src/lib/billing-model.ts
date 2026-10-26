@@ -115,6 +115,18 @@ export const couponPreviewSchema = z.object({
   label: z.string().nullable(),
 });
 
+/**
+ * GET billing/checkout-config: what the checkout needs to take a card (the
+ * public Stripe key, validated by the server) and the server's price of each
+ * plan without a coupon. `adminDetail` (why payment is unavailable, with the
+ * fix) is only sent to platform admins.
+ */
+export const checkoutConfigSchema = z.object({
+  publishableKey: z.string().regex(/^pk_(test|live)_[A-Za-z0-9]{10,}$/).nullable(),
+  adminDetail: z.string().nullable(),
+  quotes: z.object({ STARTER: couponPreviewSchema, PRO: couponPreviewSchema, BUSINESS: couponPreviewSchema }),
+});
+
 /** POST billing/plan: swap the plan of the live card subscription. */
 export const billingPlanChangeRequestSchema = z.object({ planId: paidPlanIdSchema }).strict();
 
@@ -224,3 +236,4 @@ export type BillingRedirect = z.infer<typeof billingRedirectSchema>;
 export type SubscribeResult = z.infer<typeof subscribeResultSchema>;
 export type SavedCard = z.infer<typeof savedCardSchema>;
 export type PaymentSession = z.infer<typeof paymentSessionSchema>;
+export type CheckoutConfig = z.infer<typeof checkoutConfigSchema>;

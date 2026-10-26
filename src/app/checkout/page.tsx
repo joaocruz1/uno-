@@ -5,12 +5,10 @@ import { redirect } from "next/navigation";
 
 import { CheckoutPayment, type CheckoutTargetProps } from "@/components/checkout/checkout-payment";
 import { ThemeToggle } from "@/components/theme-toggle";
-import type { CouponPreview, PaidPlanId } from "@/lib/billing-model";
 import { addonCheckoutPath, checkoutPath, parseAddonParam, parseCouponParam, parsePlanParam } from "@/lib/checkout-intent";
 import { AppError } from "@/lib/errors";
-import { readBillingState } from "@/server/billing";
-import { billingProviderConfigured, PAID_PLAN_IDS, stripePublishableKey } from "@/server/billing/config";
-import { quoteCheckout } from "@/server/billing/coupons";
+import { readBillingState, readCheckoutConfig } from "@/server/billing";
+import { billingProviderConfigured, PAID_PLAN_IDS } from "@/server/billing/config";
 import { requireActor } from "@/server/http";
 
 // Authenticated page: never prerender at build time, when no database is available.
@@ -49,7 +47,8 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
   const billing = await readBillingState(actor);
   const canManage = actor.membershipRole === "OWNER" || actor.membershipRole === "ADMIN";
   const configured = billingProviderConfigured();
-  const publishableKey = configured ? stripePublishableKey() : null;
+  // Key validated by the server (missing, malformed or wrong mode = null); the reason only for platform admins.
+  const checkout = await readCheckoutConfig(actor);
 
   let target: CheckoutTargetProps;
   if (addon) {
@@ -68,9 +67,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
     if (canManage && configured && !billing.checkoutAvailable) redirect("/dashboard/billing");
     const plans = billing.plans.filter((candidate) => (PAID_PLAN_IDS as readonly string[]).includes(candidate.id));
     // The price without a coupon, as the server will charge it (no Stripe call without a code).
-    const quotes = {} as Record<PaidPlanId, CouponPreview>;
-    for (const candidate of PAID_PLAN_IDS) quotes[candidate] = (await quoteCheckout(candidate, null, actor.organizationId)).preview;
-    target = { kind: "plan", plans, quotes, initialPlan: plan ?? "PRO", initialCoupon: coupon ?? null };
+    target = { kind: "plan", plans, quotes: checkout.quotes, initialPlan: plan ?? "PRO", initialCoupon: coupon ?? null };
   }
 
   return (
@@ -89,7 +86,8 @@ export default async function CheckoutPage({ searchParams }: { searchParams: Pro
           email={actor.email}
           organizationName={actor.organizationName}
           canManage={canManage}
-          publishableKey={publishableKey}
+          publishableKey={checkout.publishableKey}
+          adminDetail={checkout.adminDetail}
           selfPath={self}
         />
       </main>
