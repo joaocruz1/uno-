@@ -98,7 +98,9 @@ template is rejected; there is no generic or best-effort fallback.
   live subscription to manage) is sent to `/dashboard/billing`; `?addon=API`
   needs a paid card plan in force. Members who are not OWNER/ADMIN see that
   they cannot buy; without the publishable key or billing configuration the
-  page says "A cobrança ainda não está configurada". "Continuar no plano
+  page says "A cobrança ainda não está configurada" (platform admins also see
+  the precise reason and fix, e.g. key missing or in another mode than the
+  secret key). "Continuar no plano
   grátis" always leads to `/dashboard`. Contract: `CONTRACT-UNO-BILLING-001`.
 
 ## Purchase from the plans page, phone and coupons (NEX-51)
@@ -111,9 +113,16 @@ template is rejected; there is no generic or best-effort fallback.
   of navigating. Without a session it offers "Criar conta" and "Já tenho conta"
   tabs, keeps the chosen plan visible and, on success, moves to the summary
   step in the same dialog: plan (switchable among the paid plans), features,
-  coupon field, price breakdown and "Ir para o pagamento", which calls the
-  existing checkout API and goes to Stripe. With a session it opens straight on
-  the summary. The URL never changes before Stripe. Validation errors, an
+  coupon field, price breakdown and "Ir para o pagamento", which opens the
+  third step, "Pagamento", in the same dialog: a compact summary (plan, total
+  today, from the 2nd month) over Stripe's Payment Element and the pay button,
+  with the same payment core as `/checkout` (subscribe, 3D Secure on the page,
+  declines inline, success only after the server reports the plan active, then
+  the dashboard). Plan and coupon are changed by going back to step 2. While a
+  payment is in progress the dialog cannot be closed (Esc, backdrop or close
+  button say "Pagamento em andamento"); on phones the payment step is a
+  full-height sheet. With a session it opens straight on the summary. The URL
+  never changes during the purchase. Validation errors, an
   e-mail already registered (with a shortcut to sign in with it) and an expired
   session (back to the sign-in tab with a notice) are handled in the dialog.
   The buttons are plain links to `/register?plan=…` until the page is

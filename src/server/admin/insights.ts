@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 
 import { getDb, type UnoDatabase } from "@/db";
 import { getApiAddon, getPlanCatalog, planIdSchema, type PlanId } from "@/lib/plans";
+import { checkoutPublishableKeyStatus, publishableKeyFix } from "@/server/billing/config";
 
 import { assertPlatformAdmin, type AdminIdentity } from "./access";
 
@@ -249,6 +250,12 @@ export async function adminActivity(identity: AdminIdentity, database: Database 
 
 export type AdminConnection = { name: string; purpose: string; configured: boolean; detail: string };
 
+/** The checkout's publishable key: configured only when the payment can really take a card; the detail says how to fix it. */
+function publishableKeyRow(): { configured: boolean; detail: string } {
+  const status = checkoutPublishableKeyStatus();
+  return { configured: status.reason === "ok", detail: publishableKeyFix(status) };
+}
+
 /** Which providers have configuration present. Reports presence only, never values. */
 export async function adminConnections(identity: AdminIdentity, database: Database = getDb()): Promise<AdminConnection[]> {
   await assertPlatformAdmin(identity, database);
@@ -259,6 +266,7 @@ export async function adminConnections(identity: AdminIdentity, database: Databa
     { name: "Redis", purpose: "Fila, limites de taxa e sessões", ...state(has("REDIS_URL"), "Configurado", "REDIS_URL ausente") },
     { name: "Armazenamento S3/R2", purpose: "PDFs de entrada e saída (privado)", ...state(has("S3_ENDPOINT", "S3_BUCKET", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"), "Configurado", "Variáveis S3_* incompletas") },
     { name: "Stripe", purpose: "Assinaturas e cobrança", ...state(has("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET", "STRIPE_PRICE_STARTER", "STRIPE_PRICE_PRO", "STRIPE_PRICE_BUSINESS"), "Chaves e preços configurados", "Defina STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET e os três STRIPE_PRICE_*") },
+    { name: "Chave pública da Stripe (checkout)", purpose: "Cartão no checkout próprio e no diálogo de planos", ...publishableKeyRow() },
     { name: "Stripe — adicional de API", purpose: "Venda do adicional + API (opcional)", ...state(has("STRIPE_PRICE_API_ADDON"), "Preço configurado", "Opcional — STRIPE_PRICE_API_ADDON ausente; o adicional não é oferecido") },
     { name: "E-mail", purpose: "Confirmação de conta e convites", ...state(has("SMTP_HOST", "SMTP_USER", "SMTP_PASS") || has("RESEND_API_KEY") || has("SMTP_URL"), has("SMTP_HOST", "SMTP_USER", "SMTP_PASS") ? "SMTP autenticado configurado" : has("RESEND_API_KEY") ? "Resend configurado" : "SMTP local (Mailpit)", "Defina SMTP_HOST/SMTP_USER/SMTP_PASS ou RESEND_API_KEY") },
     { name: "Webhooks de saída", purpose: "Criptografia dos segredos dos clientes", ...state(has("WEBHOOK_ENCRYPTION_KEY"), "Chave configurada", "WEBHOOK_ENCRYPTION_KEY ausente") },

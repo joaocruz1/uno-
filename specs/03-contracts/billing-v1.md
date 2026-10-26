@@ -76,7 +76,14 @@ assinaturas antes do detach. Após a 1ª fatura paga, cartão com
 allow_redisplay always vira invoice_settings.default_payment_method do Customer
 se não houver um (melhor esforço). Chave publicável
 NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY lida no servidor por pedido; ausente ou de
-outro modo → checkout indisponível.
+outro modo → checkout indisponível. GET billing/checkout-config (sessão
+obrigatória, qualquer papel) → {publishableKey|null, adminDetail|null, quotes:
+{STARTER, PRO, BUSINESS}} com o preço sem cupom calculado pelo servidor;
+adminDetail (motivo e correção, só nomes de variáveis e modos) só para
+administrador da plataforma. Motivos: missing, malformed, mode_mismatch,
+billing_not_configured; uma linha de log por processo
+billing.config.publishable_key_unusable {reason, secretMode, publishableMode},
+sem valores.
 O mesmo POST aceita exatamente um alvo: {planId, promotionCode?} ou {addon:"API"}. O adicional
 exige OWNER/ADMIN, plano pago efetivo e cobrado pela Stripe (409
 paid_plan_required; plano concedido sem assinatura Stripe não contrata, pois a

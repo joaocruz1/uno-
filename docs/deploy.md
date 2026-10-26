@@ -129,6 +129,31 @@ the build environment or `connect-src` falls back to `https:`.
   publishes a release with the automatic report and the physical proof
   (`docs/printing-validation.md`) in `/admin/templates`.
 
+## Troubleshooting: checkout mostra "cobrança não configurada"
+
+O checkout (página `/checkout` e o passo "3 Pagamento" do diálogo de planos)
+mostra "A cobrança ainda não está configurada" quando o servidor não aceita a
+chave publicável. Para descobrir o motivo sem expor segredos:
+
+1. **Admin → Conexões**, linha "Chave pública da Stripe (checkout)": mostra o
+   estado e a correção. Administradores da plataforma também veem o motivo
+   ("Para administradores: …") no próprio aviso do checkout; clientes veem só
+   a mensagem genérica.
+2. **Log da aplicação** (`uno`): uma linha por processo,
+   `{"event":"billing.config.publishable_key_unusable","reason":"…","secretMode":"live","publishableMode":null}`.
+   Só motivo e modos, nunca valores.
+
+| `reason` | Causa | Correção no serviço `uno` |
+| --- | --- | --- |
+| `missing` | `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` vazia ou ausente | Definir `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_…` (ou `pk_test_…` com `sk_test_`) e implantar |
+| `malformed` | Não começa com `pk_live_`/`pk_test_` (por exemplo, a secreta colada no lugar) | Colar a chave publicável do Dashboard da Stripe → Desenvolvedores → Chaves de API |
+| `mode_mismatch` | Secreta `sk_live_` com pública `pk_test_` (ou o contrário) | Usar as duas chaves da mesma conta e do mesmo modo |
+| `billing_not_configured` | Falta `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` ou um dos três `STRIPE_PRICE_*` | Definir as variáveis (veja `docs/billing.md`) |
+
+A chave é lida pelo servidor a cada pedido, então basta reiniciar o serviço
+depois de corrigir a variável; um novo build só é necessário se a CSP também
+mudou.
+
 ## Not verified
 
 Docker builds, Railway/Vercel deployment, real R2 policy and CORS, real Stripe

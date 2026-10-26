@@ -46,9 +46,8 @@ conta na hora (NEX-42).
   landing, o botão de um plano pago abre um diálogo sobre os planos: "Criar
   conta" ou "Já tenho conta", com o plano escolhido visível; depois, no mesmo
   diálogo, o resumo (plano, cupom, valor de hoje e dos meses seguintes) e "Ir
-  para o pagamento", que leva ao checkout próprio (`/checkout?plan=pro`, com
-  `&coupon=CODIGO` quando há cupom aplicado; NEX-52, abaixo). Com sessão, o
-  diálogo abre direto no resumo. `/register`, `/login` e `/checkout` continuam
+  para o pagamento", que abre o passo "3 Pagamento" no mesmo diálogo, com o
+  cartão (NEX-52, abaixo). Com sessão, o diálogo abre direto no resumo. `/register`, `/login` e `/checkout` continuam
   funcionando por link direto, e `/checkout` também tem o campo de cupom.
 - **Telefone obrigatório.** O cadastro por e-mail exige telefone brasileiro
   (DDD válido + celular de 9 dígitos começando com 9 ou fixo de 8 dígitos
@@ -114,9 +113,11 @@ conta na hora (NEX-42).
 
 ## Checkout próprio com o Payment Element (NEX-52)
 
-**Decisões do dono:** o cartão é digitado na nossa página `/checkout` (duas
-colunas), não no Checkout hospedado da Stripe; o diálogo de planos (NEX-51)
-continua cuidando de conta, plano e cupom e leva para lá. O "+ API" também é
+**Decisões do dono:** o cartão é digitado na UNO, não no Checkout hospedado da
+Stripe. Comprando pela tela de planos, ele é digitado no próprio diálogo de
+planos (passo "3 Pagamento", sem sair de `/pricing` ou da landing); a página
+`/checkout` (duas colunas) continua para links diretos, links antigos e o
+"+ API". O "+ API" também é
 comprado nela (`/checkout?addon=API`), como assinatura própria. Nenhuma compra
 nova vai para o Checkout hospedado; sessões hospedadas abertas antes desta
 versão são expiradas quando a organização volta a comprar, e os eventos
@@ -200,9 +201,27 @@ versão são expiradas quando a organização volta a comprar, e os eventos
   "Remover" (DELETE /api/dashboard/billing/cards, OWNER/ADMIN; o único cartão
   de uma assinatura viva não é removido, e com outro cartão ele assume como
   padrão do Customer e dessas assinaturas).
+- **Pagamento no diálogo.** O passo 3 do diálogo usa o mesmo núcleo de
+  pagamento da página (`src/components/checkout/payment-flow.tsx`: sessão do
+  Payment Element, `/subscribe` com Idempotency-Key, confirmação com
+  `redirect: "if_required"`, recusa, ativação pelo webhook e animação de
+  sucesso). Mostra um resumo compacto (plano, total de hoje, a partir do 2º
+  mês); plano e cupom mudam voltando ao passo 2. A chave publicável e os preços
+  sem cupom vêm de GET /api/dashboard/billing/checkout-config (sessão
+  obrigatória). Nesse passo o diálogo é não modal, com fundo e trava de rolagem
+  próprios, porque a trava de foco e de cliques do modal do Radix brigaria com o
+  3D Secure e o Link, que a Stripe abre no `<body>`, fora do diálogo. Durante o
+  pagamento, Esc, o fundo e o botão de fechar só avisam "Pagamento em
+  andamento". No celular o passo vira uma folha de altura total com rolagem
+  interna. O sucesso aparece no diálogo depois que o servidor diz que o plano
+  está ativo e leva ao painel.
 - **Chave publicável.** `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, lida pelo
-  servidor a cada pedido. Sem ela (ou de outro modo que a secreta), a página
-  mostra "A cobrança ainda não está configurada" e não aceita pagamento.
+  servidor a cada pedido. Sem ela (ou de outro modo que a secreta), o checkout
+  mostra "A cobrança ainda não está configurada" e não aceita pagamento. O
+  motivo (`stripePublishableKeyStatus`: ausente, inválida, modo diferente ou
+  Stripe não configurada) aparece em Admin → Conexões, no aviso do checkout só
+  para administradores da plataforma e numa linha de log por processo
+  (`billing.config.publishable_key_unusable`); veja `docs/deploy.md`.
 - **Não verificado** com a Stripe real nesta entrega: pagamento, 3D Secure,
   recusa, cartão salvo e webhooks. Os testes usam provedor simulado; os e2e com
   a Stripe em modo de teste (`tests/e2e/checkout-payment.spec.ts`,
