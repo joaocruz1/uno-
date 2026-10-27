@@ -79,6 +79,32 @@ function pixelRegion(
 }
 
 describe("PDF renderer and protected-code decoder", () => {
+  it("reads a QR cropped flush to its modules (no quiet zone), as Mercado Livre embeds it", () => {
+    // ML embeds the shipment QR at 85 pt with no white border. The region the
+    // validator cuts leaves only 2 px around it; this level/mask pair was not
+    // read at either validation DPI before the decoder added a quiet zone.
+    const payload = '{"id":"48300000001","t":"lm"}';
+    const qr = QRCode.create(payload, { errorCorrectionLevel: "Q", maskPattern: 6 });
+    const modules = qr.modules.size;
+    for (const dpi of [203, 300]) {
+      const side = Math.round((85.0394 / POINTS_PER_INCH) * dpi);
+      const offset = 20;
+      const width = side + offset * 2;
+      const rgba = new Uint8ClampedArray(width * width * 4).fill(255);
+      for (let y = 0; y < side; y += 1) {
+        for (let x = 0; x < side; x += 1) {
+          if (!qr.modules.get(Math.floor(((y + 0.5) * modules) / side), Math.floor(((x + 0.5) * modules) / side))) continue;
+          const index = ((y + offset) * width + x + offset) * 4;
+          rgba[index] = 0;
+          rgba[index + 1] = 0;
+          rgba[index + 2] = 0;
+        }
+      }
+      const region = { x: offset - 2, y: offset - 2, width: side + 4, height: side + 4 };
+      expect(decodeCode({ width, height: width, rgba }, region, "QR_CODE")).toBe(payload);
+    }
+  });
+
   it.each([203, 300])("renders and decodes synthetic CODE 128 and QR fixtures at %i dpi", async (dpi) => {
     const fixture = await syntheticCodecPdf();
     const renderer = await openPdfRenderer(fixture.bytes);

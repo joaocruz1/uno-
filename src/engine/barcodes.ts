@@ -8,6 +8,7 @@ const {
   BarcodeFormat,
   BinaryBitmap,
   DecodeHintType,
+  GlobalHistogramBinarizer,
   HybridBinarizer,
   MultiFormatReader,
   RGBLuminanceSource,
@@ -85,6 +86,51 @@ function decodeWithoutLibraryWarnings(reader: ZXingTypes.MultiFormatReader, bitm
   }
 }
 
+/** Pastes the region on a white canvas: a code cropped flush to its modules has no quiet zone to be found by. */
+function withQuietZone(luminance: Uint8ClampedArray, width: number, height: number, margin: number) {
+  const paddedWidth = width + margin * 2;
+  const paddedHeight = height + margin * 2;
+  const padded = new Uint8ClampedArray(paddedWidth * paddedHeight).fill(255);
+  for (let row = 0; row < height; row += 1) {
+    padded.set(luminance.subarray(row * width, (row + 1) * width), (row + margin) * paddedWidth + margin);
+  }
+  return { luminance: padded, width: paddedWidth, height: paddedHeight };
+}
+
+function decodeAttempt(
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number,
+  barcodeFormat: ZXingTypes.BarcodeFormat,
+  binarizer: "hybrid" | "global",
+  pure: boolean,
+): string | null {
+  const hints = new Map<ZXingTypes.DecodeHintType, unknown>([
+    [DecodeHintType.TRY_HARDER, true],
+    [DecodeHintType.POSSIBLE_FORMATS, [barcodeFormat]],
+  ]);
+  if (pure) hints.set(DecodeHintType.PURE_BARCODE, true);
+  const source = new RGBLuminanceSource(luminance, width, height);
+  const binaryBitmap = new BinaryBitmap(binarizer === "hybrid" ? new HybridBinarizer(source) : new GlobalHistogramBinarizer(source));
+  const reader = new MultiFormatReader();
+  reader.setHints(hints);
+  try {
+    const result = decodeWithoutLibraryWarnings(reader, binaryBitmap);
+    return result.getBarcodeFormat() === barcodeFormat ? result.getText() : null;
+  } catch {
+    return null;
+  } finally {
+    reader.reset();
+  }
+}
+
+/**
+ * Reads one code. Marketplaces embed QR images cropped flush to the modules
+ * (no quiet zone), and the reader then misses the finder patterns depending on
+ * rounding at each DPI. The same pixels are retried on a white margin and with
+ * a second binarizer; only the decoded text matters, and the validator still
+ * requires the input and output texts to be identical.
+ */
 export function decodeCode(
   bitmap: Pick<RenderedBitmap, "width" | "height" | "rgba">,
   region: PixelRegion,
@@ -93,21 +139,20 @@ export function decodeCode(
   assertBitmap(bitmap);
   assertRegion(bitmap, region);
   const barcodeFormat = format === "CODE_128" ? BarcodeFormat.CODE_128 : BarcodeFormat.QR_CODE;
-  const hints = new Map<ZXingTypes.DecodeHintType, unknown>([
-    [DecodeHintType.TRY_HARDER, true],
-    [DecodeHintType.POSSIBLE_FORMATS, [barcodeFormat]],
-  ]);
-  const source = new RGBLuminanceSource(regionLuminance(bitmap, region), region.width, region.height);
-  const binaryBitmap = new BinaryBitmap(new HybridBinarizer(source));
-  const reader = new MultiFormatReader();
-  reader.setHints(hints);
-  try {
-    const result = decodeWithoutLibraryWarnings(reader, binaryBitmap);
-    if (result.getBarcodeFormat() !== barcodeFormat) throw new CodeDecodeError();
-    return result.getText();
-  } catch {
-    throw new CodeDecodeError();
-  } finally {
-    reader.reset();
+  const luminance = regionLuminance(bitmap, region);
+  const margin = Math.max(8, Math.round(Math.max(region.width, region.height) * 0.1));
+  const padded = withQuietZone(luminance, region.width, region.height, margin);
+  const attempts = [
+    () => decodeAttempt(luminance, region.width, region.height, barcodeFormat, "hybrid", false),
+    () => decodeAttempt(padded.luminance, padded.width, padded.height, barcodeFormat, "hybrid", false),
+    () => decodeAttempt(padded.luminance, padded.width, padded.height, barcodeFormat, "global", false),
+    ...(format === "QR_CODE"
+      ? [() => decodeAttempt(padded.luminance, padded.width, padded.height, barcodeFormat, "hybrid", true)]
+      : []),
+  ];
+  for (const attempt of attempts) {
+    const text = attempt();
+    if (text !== null) return text;
   }
+  throw new CodeDecodeError();
 }

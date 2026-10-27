@@ -34,6 +34,15 @@ function hasCode(code: string) {
 }
 
 describe("UNO PDF engine pipeline", () => {
+  it("reads a QR embedded flush to its modules, with no quiet zone", async () => {
+    // Mercado Livre crops the QR image at the modules. The decoder-level case that
+    // used to fail is in engine-codec; this covers the whole pipeline with such a QR.
+    const input = await syntheticPdf({ fiscalSummary: true, qrWithoutQuietZone: true });
+    const result = await convertPdf(input, { preset: "100x150" }, "mercado-livre@1.0.0");
+    expect(result.pageCount).toBe(1);
+    expect(result.validation).toEqual({ contentPreserved: true, geometryValid: true, codesEquivalent: true });
+  });
+
   it("validates the logistics barcode where it really is when Mercado Livre slides it sideways", async () => {
     // A fixed template box cut 45 pt of this barcode and every such label failed with codes_unreadable.
     const input = await syntheticPdf({ fiscalSummary: true, shiftedLogisticsBarcodePt: 45 });
