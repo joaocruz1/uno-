@@ -27,6 +27,8 @@ export const SYNTHETIC_CODES = {
   danfeAccessKey: "35261000000000000000550010000001231000000000",
 } as const;
 
+export const FLUSH_QR_PAYLOAD = '{"id":"48300000001","t":"lm"}';
+
 export type SyntheticPdfOptions = {
   reverse?: boolean;
   rotations?: readonly [0 | 90 | 180 | 270, 0 | 90 | 180 | 270];
@@ -41,6 +43,8 @@ export type SyntheticPdfOptions = {
    * left, as Mercado Livre does for some shipments (e.g. Jadlog, hourglass).
    */
   shiftedLogisticsBarcodePt?: number;
+  /** Embeds the QR cropped flush to its modules (no quiet zone), as Mercado Livre does. */
+  qrWithoutQuietZone?: boolean;
 };
 
 function yFromTop(top: number, fontSize: number): number {
@@ -84,11 +88,15 @@ async function barcode(document: PDFDocument, text: string, width: number, paddi
   return document.embedPng(png);
 }
 
-async function codeImages(document: PDFDocument, fiscalSummary = false) {
+async function codeImages(document: PDFDocument, fiscalSummary = false, qrMargin = 4) {
   const [logistics, danfe, qr] = await Promise.all([
     barcode(document, SYNTHETIC_CODES.logisticsBarcode, 60),
     fiscalSummary ? barcode(document, SYNTHETIC_CODES.danfeAccessKey, 80, 3) : barcode(document, SYNTHETIC_CODES.danfeBarcode, 80),
-    QRCode.toBuffer(SYNTHETIC_CODES.logisticsQr, { type: "png", width: 400, margin: 4, errorCorrectionLevel: "M" })
+    // Mercado Livre: shipment JSON, 8 px modules, cropped flush (margin 0). This
+    // level/mask pair is one the reader missed at both validation DPIs.
+    (qrMargin === 0
+      ? QRCode.toBuffer(FLUSH_QR_PAYLOAD, { type: "png", scale: 8, margin: 0, errorCorrectionLevel: "Q", maskPattern: 6 })
+      : QRCode.toBuffer(SYNTHETIC_CODES.logisticsQr, { type: "png", width: 400, margin: 4, errorCorrectionLevel: "M" }))
       .then((bytes) => document.embedPng(bytes)),
   ]);
   return { logistics, danfe, qr };
@@ -98,7 +106,7 @@ async function drawLogistics(document: PDFDocument, page: PDFPage, options: Synt
   drawStructuralOuterFrame(page);
   const regular = await document.embedFont(StandardFonts.Helvetica);
   const bold = await document.embedFont(StandardFonts.HelveticaBold);
-  const images = await codeImages(document);
+  const images = await codeImages(document, false, options.qrWithoutQuietZone ? 0 : 4);
   const primary = options.unknown ? "DOCUMENTO SINTETICO" : "DESPACHAR";
   drawText(page, options.unknown ? "CABECALHO TESTE" : "MLB 00000001", 18, 8, regular);
   drawText(page, primary, 72, 9, bold, 178);
