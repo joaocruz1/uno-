@@ -30,7 +30,7 @@ function render(config: Partial<CheckoutConfig>, canManage = true): string {
       billing: { canManage },
       plan: plan!,
       coupon,
-      config: { publishableKey: null, adminDetail: null, quotes, ...config },
+      config: { publishableKey: null, adminDetail: null, quotes, pix: { available: false, amounts: { STARTER: 999, PRO: 1_599, BUSINESS: 2_990 } }, ...config },
       onBack: () => undefined,
       onPhase: () => undefined,
       onSessionExpired: () => undefined,
@@ -73,5 +73,34 @@ describe("plans dialog payment step (NEX-52, card in the dialog)", () => {
     const plain = text(render({ publishableKey: "pk_test_SyntheticPublicValue00" }, false));
     expect(plain).toContain("Só o proprietário ou um administrador de sua organização pode contratar.");
     expect(plain).not.toContain("Carregando o pagamento…");
+  });
+
+  it("offers Pix first and recommended, with the server's PIX price and no Stripe session", () => {
+    const html = render({ publishableKey: "pk_test_SyntheticPublicValue00", pix: { available: true, amounts: { STARTER: 999, PRO: 1_599, BUSINESS: 2_990 } } });
+    const plain = text(html);
+    expect(plain).toContain("Forma de pagamento");
+    expect(plain).toContain("Recomendado");
+    expect(plain.indexOf("Pix")).toBeLessThan(plain.indexOf("Cartão de crédito"));
+    expect(html).toMatch(/data-testid="method-pix"[^>]*checked=""|checked=""[^>]*data-testid="method-pix"/);
+    expect(plain).toMatch(/Total hoje R\$ 15,99/);
+    expect(plain).toContain("30 dias");
+    expect(plain).toContain("Gerar QR Code Pix · R$ 15,99");
+    expect(plain).toContain("CPF do pagador");
+    // The card form is not mounted while Pix is chosen.
+    expect(html).not.toContain("data-stripe-payment-element");
+    expect(plain).not.toContain("Carregando o pagamento…");
+  });
+
+  it("uses the regular price in the Pix summary once the first month was already bought", () => {
+    const plain = text(render({ publishableKey: null, pix: { available: true, amounts: { STARTER: 1_900, PRO: 4_900, BUSINESS: 13_900 } } }));
+    expect(plain).toMatch(/Total hoje R\$ 49,00/);
+    expect(plain).not.toContain("Promoção do 1º mês");
+    expect(plain).toContain("Gerar QR Code Pix · R$ 49,00");
+  });
+
+  it("does not offer Pix to a member who cannot buy", () => {
+    const plain = text(render({ publishableKey: null, pix: { available: true, amounts: { STARTER: 999, PRO: 1_599, BUSINESS: 2_990 } } }, false));
+    expect(plain).not.toContain("Forma de pagamento");
+    expect(plain).not.toContain("Gerar QR Code Pix");
   });
 });

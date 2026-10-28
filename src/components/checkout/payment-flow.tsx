@@ -69,7 +69,7 @@ class CheckoutFailure extends Error {
 const POLL_FAST_MS = 2_000;
 const POLL_SLOW_MS = 6_000;
 const SLOW_NOTICE_MS = 45_000;
-const REDIRECT_AFTER_MS = 5_500;
+export const REDIRECT_AFTER_MS = 5_500;
 export const SUCCESS_PATH = "/dashboard/billing";
 
 let stripeCache: { key: string; promise: Promise<Stripe | null> } | undefined;
