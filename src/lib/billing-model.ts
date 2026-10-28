@@ -125,6 +125,11 @@ export const checkoutConfigSchema = z.object({
   publishableKey: z.string().regex(/^pk_(test|live)_[A-Za-z0-9]{10,}$/).nullable(),
   adminDetail: z.string().nullable(),
   quotes: z.object({ STARTER: couponPreviewSchema, PRO: couponPreviewSchema, BUSINESS: couponPreviewSchema }),
+  /** PIX in the checkout: whether a gateway is configured, and the server's price of 30 days per plan for this organization. */
+  pix: z.object({
+    available: z.boolean(),
+    amounts: z.object({ STARTER: z.number().int().nonnegative(), PRO: z.number().int().nonnegative(), BUSINESS: z.number().int().nonnegative() }),
+  }),
 });
 
 /** POST billing/plan: swap the plan of the live card subscription. */

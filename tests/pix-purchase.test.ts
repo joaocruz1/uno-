@@ -5,14 +5,14 @@ import { fileURLToPath } from "node:url";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 import * as schema from "@/db/schema";
 import { billingGrants, organizations, pixCharges, subscriptions, user, type UnoDatabase } from "@/db";
 import { applyGrant } from "@/server/billing/grants";
 import { MercadoPagoProvider } from "@/server/billing/pix/mercadopago";
 import type { PixCharge, PixChargeRequest, PixPayment, PixProvider } from "@/server/billing/pix/provider";
-import { confirmPixPayment, createPixPurchase, type PixPurchaseDependencies } from "@/server/billing/pix/purchase";
+import { confirmPixPayment, createPixPurchase, pixMonthlyAmountBrlCents, reconcilePixPurchase, type PixPurchaseDependencies } from "@/server/billing/pix/purchase";
 
 const NOW = new Date("2026-10-07T12:00:00.000Z");
 const DAY = 86_400_000;
@@ -111,6 +111,64 @@ describe("PIX purchase", () => {
     await confirmPixPayment("mp-1", deps());
     expect((await database.select().from(pixCharges).where(eq(pixCharges.id, purchase.id)))[0]!.status).toBe("FAILED");
     expect((await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!.prepaidPlanId).toBeNull();
+  });
+});
+
+describe("PIX first-month price", () => {
+  const original = { ...process.env };
+  afterEach(() => {
+    for (const name of ["STRIPE_COUPON_STARTER", "STRIPE_COUPON_PRO", "STRIPE_COUPON_BUSINESS"]) {
+      if (original[name] === undefined) delete process.env[name]; else process.env[name] = original[name];
+    }
+  });
+
+  it("charges the first-month price on the first purchase only", async () => {
+    process.env.STRIPE_COUPON_PRO = "coupon_synthetic_pro";
+    expect(await pixMonthlyAmountBrlCents("PRO", ORG, database)).toBe(1_599);
+    const purchase = await createPixPurchase(actor, { planId: "PRO", period: "monthly", cpf: "39053344705" }, deps());
+    expect(purchase.amountBrlCents).toBe(1_599);
+    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 1_599, externalReference: purchase.id };
+    await confirmPixPayment("mp-1", deps());
+    // Paid once: the cheap month is not sold again.
+    expect(await pixMonthlyAmountBrlCents("PRO", ORG, database)).toBe(4_900);
+  });
+
+  it("charges the regular price when the organization already has a Stripe subscription", async () => {
+    process.env.STRIPE_COUPON_PRO = "coupon_synthetic_pro";
+    await database.update(subscriptions).set({ stripeSubscriptionId: "sub_synthetic" }).where(eq(subscriptions.organizationId, ORG));
+    expect(await pixMonthlyAmountBrlCents("PRO", ORG, database)).toBe(4_900);
+  });
+
+  it("charges the regular price when the promo coupon is not configured", async () => {
+    delete process.env.STRIPE_COUPON_PRO;
+    expect(await pixMonthlyAmountBrlCents("PRO", ORG, database)).toBe(4_900);
+  });
+
+  it("rejects an invalid CPF before reaching the gateway", async () => {
+    await expect(createPixPurchase(actor, { planId: "PRO", period: "monthly", cpf: "11111111111" }, deps())).rejects.toThrow();
+    expect(provider.lastRequest).toBeUndefined();
+  });
+});
+
+describe("PIX status polling reconciles with the gateway", () => {
+  it("grants and reports APPROVED from the poll when the webhook never came", async () => {
+    const purchase = await createPixPurchase(actor, { planId: "STARTER", period: "monthly", cpf: "39053344705" }, deps());
+    provider.payment = { providerChargeId: "mp-1", status: "approved", amountBrlCents: 1_900, externalReference: purchase.id };
+    const view = await reconcilePixPurchase(ORG, purchase.id, deps());
+    expect(view.status).toBe("APPROVED");
+    expect((await database.select().from(subscriptions).where(eq(subscriptions.organizationId, ORG)))[0]!.prepaidPlanId).toBe("STARTER");
+  });
+
+  it("keeps PENDING while the gateway still says pending, and survives a gateway error", async () => {
+    const purchase = await createPixPurchase(actor, { planId: "STARTER", period: "monthly", cpf: "39053344705" }, deps());
+    expect((await reconcilePixPurchase(ORG, purchase.id, deps())).status).toBe("PENDING");
+    provider.getPayment = async () => { throw new Error("gateway down"); };
+    expect((await reconcilePixPurchase(ORG, purchase.id, deps())).status).toBe("PENDING");
+  });
+
+  it("never shows another organization's charge", async () => {
+    const purchase = await createPixPurchase(actor, { planId: "STARTER", period: "monthly", cpf: "39053344705" }, deps());
+    await expect(reconcilePixPurchase("00000000-0000-4000-8000-0000000009ff", purchase.id, deps())).rejects.toMatchObject({ status: 404 });
   });
 });
 

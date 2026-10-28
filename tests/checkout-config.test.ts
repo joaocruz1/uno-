@@ -82,21 +82,28 @@ describe("publishable key status (checkout diagnostics)", () => {
     delete process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY;
     const preview = (planId: PaidPlanId): CouponPreview => ({ valid: true, message: "", code: null, appliedDiscount: "first_month", firstPaymentBrlCents: planId === "PRO" ? 1_599 : 999, recurringBrlCents: 4_900, regularBrlCents: 4_900, discountedMonths: 1, label: null });
     const quote = vi.fn(async (planId: PaidPlanId) => ({ preview: preview(planId) })) as unknown as Parameters<typeof readCheckoutConfig>[1];
+    const pix = { available: () => true, amounts: vi.fn(async () => ({ STARTER: 999, PRO: 1_599, BUSINESS: 2_990 })) };
     const viewer = { organizationId: "org_synthetic", email: "admin@example.test", platformRole: "ADMIN" as const, emailVerified: true };
 
-    const admin = await readCheckoutConfig(viewer, quote);
+    const admin = await readCheckoutConfig(viewer, quote, pix);
     expect(checkoutConfigSchema.safeParse(admin).success).toBe(true);
     expect(admin.publishableKey).toBeNull();
     expect(admin.adminDetail).toContain("Ausente: defina NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY=pk_live_…");
     expect(admin.quotes.PRO.firstPaymentBrlCents).toBe(1_599);
+    expect(admin.pix).toEqual({ available: true, amounts: { STARTER: 999, PRO: 1_599, BUSINESS: 2_990 } });
+    // Without a PIX gateway the amounts are the regular prices and the gateway-side lookup never runs.
+    pix.amounts.mockClear();
+    const off = await readCheckoutConfig(viewer, quote, { ...pix, available: () => false });
+    expect(off.pix).toEqual({ available: false, amounts: { STARTER: 4_900, PRO: 4_900, BUSINESS: 4_900 } });
+    expect(pix.amounts).not.toHaveBeenCalled();
 
-    const customer = await readCheckoutConfig({ ...viewer, email: "loja@example.test", platformRole: "USER" }, quote);
+    const customer = await readCheckoutConfig({ ...viewer, email: "loja@example.test", platformRole: "USER" }, quote, pix);
     expect(customer.adminDetail).toBeNull();
     // An unverified e-mail never counts as platform admin.
-    expect((await readCheckoutConfig({ ...viewer, emailVerified: false }, quote)).adminDetail).toBeNull();
+    expect((await readCheckoutConfig({ ...viewer, emailVerified: false }, quote, pix)).adminDetail).toBeNull();
 
     process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY = PK_LIVE;
-    const ready = await readCheckoutConfig(viewer, quote);
+    const ready = await readCheckoutConfig(viewer, quote, pix);
     expect(ready).toMatchObject({ publishableKey: PK_LIVE, adminDetail: null });
   });
 });

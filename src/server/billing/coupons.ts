@@ -101,6 +101,11 @@ function baseQuote(planId: PaidPlanId, code: string | null, message: string, val
   };
 }
 
+/** The plan's price with no coupon: the first-month promo when its Stripe coupon is configured, else the regular price. */
+export function listPriceQuote(planId: PaidPlanId): CouponPreview {
+  return baseQuote(planId, null, "", true).preview;
+}
+
 function rejected(planId: PaidPlanId, code: string | null, reason: RejectionReason): CheckoutQuote {
   // The reason is for operators only; the buyer always gets the same message.
   console.log(JSON.stringify({ event: "billing.coupon.rejected", reason, planId, code }));

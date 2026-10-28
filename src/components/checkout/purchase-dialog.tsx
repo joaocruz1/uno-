@@ -1,7 +1,7 @@
 "use client";
 
 import * as DialogPrimitive from "@radix-ui/react-dialog";
-import { ArrowLeft, ArrowRight, Check, Lock, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CreditCard, Lock, QrCode, ShieldCheck, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type MouseEvent, type ReactNode } from "react";
@@ -19,7 +19,8 @@ import { formatBrlCents } from "@/lib/plans";
 
 import { CouponField, hasPromo, planFeatures, PriceBreakdown, SecurePaymentNote, useCouponCheckout, type CouponCheckout } from "./checkout-summary";
 import { ScanOverlay, useShake } from "./payment-animations";
-import { laterLabel, PaymentFields, priceFromQuote, SuccessLabel, usePaymentFlow, type PaymentOrder, type Phase } from "./payment-flow";
+import { PixFields, usePixCheckout } from "./pix-checkout";
+import { laterLabel, PaymentFields, priceFromQuote, REDIRECT_AFTER_MS, SuccessLabel, usePaymentFlow, type PaymentOrder, type Phase } from "./payment-flow";
 
 const PAID: readonly PaidPlanId[] = ["STARTER", "PRO", "BUSINESS"];
 const inputClass = "mt-2 h-11 w-full rounded-lg border border-[var(--color-line)] bg-[var(--color-surface-2)] px-3 text-base text-[var(--color-ink)] outline-none transition placeholder:text-[var(--color-faint)] focus:border-uno-red/70 focus:ring-2 focus:ring-uno-red/20 disabled:opacity-60 sm:text-sm";
@@ -250,10 +251,52 @@ function SummaryStep({ billing, plans, plan, coupon, onSelect, onContinue }: {
   );
 }
 
+type Method = "pix" | "card";
+
+/** Pix first (recommended, and the cheapest first month), card second. */
+function MethodChoice({ method, onChange, disabled, pixAmount, regular }: { method: Method; onChange(next: Method): void; disabled: boolean; pixAmount: number; regular: number }) {
+  const groupId = useId();
+  const options: { value: Method; title: string; detail: string; icon: ReactNode; badge?: string }[] = [
+    {
+      value: "pix",
+      title: "Pix",
+      detail: pixAmount < regular ? `${formatBrlCents(pixAmount)} por 30 dias · aprovação na hora` : `${formatBrlCents(pixAmount)} por 30 dias · aprovação na hora`,
+      icon: <QrCode size={18} aria-hidden="true" />,
+      badge: "Recomendado",
+    },
+    { value: "card", title: "Cartão de crédito", detail: "Renova todo mês, cancele quando quiser", icon: <CreditCard size={18} aria-hidden="true" /> },
+  ];
+  return (
+    <fieldset disabled={disabled}>
+      <legend className="text-sm font-medium text-[var(--color-muted)]">Forma de pagamento</legend>
+      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+        {options.map((option) => {
+          const active = option.value === method;
+          return (
+            <label key={option.value} className={`relative flex cursor-pointer items-start gap-3 rounded-xl border px-3.5 py-3 transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-uno-red ${active ? "border-uno-red bg-uno-red/[.06]" : "border-[var(--color-line)] hover:border-[var(--color-line-strong)]"} ${disabled ? "opacity-60" : ""}`}>
+              <input type="radio" name={`${groupId}-method`} value={option.value} checked={active} onChange={() => onChange(option.value)} className="sr-only" data-testid={`method-${option.value}`} />
+              <span className={`mt-0.5 shrink-0 ${active ? "text-uno-red" : "text-[var(--color-muted)]"}`}>{option.icon}</span>
+              <span className="min-w-0">
+                <span className="flex flex-wrap items-center gap-2 font-heading text-sm font-bold text-[var(--color-ink)]">
+                  {option.title}
+                  {option.badge ? <span className="rounded-full bg-[var(--color-ok-surface)] px-2 py-0.5 text-[11px] font-semibold text-[var(--color-ok)]">{option.badge}</span> : null}
+                </span>
+                <span className="mt-0.5 block text-xs text-[var(--color-muted)]">{option.detail}</span>
+              </span>
+            </label>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
 /**
- * Step 3: a compact summary (plan, total today, from the 2nd month) over
- * Stripe's Payment Element and the pay button. The payment core is the same as
- * on /checkout (./payment-flow); plan and coupon are changed back in step 2.
+ * Step 3: a compact summary (plan, total today, from the 2nd month), the
+ * choice between Pix (first, recommended) and card, and the chosen payment in
+ * this same dialog: the Pix CPF and QR code, or Stripe's Payment Element. The
+ * card core is the same as on /checkout (./payment-flow); plan and coupon are
+ * changed back in step 2.
  */
 export function PaymentStep({ billing, plan, coupon, config, onBack, onPhase, onSessionExpired }: {
   billing: Pick<BillingView, "canManage">;
@@ -265,6 +308,10 @@ export function PaymentStep({ billing, plan, coupon, config, onBack, onPhase, on
   onSessionExpired(message: string): void;
 }) {
   const planId = plan.id as PaidPlanId;
+  const pixOffered = config.pix.available && billing.canManage;
+  const pixAmount = config.pix.amounts[planId];
+  const [method, setMethod] = useState<Method>(pixOffered ? "pix" : "card");
+  const pixSelected = pixOffered && method === "pix";
   const order: PaymentOrder = { kind: "plan", planId, planName: plan.name, promotionCode: coupon.appliedCode };
   const quotedPrice = useMemo(() => priceFromQuote(coupon.preview?.valid ? coupon.preview : config.quotes[planId]), [config.quotes, coupon.preview, planId]);
   const [shakeRef, shake] = useShake<HTMLDivElement>();
@@ -272,18 +319,30 @@ export function PaymentStep({ billing, plan, coupon, config, onBack, onPhase, on
     onCardRejected: shake,
     order,
     quotedPrice,
-    publishableKey: config.publishableKey,
+    // Stripe's session (customer, saved cards) is only opened when the card is the chosen way to pay.
+    publishableKey: pixSelected ? null : config.publishableKey,
     canManage: billing.canManage,
     selfPath: checkoutPath(planId, { coupon: coupon.appliedCode }),
     onCouponRejected: coupon.reject,
     onSessionExpired,
   });
-  const { phase, price, busy } = flow;
+  const pix = usePixCheckout({ planId, onSessionExpired });
+  const { price } = flow;
+  const busy = flow.busy || pix.busy;
+  const phase: Phase = pix.phase === "approved" ? "success" : pix.phase === "creating" ? "processing" : flow.phase;
   useEffect(() => { onPhase(phase); }, [onPhase, phase]);
+  const { goToDashboard } = flow;
+  useEffect(() => {
+    if (pix.phase !== "approved") return;
+    const timer = window.setTimeout(goToDashboard, REDIRECT_AFTER_MS);
+    return () => window.clearTimeout(timer);
+  }, [goToDashboard, pix.phase]);
 
-  if (phase === "success") return <SuccessLabel title={`Plano ${plan.name}`} onContinue={flow.goToDashboard} />;
+  if (phase === "success") return <SuccessLabel title={`Plano ${plan.name}`} onContinue={goToDashboard} />;
 
-  const discount = price.regular - price.first;
+  const shownFirst = pixSelected ? pixAmount : price.first;
+  const discount = price.regular - shownFirst;
+  const discountLabel = pixSelected ? (discount > 0 ? "Promoção do 1º mês" : null) : price.discountLabel;
   return (
     <div ref={shakeRef} className="space-y-5">
       <div className="relative overflow-hidden rounded-xl border border-[var(--color-line)] bg-[var(--color-surface-2)] px-4 py-3.5" aria-label="Resumo do pedido" role="group">
@@ -292,33 +351,58 @@ export function PaymentStep({ billing, plan, coupon, config, onBack, onPhase, on
           <div className="min-w-0">
             <p className="text-xs font-semibold text-uno-red">Plano</p>
             <p className="font-heading text-lg font-bold text-[var(--color-ink)]">{plan.name}</p>
-            {discount > 0 && price.discountLabel ? <p className="text-xs text-[var(--color-ok)]">{price.discountLabel}: − {formatBrlCents(discount)}</p> : null}
+            {discount > 0 && discountLabel ? <p className="text-xs text-[var(--color-ok)]">{discountLabel}: − {formatBrlCents(discount)}</p> : null}
           </div>
-          <button type="button" onClick={onBack} disabled={busy} className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-uno-red underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-uno-red disabled:opacity-50">Alterar plano ou cupom</button>
+          <button type="button" onClick={onBack} disabled={busy || pix.phase === "waiting"} className="shrink-0 rounded-lg px-2 py-1 text-sm font-semibold text-uno-red underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-uno-red disabled:opacity-50">Alterar plano ou cupom</button>
         </div>
         <dl className="mt-3 grid grid-cols-2 gap-3 border-t border-[var(--color-line)] pt-3 text-sm">
           <div>
             <dt className="text-[var(--color-muted)]">Total hoje</dt>
-            <dd className="font-heading text-xl font-extrabold tabular-nums" data-testid="total-today">{formatBrlCents(price.first)}</dd>
+            <dd className="font-heading text-xl font-extrabold tabular-nums" data-testid="total-today">{formatBrlCents(shownFirst)}</dd>
           </div>
-          <div className="text-right">
-            <dt className="text-[var(--color-muted)]">{laterLabel(price)}</dt>
-            <dd className="font-heading text-xl font-extrabold tabular-nums" data-testid="recurring">{formatBrlCents(price.recurring)}<span className="text-sm font-semibold text-[var(--color-muted)]">/mês</span></dd>
-          </div>
+          {pixSelected ? (
+            <div className="text-right">
+              <dt className="text-[var(--color-muted)]">Acesso por</dt>
+              <dd className="font-heading text-xl font-extrabold" data-testid="pix-days">30 dias</dd>
+            </div>
+          ) : (
+            <div className="text-right">
+              <dt className="text-[var(--color-muted)]">{laterLabel(price)}</dt>
+              <dd className="font-heading text-xl font-extrabold tabular-nums" data-testid="recurring">{formatBrlCents(price.recurring)}<span className="text-sm font-semibold text-[var(--color-muted)]">/mês</span></dd>
+            </div>
+          )}
         </dl>
+        {pixSelected ? <p className="mt-3 text-xs text-[var(--color-muted)]">Sem renovação automática: quando os 30 dias acabarem, você escolhe se paga de novo.</p> : null}
       </div>
 
-      <section aria-label="Cartão de crédito">
-        <PaymentFields flow={flow} organizationName="sua organização" adminDetail={config.adminDetail} disabled={coupon.applying} />
-      </section>
+      {pixOffered ? <MethodChoice method={method} onChange={setMethod} disabled={busy || pix.phase === "waiting"} pixAmount={pixAmount} regular={price.regular} /> : null}
+
+      {pixSelected ? (
+        <section aria-label="Pagar com Pix">
+          <PixFields pix={pix} amountBrlCents={pixAmount} couponNote={coupon.appliedCode ? `O cupom ${coupon.appliedCode} vale só no pagamento com cartão.` : null} />
+        </section>
+      ) : (
+        <section aria-label="Cartão de crédito">
+          <PaymentFields flow={flow} organizationName="sua organização" adminDetail={config.adminDetail} disabled={coupon.applying} />
+        </section>
+      )}
 
       <div className="space-y-2 text-xs text-[var(--color-muted)]">
-        <p className="flex gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--color-ok)]" aria-hidden="true" /><span>Pagamento processado pela Stripe. A UNO não vê nem guarda o número do cartão.</span></p>
-        <p className="flex gap-2"><Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span>Cancele quando quiser em Configurações → Assinatura. O cartão fica guardado na Stripe para as renovações.</span></p>
-        {flow.savedCard ? <p>Usando o cartão salvo {cardLabel(flow.savedCard)}.</p> : null}
+        {pixSelected ? (
+          <>
+            <p className="flex gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--color-ok)]" aria-hidden="true" /><span>Pix processado pelo Mercado Pago. O dinheiro cai direto na conta da UNO e o plano é liberado assim que o banco confirmar.</span></p>
+            <p className="flex gap-2"><Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span>Os 30 dias somam ao que você já tiver. Prefere renovar sozinho todo mês? Escolha o cartão.</span></p>
+          </>
+        ) : (
+          <>
+            <p className="flex gap-2"><ShieldCheck size={14} className="mt-0.5 shrink-0 text-[var(--color-ok)]" aria-hidden="true" /><span>Pagamento processado pela Stripe. A UNO não vê nem guarda o número do cartão.</span></p>
+            <p className="flex gap-2"><Lock size={14} className="mt-0.5 shrink-0" aria-hidden="true" /><span>Cancele quando quiser em Configurações → Assinatura. O cartão fica guardado na Stripe para as renovações.</span></p>
+            {flow.savedCard ? <p>Usando o cartão salvo {cardLabel(flow.savedCard)}.</p> : null}
+          </>
+        )}
       </div>
       <p className="text-center text-sm">
-        <button type="button" onClick={onBack} disabled={busy} className="inline-flex items-center gap-1 text-[var(--color-muted)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline disabled:opacity-50"><ArrowLeft size={14} aria-hidden="true" /> Voltar</button>
+        <button type="button" onClick={onBack} disabled={busy || pix.phase === "waiting"} className="inline-flex items-center gap-1 text-[var(--color-muted)] underline-offset-4 hover:text-[var(--color-ink)] hover:underline disabled:opacity-50"><ArrowLeft size={14} aria-hidden="true" /> Voltar</button>
       </p>
     </div>
   );
@@ -328,7 +412,7 @@ const STEP_TEXT: Record<Step, { title: string; description: string }> = {
   loading: { title: "Crie sua conta para assinar", description: "Leva menos de um minuto. Depois você escolhe o cupom e paga, sem sair desta página." },
   auth: { title: "Crie sua conta para assinar", description: "Leva menos de um minuto. Depois você escolhe o cupom e paga, sem sair desta página." },
   summary: { title: "Confirme sua assinatura", description: "Revise o plano, aplique um cupom e siga para o pagamento seguro." },
-  payment: { title: "Pagamento", description: "Digite o cartão aqui mesmo. A cobrança é feita pela Stripe." },
+  payment: { title: "Pagamento", description: "Escolha Pix ou cartão e pague aqui mesmo, sem sair desta página." },
 };
 
 /**
