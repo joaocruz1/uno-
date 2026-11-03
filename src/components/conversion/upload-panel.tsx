@@ -376,8 +376,8 @@ export function UploadPanel({ planName, maxFileMB, onUploaded }: UploadPanelProp
         ) : null}
 
         <fieldset className="mt-6 border-t border-[var(--color-line)] pt-5" disabled={busy || phase === "uploaded"}>
-          <legend className="font-heading text-sm font-semibold text-[var(--color-ink)]">Produto no topo da etiqueta <span className="font-normal text-[var(--color-faint)]">(opcional)</span></legend>
-          <p className="mt-2 text-[11px] leading-5 text-[var(--color-faint)]">Preencha antes de selecionar o PDF para imprimir quantidade, produto e SKU acima da etiqueta. O arquivo não traz esses dados.</p>
+          <legend className="font-heading text-sm font-semibold text-[var(--color-ink)]">Produto na etiqueta <span className="font-normal text-[var(--color-faint)]">(opcional)</span></legend>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--color-faint)]">Preencha antes de selecionar o PDF para imprimir SKU, variação e quantidade na tabela abaixo da DANFE. O arquivo não traz esses dados.</p>
           <div className="mt-3 grid grid-cols-4 gap-3">
             <label className="col-span-3 text-xs text-[var(--color-muted)]">Produto<Input className="mt-2" maxLength={140} value={productTitle} onChange={(event) => setProductTitle(event.currentTarget.value)} /></label>
             <label className="text-xs text-[var(--color-muted)]">Qtd.<Input className="mt-2" type="number" min={1} max={9999} step={1} value={productQuantity} onChange={(event) => setProductQuantity(event.currentTarget.value)} /></label>

@@ -13,7 +13,7 @@ import {
 } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { AppError } from "@/lib/errors";
-import { productHeaderSchema } from "@/lib/product-header";
+import { productInputSchema } from "@/lib/product-header";
 import { outputSizeSchema, sizeDimensions } from "@/lib/label-size";
 import type { Actor } from "@/server/auth/actor";
 import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
@@ -34,7 +34,7 @@ export const createConversionInputSchema = z.object({
   uploadIntentId: z.uuid(),
   template: z.string().max(128).optional(),
   size: outputSizeSchema,
-  product: productHeaderSchema.optional(),
+  product: productInputSchema.optional(),
 }).strict();
 
 export type CreateConversionInput = z.infer<typeof createConversionInputSchema>;

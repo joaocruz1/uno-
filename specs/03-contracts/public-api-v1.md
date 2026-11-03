@@ -164,3 +164,17 @@ any product field is present, ≤ 140 chars), `quantity` (integer 1–9999, defa
 above the label, are never derived from the document, and participate in the
 idempotency fingerprint. Invalid values return `400 invalid_request`.
 `POST /api/v1/batches` rejects these fields. The addition is backward compatible.
+
+# Amendment 2026-11-03 — order items table
+
+The product data is printed as a "SKU / Variação / Qtd" table below the
+fiscal strip (it replaces the picking box above the label). `POST
+/api/v1/conversions` also accepts `items`: a JSON array (≤ 8 KiB, 1–20 entries)
+of `{ sku?, title?, variation?, quantity }`, where `sku` or `title` is required
+(`sku`/`variation` ≤ 60 chars, `title` ≤ 140, `quantity` integer 1–9999). The
+first column shows `sku`, or `title` when there is no SKU. `items` cannot be
+combined with `productTitle`/`quantity`/`sku`/`variation` (`400
+invalid_request`), is part of the idempotency fingerprint and is rejected by
+`POST /api/v1/batches`. Rows that would push the logistics label below 80 %
+scale are not printed; a final row states how many items were left out. The
+stored `conversions.product_header` holds either shape; no migration.

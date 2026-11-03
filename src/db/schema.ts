@@ -17,6 +17,8 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
+import type { ProductHeader } from "@/lib/product-header";
+
 const uuidDefault = sql`gen_random_uuid()::text`;
 const now = sql`now()`;
 
@@ -667,7 +669,7 @@ export const conversions = pgTable(
     errorCode: text("error_code"),
     errorMessage: text("error_message"),
     suggestedSize: text("suggested_size"),
-    productHeader: jsonb("product_header").$type<{ quantity: number; title: string; sku?: string; variation?: string }>(),
+    productHeader: jsonb("product_header").$type<ProductHeader>(),
     queuedAt: timestamp("queued_at", { withTimezone: true }).notNull().default(now),
     processingStartedAt: timestamp("processing_started_at", { withTimezone: true }),
     completedAt: timestamp("completed_at", { withTimezone: true }),

@@ -11,7 +11,9 @@ import { getStorage, type StorageGateway } from "@/server/storage";
 
 const PART_BYTES = 8 * 1_024 * 1_024;
 const MAGIC_SCAN_BYTES = 1_024;
-const MAX_FIELDS = 8;
+const MAX_FIELDS = 9;
+/** Large enough for `items`, a JSON array of up to 20 order lines. */
+const MAX_FIELD_BYTES = 8 * 1_024;
 
 export type PreparedApiUpload = {
   trackingId: string;
@@ -203,7 +205,7 @@ export async function parseApiMultipart(
   timer.unref();
   const fields: Record<string, string> = {};
   const files: PreparedApiUpload[] = [];
-  const allowedFields = new Set(["template", "size", "widthMm", "heightMm", "quantity", "productTitle", "sku", "variation"]);
+  const allowedFields = new Set(["template", "size", "widthMm", "heightMm", "quantity", "productTitle", "sku", "variation", "items"]);
   let ordinal = 0;
   let terminalError: unknown;
   let chain = Promise.resolve();
@@ -212,7 +214,7 @@ export async function parseApiMultipart(
   try {
     const currentParser = Busboy({
       headers: { "content-type": contentType },
-      limits: { files: input.maxFiles, fileSize: input.maxFileBytes, fields: MAX_FIELDS, fieldSize: 512, parts: input.maxFiles + MAX_FIELDS },
+      limits: { files: input.maxFiles, fileSize: input.maxFileBytes, fields: MAX_FIELDS, fieldSize: MAX_FIELD_BYTES, parts: input.maxFiles + MAX_FIELDS },
     });
     parser = currentParser;
     currentParser.on("field", (name, value, info) => {

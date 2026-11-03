@@ -76,7 +76,7 @@ export function parseEffectiveMultipartOptions(fields: Record<string, string>): 
   try {
     product = parseProductFields(fields);
   } catch {
-    throw new AppError("invalid_request", "Dados do produto inválidos: informe productTitle e, se desejar, quantity, sku e variation.", 400);
+    throw new AppError("invalid_request", "Dados do produto inválidos: envie productTitle (e, se desejar, quantity, sku e variation) ou items com um array JSON de até 20 itens { sku ou title, variation, quantity }.", 400);
   }
   return { template, size, ...(product ? { product } : {}) };
 }

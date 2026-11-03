@@ -28,78 +28,6 @@ export class VectorPdfComposer implements Composer {
           height: region.outputBox.top - region.outputBox.bottom,
         });
       }
-      const header = plan.productHeader;
-      if (header) {
-        const regular = await output.embedFont(StandardFonts.Helvetica);
-        const bold = await output.embedFont(StandardFonts.HelveticaBold);
-        // Standard fonts cover WinAnsi only; anything else would abort the whole label.
-        const safe = (value: string) => [...value.normalize("NFC")].filter((character) => {
-          const code = character.codePointAt(0)!;
-          return (code >= 0x20 && code <= 0x7e) || (code >= 0xa1 && code <= 0xff);
-        }).join("").replace(/\s+/g, " ").trim();
-        const fit = (value: string, font: typeof regular, size: number, width: number) => {
-          if (font.widthOfTextAtSize(value, size) <= width) return value;
-          let text = value;
-          while (text.length > 1 && font.widthOfTextAtSize(`${text}...`, size) > width) text = text.slice(0, -1);
-          return `${text.trimEnd()}...`;
-        };
-        const { box, product } = header;
-        const boxWidth = box.right - box.left;
-        page.drawRectangle({
-          x: box.left, y: box.bottom, width: boxWidth, height: box.top - box.bottom,
-          borderColor: rgb(0, 0, 0), borderWidth: 0.6, borderDashArray: [2, 1.5],
-        });
-        const quantity = String(product.quantity);
-        const columnWidth = 52;
-        const quantitySize = quantity.length > 2 ? 17 : 22;
-        const centerInColumn = (text: string, font: typeof regular, size: number, y: number) =>
-          page.drawText(text, { x: box.left + (columnWidth - font.widthOfTextAtSize(text, size)) / 2, y, size, font });
-        centerInColumn(quantity, bold, quantitySize, box.bottom + 20);
-        centerInColumn(product.quantity === 1 ? "Unidade" : "Unidades", regular, 6, box.bottom + 10);
-        const textLeft = box.left + columnWidth + 2;
-        const textWidth = box.right - textLeft - 4;
-        let cursor = box.top - 9;
-        if (product.quantity > 1) {
-          page.drawText("ATENÇÃO À QUANTIDADE", { x: textLeft, y: cursor, size: 6.5, font: bold });
-          cursor -= 8.5;
-        }
-        const words = safe(product.title).split(" ");
-        const lines: string[] = [];
-        for (const word of words) {
-          const candidate = lines.length > 0 ? `${lines[lines.length - 1]} ${word}` : word;
-          if (lines.length > 0 && bold.widthOfTextAtSize(candidate, 7.5) <= textWidth) lines[lines.length - 1] = candidate;
-          else lines.push(word);
-        }
-        const titleLines = lines.length > 2 ? [lines[0], lines.slice(1).join(" ")] : lines;
-        for (const line of titleLines) {
-          page.drawText(fit(line, bold, 7.5, textWidth), { x: textLeft, y: cursor, size: 7.5, font: bold });
-          cursor -= 8.5;
-        }
-        const sku = product.sku ? safe(product.sku) : "";
-        const badge = quantity;
-        const badgeWidth = bold.widthOfTextAtSize(badge, 7) + 4;
-        const quantityLabel = "Qtd:";
-        const tailWidth = regular.widthOfTextAtSize(quantityLabel, 7) + 3 + badgeWidth;
-        let x = textLeft;
-        if (sku) {
-          page.drawText("SKU:", { x, y: cursor, size: 7, font: regular });
-          x += regular.widthOfTextAtSize("SKU:", 7) + 2.5;
-          const shown = fit(sku, bold, 7, textWidth - (x - textLeft) - tailWidth - 10);
-          page.drawText(shown, { x, y: cursor, size: 7, font: bold });
-          x += bold.widthOfTextAtSize(shown, 7) + 4;
-          page.drawText("-", { x, y: cursor, size: 7, font: regular });
-          x += regular.widthOfTextAtSize("-", 7) + 4;
-        }
-        page.drawText(quantityLabel, { x, y: cursor, size: 7, font: regular });
-        x += regular.widthOfTextAtSize(quantityLabel, 7) + 3;
-        page.drawRectangle({ x, y: cursor - 1.6, width: badgeWidth, height: 8.2, color: rgb(0, 0, 0) });
-        page.drawText(badge, { x: x + 2, y: cursor, size: 7, font: bold, color: rgb(1, 1, 1) });
-        cursor -= 8.5;
-        const variation = product.variation ? safe(product.variation) : "";
-        if (variation && cursor > box.bottom + 2) {
-          page.drawText(fit(variation, regular, 6.5, textWidth), { x: textLeft, y: cursor, size: 6.5, font: regular });
-        }
-      }
       const strip = plan.fiscalStrip;
       if (strip) {
         const regular = await output.embedFont(StandardFonts.Helvetica);
@@ -130,6 +58,61 @@ export class VectorPdfComposer implements Composer {
           height: strip.barcodeOutputBox.top - strip.barcodeOutputBox.bottom,
         });
         centered(strip.summary.accessKey, regular, 5.5, strip.digitsBaseline);
+      }
+      const table = plan.itemsTable;
+      if (table) {
+        const regular = await output.embedFont(StandardFonts.Helvetica);
+        const bold = await output.embedFont(StandardFonts.HelveticaBold);
+        // Standard fonts cover WinAnsi only; anything else would abort the whole label.
+        const safe = (value: string) => [...value.normalize("NFC")].filter((character) => {
+          const code = character.codePointAt(0)!;
+          return (code >= 0x20 && code <= 0x7e) || (code >= 0xa1 && code <= 0xff);
+        }).join("").replace(/\s+/g, " ").trim();
+        const fit = (value: string, font: typeof regular, size: number, width: number) => {
+          if (font.widthOfTextAtSize(value, size) <= width) return value;
+          let text = value;
+          while (text.length > 1 && font.widthOfTextAtSize(`${text}...`, size) > width) text = text.slice(0, -1);
+          return `${text.trimEnd()}...`;
+        };
+        const { box, headerHeight, rowHeight } = table;
+        const width = box.right - box.left;
+        // SKU | Variação | Qtd, as on the picking slips sellers already use.
+        const quantityLeft = box.right - 30;
+        const variationLeft = box.left + width * 0.56;
+        const line = (x1: number, y1: number, x2: number, y2: number, thickness = 0.5) =>
+          page.drawLine({ start: { x: x1, y: y1 }, end: { x: x2, y: y2 }, thickness, color: rgb(0, 0, 0) });
+        page.drawRectangle({ x: box.left, y: box.bottom, width, height: box.top - box.bottom, borderColor: rgb(0, 0, 0), borderWidth: 0.8 });
+        const headerBottom = box.top - headerHeight;
+        line(box.left, headerBottom, box.right, headerBottom, 0.8);
+        const rows = table.items.length + (table.hidden > 0 ? 1 : 0);
+        const columnsBottom = box.top - headerHeight - table.items.length * rowHeight;
+        line(variationLeft, box.top, variationLeft, columnsBottom);
+        line(quantityLeft, box.top, quantityLeft, columnsBottom);
+        const headerBaseline = headerBottom + 2.8;
+        page.drawText("SKU", { x: box.left + 3, y: headerBaseline, size: 6.5, font: bold });
+        page.drawText("Variação", { x: variationLeft + 3, y: headerBaseline, size: 6.5, font: bold });
+        page.drawText("Qtd", { x: quantityLeft + (30 - bold.widthOfTextAtSize("Qtd", 6.5)) / 2, y: headerBaseline, size: 6.5, font: bold });
+        for (const [index, item] of table.items.entries()) {
+          const top = headerBottom - index * rowHeight;
+          const bottom = top - rowHeight;
+          if (index < rows - 1) line(box.left, bottom, box.right, bottom, 0.3);
+          const baseline = bottom + 3;
+          const name = safe(item.sku ?? item.title ?? "");
+          page.drawText(fit(name, regular, 7, variationLeft - box.left - 6), { x: box.left + 3, y: baseline, size: 7, font: regular });
+          const variation = item.variation ? safe(item.variation) : "";
+          if (variation) page.drawText(fit(variation, regular, 7, quantityLeft - variationLeft - 6), { x: variationLeft + 3, y: baseline, size: 7, font: regular });
+          const quantity = String(item.quantity);
+          const quantityX = quantityLeft + (30 - bold.widthOfTextAtSize(quantity, 7.5)) / 2;
+          // More than one unit is the usual picking mistake: invert the cell so it stands out.
+          if (item.quantity > 1) {
+            page.drawRectangle({ x: quantityLeft + 0.4, y: bottom + 0.4, width: box.right - quantityLeft - 0.8, height: rowHeight - 0.8, color: rgb(0, 0, 0) });
+          }
+          page.drawText(quantity, { x: quantityX, y: baseline, size: 7.5, font: bold, color: item.quantity > 1 ? rgb(1, 1, 1) : rgb(0, 0, 0) });
+        }
+        if (table.hidden > 0) {
+          const notice = `+ ${table.hidden} ${table.hidden === 1 ? "item não coube" : "itens não couberam"} na etiqueta`;
+          page.drawText(notice, { x: box.left + 3, y: box.bottom + 3, size: 6.5, font: bold });
+        }
       }
       return { bytes: await output.save({ useObjectStreams: true }), layout: plan };
     } catch (error) {
