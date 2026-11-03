@@ -15,6 +15,7 @@ import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions, type OutputSize } from "@/lib/label-size";
 import { getPlanCatalog, type PlanId } from "@/lib/plans";
+import type { ProductHeader } from "@/lib/product-header";
 import type { Actor } from "@/server/auth/actor";
 import { assertUsageAvailable, effectivePlanFromSubscription, lockCurrentUsagePeriod, subscriptionEntitlementColumns } from "@/server/billing/entitlements";
 import { enforceRateLimit } from "@/server/rate-limit";
@@ -40,7 +41,7 @@ type SourceConversion = {
   sourceByteLength: number;
   artifactsExpireAt: Date | null;
   outputPreset: string;
-  productHeader?: { quantity: number; title: string; sku?: string; variation?: string } | null;
+  productHeader?: ProductHeader | null;
   outputWidthMm: string;
   outputHeightMm: string;
   templateKey: string;

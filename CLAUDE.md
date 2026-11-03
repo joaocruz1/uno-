@@ -12,10 +12,13 @@ Responda ao dono do projeto em português (pt-BR), de forma direta.
 pedido de marketplace (etiqueta logística + DANFE simplificada) e devolve uma
 única etiqueta 100 × 150 mm, com:
 
-1. cabeçalho opcional de separação (quantidade, produto, SKU, variação);
-2. a etiqueta logística original, sem espaços em branco;
-3. uma faixa "DANFE SIMPLIFICADA - ETIQUETA" (tipo, NF, série, emissão e o
-   código de barras original da chave de acesso).
+1. a etiqueta logística original, sem espaços em branco;
+2. uma faixa "DANFE SIMPLIFICADA - ETIQUETA" (tipo, NF, série, emissão e o
+   código de barras original da chave de acesso);
+3. tabela opcional de itens "SKU / Variação / Qtd" (até 20 itens via `items`
+   na API, ou um produto pelos campos avulsos). Os itens vêm do ERP: a DANFE
+   simplificada do ML não traz itens. Até 2026-11-03 isso era uma caixa
+   tracejada acima da etiqueta.
 
 A referência visual escolhida pelo dono é o produto Etiqjá: uma etiqueta 10×15
 compacta, não uma página longa preservando tudo. A primeira versão (100 × 250,

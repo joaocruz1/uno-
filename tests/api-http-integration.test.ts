@@ -152,6 +152,15 @@ describe.skipIf(!enabled)("public API over HTTP", () => {
     const compact = await poll(`/api/v1/conversions/${String(labelled.body.id)}`, pro.secret);
     expect(compact.status).toBe("completed");
     expect(compact.size).toMatchObject({ preset: "100x150", widthMm: 100, heightMm: 150 });
+    const listed = await call("/api/v1/conversions", pro.secret, {
+      method: "POST",
+      body: form([{ field: "file", name: "synthetic-fiscal.pdf", bytes: await syntheticPdf({ fiscalSummary: true }) }], {
+        size: "100x150",
+        items: JSON.stringify([{ sku: "KIT-SINTETICO", variation: "Cinza", quantity: 2 }, { sku: "BONE-SINTETICO", variation: "Preto", quantity: 1 }]),
+      }),
+    });
+    expect(listed.response.status).toBe(202);
+    expect((await poll(`/api/v1/conversions/${String(listed.body.id)}`, pro.secret)).status).toBe("completed");
     const badQuantity = await call("/api/v1/conversions", pro.secret, {
       method: "POST", body: form([{ field: "file", name: "synthetic.pdf", bytes: pdf }], { ...size, productTitle: "Produto", quantity: "zero" }),
     });
@@ -160,6 +169,10 @@ describe.skipIf(!enabled)("public API over HTTP", () => {
       method: "POST", body: form([{ field: "files", name: "synthetic.pdf", bytes: pdf }], { ...size, productTitle: "Produto" }),
     });
     expect(batchWithProduct.response.status).toBe(400);
+    const batchWithItems = await call("/api/v1/batches", pro.secret, {
+      method: "POST", body: form([{ field: "files", name: "synthetic.pdf", bytes: pdf }], { ...size, items: JSON.stringify([{ sku: "A", quantity: 1 }]) }),
+    });
+    expect(batchWithItems.response.status).toBe(400);
 
     const batch = await call("/api/v1/batches", pro.secret, {
       method: "POST", idempotencyKey: `synthetic-${randomUUID()}`,
@@ -179,7 +192,7 @@ describe.skipIf(!enabled)("public API over HTTP", () => {
     expect(Buffer.from(await archive.arrayBuffer()).subarray(0, 2).toString("ascii")).toBe("PK");
 
     const usageAfter = await call("/api/v1/usage", pro.secret);
-    expect(usageAfter.body).toMatchObject({ confirmed: 4, reserved: 0 });
+    expect(usageAfter.body).toMatchObject({ confirmed: 5, reserved: 0 });
     expect((await call("/api/v1/usage", other.secret)).body).toMatchObject({ confirmed: 0, reserved: 0 });
   }, 240_000);
 });

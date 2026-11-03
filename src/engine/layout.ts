@@ -1,6 +1,6 @@
 import { EngineError } from "./errors";
 import { findTemplateDefinition } from "./templates";
-import type { ConversionOptions, Extraction, ExtractedRegion, FiscalStrip, Layout, LayoutPlan, OutputSize, PageRole, PdfRect, PlacedRegion, ProductHeader } from "./types";
+import type { ConversionOptions, Extraction, ExtractedRegion, FiscalStrip, Layout, LayoutPlan, OutputSize, PageRole, PdfRect, PickingItem, PlacedRegion, ProductHeader } from "./types";
 
 const POINTS_PER_MM = 72 / 25.4;
 const MARGIN_PT = 6;
@@ -17,18 +17,53 @@ const STRIP_DIGITS_PT = 8;
 const STRIP_HEIGHT_PT = STRIP_TITLE_PT + STRIP_LINE_PT + 2 + STRIP_BARCODE_PT + STRIP_DIGITS_PT;
 /** Below this the logistics codes and text are no longer trusted to print legibly. */
 const MIN_COMPACT_SCALE = 0.8;
-/** Dashed picking box above the label when the caller supplies product data. */
-const HEADER_HEIGHT_PT = 52;
-const HEADER_GAP_PT = 2;
+/** "SKU / Variação / Qtd" table below the fiscal strip when the caller supplies picking data. */
+const TABLE_GAP_PT = 3;
+const TABLE_HEADER_PT = 9;
+const TABLE_ROW_PT = 10;
+const MAX_ITEMS = 20;
 const TRIM_PADDING_PT = 2.5;
 
-function isProduct(value: ProductHeader | undefined): value is ProductHeader {
-  return Boolean(value) && Number.isInteger(value!.quantity) && value!.quantity >= 1 && value!.quantity <= 9_999 &&
-    typeof value!.title === "string" && value!.title.trim().length > 0;
+const text = (value: unknown, max: number) =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max && !/[\x00-\x1f\x7f]/u.test(value);
+
+function isItem(value: PickingItem): boolean {
+  return typeof value === "object" && value !== null && Number.isInteger(value.quantity) && value.quantity >= 1 && value.quantity <= 9_999 &&
+    (value.title === undefined || text(value.title, 140)) && (value.sku === undefined || text(value.sku, 60)) &&
+    (value.variation === undefined || text(value.variation, 60)) && (value.sku !== undefined || value.title !== undefined);
 }
 
-function headerBox(widthPt: number, top: number): PdfRect {
-  return { left: STRIP_SIDE_PT, right: widthPt - STRIP_SIDE_PT, top, bottom: top - HEADER_HEIGHT_PT };
+/** Both input shapes become table rows; anything malformed is refused instead of printed. */
+function pickingItems(product: ProductHeader | undefined): PickingItem[] | undefined {
+  if (product === undefined) return undefined;
+  if (typeof product !== "object" || product === null) throw new EngineError("validation_failed");
+  const items = "items" in product ? product.items : [product];
+  if (!Array.isArray(items) || items.length < 1 || items.length > MAX_ITEMS || !items.every(isItem)) {
+    throw new EngineError("validation_failed");
+  }
+  return items;
+}
+
+/** Height of a table showing `shown` rows, plus one summary row when some items are left out. */
+function tableHeight(shown: number, total: number): number {
+  return TABLE_GAP_PT + TABLE_HEADER_PT + (shown + (shown < total ? 1 : 0)) * TABLE_ROW_PT;
+}
+
+/** Most rows (at least one) whose table fits; undefined when not even one does. */
+function fittingRows(total: number, fits: (height: number) => boolean): number | undefined {
+  for (let shown = total; shown >= 1; shown -= 1) if (fits(tableHeight(shown, total))) return shown;
+  return undefined;
+}
+
+function itemsTable(widthPt: number, top: number, items: PickingItem[], shown: number): NonNullable<LayoutPlan["itemsTable"]> {
+  const boxTop = top - TABLE_GAP_PT;
+  return {
+    box: { left: STRIP_SIDE_PT, right: widthPt - STRIP_SIDE_PT, top: boxTop, bottom: top - tableHeight(shown, items.length) },
+    headerHeight: TABLE_HEADER_PT,
+    rowHeight: TABLE_ROW_PT,
+    items: items.slice(0, shown),
+    hidden: items.length - shown,
+  };
 }
 
 function dimensions(outputSize: OutputSize): { widthMm: number; heightMm: number } {
@@ -82,8 +117,8 @@ function placeCodes(extraction: Extraction, placed: PlacedRegion[], scale: numbe
 }
 
 /**
- * Drops blank bands above and below a region's real content so the picking
- * header can share the page without shrinking the label more than necessary.
+ * Drops blank bands above and below a region's real content so the items
+ * table can share the page without shrinking the label more than necessary.
  */
 function trimToContent(region: ExtractedRegion, extraction: Extraction): ExtractedRegion {
   const inside = [
@@ -101,25 +136,24 @@ export class SafeLayoutEngine implements Layout {
     const { widthMm, heightMm } = dimensions(outputSize);
     const widthPt = widthMm * POINTS_PER_MM;
     const heightPt = heightMm * POINTS_PER_MM;
-    if (options.product !== undefined && !isProduct(options.product)) throw new EngineError("validation_failed");
-    const product = options.product;
-    const compact = this.compact(extraction, { widthMm, heightMm, widthPt, heightPt }, product);
+    const items = pickingItems(options.product);
+    const compact = this.compact(extraction, { widthMm, heightMm, widthPt, heightPt }, items);
     if (compact) return compact;
-    const headerHeight = product ? HEADER_HEIGHT_PT + HEADER_GAP_PT : 0;
 
     const regions = [...extraction.regions].sort((a, b) =>
       roleOrder(a.role) - roleOrder(b.role) || b.box.top - a.box.top,
     );
     const widest = Math.max(...regions.map((region) => region.box.right - region.box.left));
     const usefulHeight = regions.reduce((total, region) => total + height(region.box), 0);
-    const requiredHeight = usefulHeight + MARGIN_PT * 2 + GAP_PT * Math.max(0, regions.length - 1) + headerHeight;
-    if (widthPt + 0.5 < widest || heightPt + 0.5 < requiredHeight) {
+    const requiredHeight = usefulHeight + MARGIN_PT * 2 + GAP_PT * Math.max(0, regions.length - 1);
+    const shown = items ? fittingRows(items.length, (table) => heightPt + 0.5 >= requiredHeight + table) : 0;
+    if (widthPt + 0.5 < widest || heightPt + 0.5 < requiredHeight || shown === undefined) {
       throw new EngineError("format_too_small");
     }
-    const { placed } = stack(regions, widthPt, heightPt - MARGIN_PT - headerHeight, 1);
+    const { placed, bottom } = stack(regions, widthPt, heightPt - MARGIN_PT, 1);
     return {
       extraction, widthMm, heightMm, widthPt, heightPt, scale: 1, regions: placed, protectedCodes: placeCodes(extraction, placed, 1),
-      ...(product ? { productHeader: { box: headerBox(widthPt, heightPt - MARGIN_PT), product } } : {}),
+      ...(items ? { itemsTable: itemsTable(widthPt, bottom, items, shown) } : {}),
     };
   }
 
@@ -130,7 +164,7 @@ export class SafeLayoutEngine implements Layout {
   private compact(
     extraction: Extraction,
     page: { widthMm: number; heightMm: number; widthPt: number; heightPt: number },
-    product?: ProductHeader,
+    items?: PickingItem[],
   ): LayoutPlan | undefined {
     const summary = extraction.fiscalSummary;
     const definition = findTemplateDefinition(extraction.detection.templateKey, extraction.detection.templateVersion);
@@ -138,17 +172,20 @@ export class SafeLayoutEngine implements Layout {
     if (!summary || !barcode) return undefined;
 
     const regions = extraction.regions.filter((region) => region.role === "logistics").sort((a, b) => b.box.top - a.box.top)
-      .map((region) => (product ? trimToContent(region, extraction) : region));
+      .map((region) => (items ? trimToContent(region, extraction) : region));
     if (regions.length === 0) return undefined;
     const widest = Math.max(...regions.map((region) => region.box.right - region.box.left));
     const barcodeWidth = barcode.box.right - barcode.box.left;
     const usefulHeight = regions.reduce((total, region) => total + height(region.box), 0);
-    const headerHeight = product ? HEADER_HEIGHT_PT + HEADER_GAP_PT : 0;
-    const fixedHeight = COMPACT_MARGIN_PT * 2 + GAP_PT * (regions.length - 1) + STRIP_GAP_PT + STRIP_HEIGHT_PT + headerHeight;
-    const scale = Math.min(1, (page.heightPt - fixedHeight) / usefulHeight, (page.widthPt + 0.5) / widest);
-    if (scale < MIN_COMPACT_SCALE || barcodeWidth > page.widthPt - 2 * STRIP_SIDE_PT + 0.5) throw new EngineError("format_too_small");
+    const fixedHeight = COMPACT_MARGIN_PT * 2 + GAP_PT * (regions.length - 1) + STRIP_GAP_PT + STRIP_HEIGHT_PT;
+    const scaleWith = (table: number) => Math.min(1, (page.heightPt - fixedHeight - table) / usefulHeight, (page.widthPt + 0.5) / widest);
+    // The label keeps priority: rows that would push it below the legibility floor are summarized instead.
+    const shown = items ? fittingRows(items.length, (table) => scaleWith(table) >= MIN_COMPACT_SCALE) : 0;
+    if (shown === undefined || barcodeWidth > page.widthPt - 2 * STRIP_SIDE_PT + 0.5) throw new EngineError("format_too_small");
+    const scale = scaleWith(items ? tableHeight(shown, items.length) : 0);
+    if (scale < MIN_COMPACT_SCALE) throw new EngineError("format_too_small");
 
-    const { placed, bottom } = stack(regions, page.widthPt, page.heightPt - COMPACT_MARGIN_PT - headerHeight, scale);
+    const { placed, bottom } = stack(regions, page.widthPt, page.heightPt - COMPACT_MARGIN_PT, scale);
     const titleTop = bottom - STRIP_GAP_PT;
     const titleBar = { left: STRIP_SIDE_PT, right: page.widthPt - STRIP_SIDE_PT, top: titleTop, bottom: titleTop - STRIP_TITLE_PT };
     const lineBaseline = titleBar.bottom - STRIP_LINE_PT + 2;
@@ -179,7 +216,7 @@ export class SafeLayoutEngine implements Layout {
         { ...barcode, box: barcodeSourceBox, outputBox: barcodeOutputBox },
       ],
       fiscalStrip,
-      ...(product ? { productHeader: { box: headerBox(page.widthPt, page.heightPt - COMPACT_MARGIN_PT), product } } : {}),
+      ...(items ? { itemsTable: itemsTable(page.widthPt, barcodeOutputBox.bottom - STRIP_DIGITS_PT, items, shown) } : {}),
     };
   }
 }

@@ -51,13 +51,21 @@ export type ProtectedCodeRegion = {
   box: PdfRect;
 };
 
-/** Optional picking data supplied by the caller; it is never read from the document. */
-export type ProductHeader = {
+/** One order line of the picking table; it needs a SKU or a title to be identifiable. */
+export type PickingItem = {
   quantity: number;
-  title: string;
+  title?: string;
   sku?: string;
   variation?: string;
 };
+
+/**
+ * Optional picking data supplied by the caller; it is never read from the document.
+ * Either a single product (the original API fields) or the order's item list.
+ */
+export type ProductHeader =
+  | { quantity: number; title: string; sku?: string; variation?: string }
+  | { items: PickingItem[] };
 
 export type ConversionOptions = { product?: ProductHeader };
 
@@ -106,7 +114,8 @@ export type LayoutPlan = {
   regions: PlacedRegion[];
   protectedCodes: PlacedProtectedCode[];
   fiscalStrip?: FiscalStrip;
-  productHeader?: { box: PdfRect; product: ProductHeader };
+  /** "SKU / Variação / Qtd" table below the fiscal strip; `hidden` items did not fit. */
+  itemsTable?: { box: PdfRect; headerHeight: number; rowHeight: number; items: PickingItem[]; hidden: number };
 };
 
 export type ComposedPdf = { bytes: Uint8Array; layout: LayoutPlan };

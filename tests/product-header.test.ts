@@ -19,6 +19,19 @@ describe("product header input", () => {
     expect(() => productHeaderSchema.parse({ quantity: 1, title: "Produto", price: 10 })).toThrow();
   });
 
+  it("accepts the order's item list as a JSON array, but not mixed with the single-product fields", () => {
+    const items = [{ sku: "KIT-01", variation: "Cinza", quantity: 2 }, { title: "Bone preto", quantity: 1 }];
+    expect(parseProductFields({ items: JSON.stringify(items) })).toEqual({ items });
+    expect(() => parseProductFields({ items: JSON.stringify(items), productTitle: "Produto" })).toThrow();
+    for (const invalid of ["[]", "{}", "nao-e-json", JSON.stringify([{ quantity: 1 }]), JSON.stringify([{ sku: "A", quantity: 0 }]),
+      JSON.stringify([{ sku: "A", quantity: 1, price: 10 }]), JSON.stringify(Array.from({ length: 21 }, () => ({ sku: "A", quantity: 1 })))]) {
+      expect(() => parseProductFields({ items: invalid })).toThrow();
+    }
+    const withItems = parseEffectiveMultipartOptions({ size: "100x150", items: JSON.stringify(items) });
+    expect(withItems.product).toEqual({ items });
+    expect(() => parseEffectiveMultipartOptions({ size: "100x150", items: "[]" })).toThrowError(expect.objectContaining({ code: "invalid_request" }));
+  });
+
   it("is part of the effective API options and of the idempotency fingerprint", () => {
     const plain = parseEffectiveMultipartOptions({ size: "100x150" });
     const withProduct = parseEffectiveMultipartOptions({ size: "100x150", productTitle: "Produto", quantity: "2" });

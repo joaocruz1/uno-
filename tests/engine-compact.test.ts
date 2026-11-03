@@ -46,17 +46,38 @@ describe("compact fiscal strip", () => {
       .resolves.toMatchObject({ scale: 1 });
   });
 
-  it("prints caller-supplied picking data above the label and still validates every code", async () => {
-    const product = { quantity: 2, title: "Produto sintetico de teste com nome longo para quebrar em duas linhas", sku: "SKU-SINTETICO-01", variation: "Cor: Verde" };
+  it("prints caller-supplied picking data as a table below the fiscal strip and still validates every code", async () => {
+    const product = { quantity: 2, title: "Produto sintetico de teste com nome longo", sku: "SKU-SINTETICO-01", variation: "Cor: Verde" };
     const extraction = await extract(await syntheticPdf({ fiscalSummary: true }));
     const plan = await new SafeLayoutEngine().layout(extraction, { preset: "100x150" }, { product });
-    expect(plan.productHeader?.product).toEqual(product);
+    expect(plan.itemsTable?.items).toEqual([product]);
+    expect(plan.itemsTable?.hidden).toBe(0);
     expect(plan.scale).toBeGreaterThanOrEqual(0.8);
-    expect(plan.productHeader!.box.bottom).toBeGreaterThan(plan.regions[0]!.outputBox.top);
+    expect(plan.itemsTable!.box.top).toBeLessThan(plan.fiscalStrip!.digitsBaseline);
+    expect(plan.itemsTable!.box.bottom).toBeGreaterThanOrEqual(0);
     const result = await convertPdf(await syntheticPdf({ fiscalSummary: true }), { preset: "100x150" }, undefined, undefined, { product });
     expect(result.validation.codesEquivalent).toBe(true);
     await expect(new SafeLayoutEngine().layout(extraction, { preset: "100x150" }, { product: { quantity: 0, title: "x" } }))
       .rejects.toMatchObject({ code: "validation_failed" });
+  });
+
+  it("lists every order item that fits and summarizes the rest instead of shrinking the label", async () => {
+    const extraction = await extract(await syntheticPdf({ fiscalSummary: true }));
+    const two = { items: [{ sku: "KIT-01", variation: "Cinza", quantity: 2 }, { title: "Bone preto", quantity: 1 }] };
+    const plan = await new SafeLayoutEngine().layout(extraction, { preset: "100x150" }, { product: two });
+    expect(plan.itemsTable).toMatchObject({ items: two.items, hidden: 0 });
+    const many = { items: Array.from({ length: 20 }, (_, index) => ({ sku: `SKU-${index}`, quantity: 1 })) };
+    const crowded = await new SafeLayoutEngine().layout(extraction, { preset: "100x150" }, { product: many });
+    expect(crowded.scale).toBeGreaterThanOrEqual(0.8);
+    expect(crowded.itemsTable!.items.length).toBeGreaterThanOrEqual(1);
+    expect(crowded.itemsTable!.items.length + crowded.itemsTable!.hidden).toBe(20);
+    expect(crowded.itemsTable!.hidden).toBeGreaterThan(0);
+    const result = await convertPdf(await syntheticPdf({ fiscalSummary: true }), { preset: "100x150" }, undefined, undefined, { product: many });
+    expect(result.validation.codesEquivalent).toBe(true);
+    for (const items of [[], [{ quantity: 1 }], [{ sku: "A", quantity: 10_000 }], Array.from({ length: 21 }, () => ({ sku: "A", quantity: 1 }))]) {
+      await expect(new SafeLayoutEngine().layout(extraction, { preset: "100x150" }, { product: { items } }))
+        .rejects.toMatchObject({ code: "validation_failed" });
+    }
   });
 
   it("rejects a format where the label would have to shrink below the legibility floor", async () => {

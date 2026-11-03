@@ -34,11 +34,17 @@ const SAMPLES = {
   -H "Authorization: Bearer $UNO_API_KEY" \\
   -H "Idempotency-Key: pedido-001-v1" \\
   -F "file=@etiqueta.pdf;type=application/pdf" \\
-  -F "size=100x150"`,
+  -F "size=100x150" \\
+  -F 'items=[{"sku":"KIT-01","variation":"Cinza","quantity":2},{"sku":"BONE-02","variation":"Preto","quantity":1}]'`,
     node: `import { openAsBlob } from "node:fs";
 const body = new FormData();
 body.append("file", await openAsBlob("etiqueta.pdf", { type: "application/pdf" }), "etiqueta.pdf");
 body.append("size", "100x150");
+// Opcional: itens do pedido, impressos na tabela SKU / Variação / Qtd.
+body.append("items", JSON.stringify([
+  { sku: "KIT-01", variation: "Cinza", quantity: 2 },
+  { sku: "BONE-02", variation: "Preto", quantity: 1 },
+]));
 
 const res = await fetch(\`\${process.env.UNO_API_URL}/api/v1/conversions\`, {
   method: "POST", body,
@@ -48,8 +54,12 @@ const res = await fetch(\`\${process.env.UNO_API_URL}/api/v1/conversions\`, {
   },
 });
 const conversion = await res.json(); // HTTP 202`,
-    python: `import os, requests
+    python: `import json, os, requests
 
+items = [
+    {"sku": "KIT-01", "variation": "Cinza", "quantity": 2},
+    {"sku": "BONE-02", "variation": "Preto", "quantity": 1},
+]
 with open("etiqueta.pdf", "rb") as label:
     res = requests.post(
         f"{os.environ['UNO_API_URL']}/api/v1/conversions",
@@ -58,7 +68,7 @@ with open("etiqueta.pdf", "rb") as label:
             "Idempotency-Key": "pedido-001-v1",
         },
         files={"file": ("etiqueta.pdf", label, "application/pdf")},
-        data={"size": "100x150"},
+        data={"size": "100x150", "items": json.dumps(items)},  # items é opcional
     )
 conversion = res.json()`,
   },
@@ -330,8 +340,14 @@ export function ApiReference({ rates }: { rates: { STARTER: number; PRO: number;
                 <Param name="size" type="string" required>100x150, 100x100, a6 ou custom.</Param>
                 <Param name="widthMm" type="number">Largura 50–210, quando size=custom.</Param>
                 <Param name="heightMm" type="number">Altura 50–300, quando size=custom.</Param>
+                <Param name="items" type="string (JSON)">Itens do pedido, impressos numa tabela SKU / Variação / Qtd abaixo da DANFE. Array de 1 a 20 objetos <code className="font-mono text-[13px] text-zinc-300">{"{ sku, title, variation, quantity }"}</code>: sku (até 60) ou title (até 140) obrigatório, variation até 60, quantity inteiro 1–9999. Não combine com os campos de produto único.</Param>
+                <Param name="productTitle" type="string">Pedido de um produto só: nome (até 140), obrigatório se enviar quantity, sku ou variation. Vira uma linha da tabela.</Param>
+                <Param name="quantity" type="number">Com productTitle: inteiro 1–9999 (padrão 1).</Param>
+                <Param name="sku" type="string">Com productTitle: até 60 caracteres.</Param>
+                <Param name="variation" type="string">Com productTitle: até 60 caracteres, por exemplo Cor: Verde.</Param>
                 <Param name="Idempotency-Key" type="header" required>Repetir a mesma chave retorna o mesmo resultado.</Param>
               </div>
+              <p>O PDF do marketplace não traz os itens do pedido (a DANFE simplificada do Mercado Livre vem sem eles): mande-os do seu ERP. A etiqueta logística tem prioridade e não encolhe abaixo de 80%; no 10×15 cabem cerca de 3 itens, e a última linha avisa quantos ficaram de fora. Quantidade acima de 1 sai em destaque. Os lotes não aceitam esses campos.</p>
             </Endpoint>
 
             <Endpoint id="conversions-get" method="GET" path="/api/v1/conversions/{id}" title="Consultar uma conversão"

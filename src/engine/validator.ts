@@ -96,7 +96,7 @@ export class RenderedPdfValidator implements Validator {
       }
       if (layout.regions.some((region) => !insidePage(region.outputBox, layout.widthPt, layout.heightPt)) ||
         layout.protectedCodes.some((code) => !insidePage(code.outputBox, layout.widthPt, layout.heightPt)) ||
-        (layout.productHeader !== undefined && !insidePage(layout.productHeader.box, layout.widthPt, layout.heightPt))) {
+        (layout.itemsTable !== undefined && !insidePage(layout.itemsTable.box, layout.widthPt, layout.heightPt))) {
         throw new EngineError("validation_failed");
       }
       // The summarized fiscal page is represented by the strip, not by embedded regions.

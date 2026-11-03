@@ -257,16 +257,38 @@ corpo identifica o evento e é igual para todos os endpoints inscritos.
   host público. Endereços internos, privados ou IPs literais são recusados.
 - Não registre o segredo, a assinatura nem o corpo completo em logs.
 
-## Cabeçalho de produto (opcional)
+## Itens do pedido (opcional)
 
-Em `POST /api/v1/conversions`, envie os campos abaixo para imprimir uma caixa de
-separação acima da etiqueta. O PDF do marketplace não contém esses dados; eles
+Em `POST /api/v1/conversions`, envie os itens do pedido para imprimir uma tabela
+**SKU / Variação / Qtd** abaixo da faixa da DANFE. O PDF do marketplace não
+contém esses dados (a DANFE simplificada do Mercado Livre vem sem itens); eles
 vêm do seu ERP.
+
+Pedido com vários itens: campo `items` com um array JSON (até 20 itens, 8 KiB).
+
+| Chave do item | Obrigatório | Valor |
+| --- | --- | --- |
+| `sku` | `sku` ou `title` | até 60 caracteres; é o que aparece na coluna SKU |
+| `title` | `sku` ou `title` | até 140 caracteres; usado na coluna SKU quando não há `sku` |
+| `variation` | não | até 60 caracteres, por exemplo `Cinza` ou `Cor: Verde` |
+| `quantity` | sim | inteiro de 1 a 9999; acima de 1 a célula sai em destaque (preta) |
+
+```bash
+curl --fail-with-body "$UNO_API_URL/api/v1/conversions" \
+  -H "Authorization: Bearer $UNO_API_KEY" \
+  -H "Idempotency-Key: pedido-sintetico-003-v1" \
+  -F "file=@synthetic.pdf;type=application/pdf" \
+  -F "size=100x150" \
+  -F 'items=[{"sku":"KIT-SINTETICO","variation":"Cinza","quantity":2},{"sku":"BONE-SINTETICO","variation":"Preto","quantity":1}]'
+```
+
+Pedido com um produto só: os campos avulsos continuam valendo e viram uma linha
+da tabela. Não combine com `items`.
 
 | Campo | Obrigatório | Valor |
 | --- | --- | --- |
 | `productTitle` | sim, se qualquer campo de produto for enviado | até 140 caracteres |
-| `quantity` | não (padrão 1) | inteiro de 1 a 9999; acima de 1 imprime "ATENÇÃO À QUANTIDADE" |
+| `quantity` | não (padrão 1) | inteiro de 1 a 9999 |
 | `sku` | não | até 60 caracteres |
 | `variation` | não | até 60 caracteres, por exemplo `Cor: Verde` |
 
@@ -280,8 +302,12 @@ curl --fail-with-body "$UNO_API_URL/api/v1/conversions" \
   -F "sku=SKU-SINTETICO-01" -F "variation=Cor: Verde"
 ```
 
+A etiqueta logística tem prioridade: as linhas que a fariam encolher abaixo de
+80% não são impressas, e a última linha da tabela avisa quantos itens ficaram de
+fora (no 100 × 150 cabem cerca de 3 itens com a etiqueta do ML).
+
 Os campos fazem parte da identidade idempotente da requisição. `POST
 /api/v1/batches` recusa esses campos com 400: os dados são por pedido. Com PDF
-digital, a saída padrão de 100 × 150 mm traz cabeçalho (se enviado), etiqueta
-logística e a faixa "DANFE SIMPLIFICADA - ETIQUETA" com NF, série, emissão e o
-código de barras da chave. Caracteres fora do Latin-1 são omitidos na impressão.
+digital, a saída padrão de 100 × 150 mm traz a etiqueta logística, a faixa
+"DANFE SIMPLIFICADA - ETIQUETA" com NF, série, emissão e o código de barras da
+chave e, se enviados, os itens. Caracteres fora do Latin-1 são omitidos na impressão.
