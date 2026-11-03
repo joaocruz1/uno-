@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "UNO · Etiquetas 10×15",
+  "short_name": "UNO",
+  "version": "1.0.0",
+  "description": "Converte as etiquetas do Mercado Livre, Shopee e TikTok Shop em 10×15 prontas para a térmica, no momento do download.",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "action": { "default_title": "UNO", "default_popup": "src/popup/popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "permissions": ["downloads", "storage", "notifications", "tabs"],
+  "host_permissions": [
+    "__UNO_ORIGIN__/*",
+    "*://*.mercadolivre.com.br/*",
+    "*://*.mercadolibre.com/*",
+    "*://*.mercadolibre.com.br/*",
+    "*://*.mercadoshops.com.br/*",
+    "*://*.shopee.com.br/*",
+    "*://*.shopee.com/*",
+    "*://*.susercontent.com/*",
+    "*://*.tiktok.com/*",
+    "*://*.tiktokshop.com/*",
+    "*://*.tiktokglobalshop.com/*",
+    "*://*.tiktokcdn.com/*",
+    "*://*.ibytedtos.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://*.mercadolivre.com.br/*", "*://*.mercadolibre.com/*", "*://*.mercadolibre.com.br/*", "*://*.shopee.com.br/*", "*://*.shopee.com/*", "*://*.tiktok.com/*", "*://*.tiktokshop.com/*", "*://*.tiktokglobalshop.com/*"],
+      "js": ["src/content/blob-hook.js"],
+      "world": "MAIN",
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["*://*.mercadolivre.com.br/*", "*://*.mercadolibre.com/*", "*://*.mercadolibre.com.br/*", "*://*.shopee.com.br/*", "*://*.shopee.com/*", "*://*.tiktok.com/*", "*://*.tiktokshop.com/*", "*://*.tiktokglobalshop.com/*"],
+      "js": ["src/content/blob-reader.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
+      "matches": ["__UNO_ORIGIN__/extensao/conectar*"],
+      "js": ["src/content/connect.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "minimum_chrome_version": "111"
+}

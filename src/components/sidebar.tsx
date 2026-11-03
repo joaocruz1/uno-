@@ -17,6 +17,7 @@ import {
   Layers3,
   ListChecks,
   Package,
+  Puzzle,
   Settings,
   ShieldCheck,
   Webhook,
@@ -39,6 +40,7 @@ const PRIMARY: Item[] = [
 
 const MORE: Item[] = [
   ["Lista Shopee", "/dashboard/shopee-lista", ListChecks],
+  ["Extensão", "/dashboard/extensao", Puzzle],
   ["Lotes", "/dashboard/batches", FileClock],
   ["Uso", "/dashboard/usage", BarChart3],
   ["Indicações", "/dashboard/indicacoes", Gift],

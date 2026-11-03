@@ -16,3 +16,4 @@ specs
 !.env.example
 *.tsbuildinfo
 public/pdfjs
+extension

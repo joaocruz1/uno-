@@ -13,6 +13,7 @@ const LINKS = [
   ["Histórico", "/dashboard/history"],
   ["Assinatura", "/dashboard/billing"],
   ["Lotes", "/dashboard/batches"],
+  ["Extensão", "/dashboard/extensao"],
   ["Uso", "/dashboard/usage"],
   ["Indicações", "/dashboard/indicacoes"],
   ["API", "/dashboard/api"],

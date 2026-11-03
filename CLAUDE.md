@@ -170,3 +170,4 @@ Pendências:
 | Segurança | `docs/security.md` |
 | O que foi e não foi validado | `docs/validation.md`, `docs/implementation-checklist.md` |
 | Prova de impressão | `docs/printing-validation.md` |
+| Extensão do navegador (ML, Shopee, TikTok) | `extension/README.md`, `specs/03-contracts/browser-extension-v1.md` |

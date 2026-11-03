@@ -15,3 +15,6 @@ public/pdfjs/
 # Logos oficiais de marketplaces (marcas de terceiros) ficam fora do Git
 public/channels/*
 !public/channels/README.md
+
+# Pacotes gerados da extensão do navegador
+/extension/dist/
