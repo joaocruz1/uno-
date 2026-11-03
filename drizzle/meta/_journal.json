@@ -141,6 +141,13 @@
       "when": 1792967183150,
       "tag": "0019_strange_songbird",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1793705528922,
+      "tag": "0020_extension_tokens",
+      "breakpoints": true
     }
   ]
 }

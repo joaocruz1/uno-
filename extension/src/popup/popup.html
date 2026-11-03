@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <title>UNO</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="../../icons/icon-32.png" alt="" width="24" height="24">
+    <div><strong>UNO</strong><span>Duas páginas. Uma etiqueta.</span></div>
+  </header>
+
+  <section id="loading" class="muted">Carregando…</section>
+
+  <section id="disconnected" hidden>
+    <p>Conecte sua conta para converter as etiquetas direto no Mercado Livre, Shopee e TikTok Shop.</p>
+    <button id="connect" class="primary">Conectar</button>
+  </section>
+
+  <section id="connected" hidden>
+    <div class="account">
+      <p id="org"></p>
+      <p id="usage" class="muted"></p>
+      <p id="offline" class="warn" hidden></p>
+    </div>
+    <h2>Converter ao baixar</h2>
+    <ul id="toggles"></ul>
+    <h2>Últimas conversões</h2>
+    <ul id="history"><li class="muted">Nenhuma ainda.</li></ul>
+    <footer>
+      <a id="dashboard" target="_blank" rel="noreferrer">Abrir painel</a>
+      <button id="disconnect" class="link">Desconectar</button>
+    </footer>
+  </section>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>

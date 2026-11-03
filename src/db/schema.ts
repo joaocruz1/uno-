@@ -822,6 +822,31 @@ export const apiKeys = pgTable(
   ],
 );
 
+/** Browser-extension sessions: one per connected browser, bound to the user who connected it. */
+export const extensionTokens = pgTable(
+  "extension_tokens",
+  {
+    id: text("id").primaryKey().default(uuidDefault),
+    organizationId: text("organization_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().default(now),
+  },
+  (table) => [
+    uniqueIndex("extension_tokens_hash_uq").on(table.tokenHash),
+    index("extension_tokens_org_active_idx").on(table.organizationId, table.createdAt).where(sql`${table.revokedAt} is null`),
+    index("extension_tokens_user_id_idx").on(table.userId),
+  ],
+);
+
 export const apiRequests = pgTable(
   "api_requests",
   {
