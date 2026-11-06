@@ -4,12 +4,16 @@ import { and, asc, eq, or, sql } from "drizzle-orm";
 
 import { batches, conversions, getDb, outboxEvents, type UnoDatabase } from "@/db";
 import { concatPdfs, stampTopLeftNumber } from "@/engine/marketplace/pdf";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { AppError } from "@/lib/errors";
+import { reconcileBatch } from "@/server/batches";
 import { getStorage, type StorageGateway } from "@/server/storage";
 
 const LEASE_MS = 5 * 60_000;
 /** Each order output is a single 10×15 label (tens of KB); a lote is read into memory to concat. */
 const MAX_SOURCE_BYTES = 150 * 1_024 * 1_024;
+/** Order outputs read from storage at once while assembling a lote. */
+const READ_CONCURRENCY = 8;
 
 type CombineClaim = {
   id: string;
@@ -118,17 +122,16 @@ async function buildCombinedPdf(
   dependencies: CombineDependencies,
 ): Promise<Uint8Array> {
   const total = usable.length;
-  const parts: Uint8Array[] = [];
-  for (const [position, source] of usable.entries()) {
-    let bytes: Uint8Array = await dependencies.storage.read(source.outputObjectKey, MAX_SOURCE_BYTES);
-    if (claim.numbering) {
-      const value = claim.numbering.start + position;
-      const prefix = claim.numbering.letter ?? "";
-      const text = claim.numbering.showTotal ? `${prefix}${value}/${total}` : `${prefix}${value}`;
-      bytes = await stampTopLeftNumber(bytes, text);
-    }
-    parts.push(bytes);
-  }
+  // Storage round trips dominate a lote, so a few run at once; results keep
+  // their position, so the combined PDF still follows the upload order.
+  const parts = await mapWithConcurrency(usable, READ_CONCURRENCY, async (source, position) => {
+    const bytes: Uint8Array = await dependencies.storage.read(source.outputObjectKey, MAX_SOURCE_BYTES);
+    if (!claim.numbering) return bytes;
+    const value = claim.numbering.start + position;
+    const prefix = claim.numbering.letter ?? "";
+    const text = claim.numbering.showTotal ? `${prefix}${value}/${total}` : `${prefix}${value}`;
+    return stampTopLeftNumber(bytes, text);
+  });
   return concatPdfs(parts);
 }
 
@@ -205,6 +208,24 @@ export async function processPendingMarketplaceCombines(dependencies: CombineDep
   )).limit(10);
   for (const row of rows) await processMarketplaceCombine(row.id, dependencies);
   return rows.length;
+}
+
+/**
+ * Called by the worker as soon as one conversion settles: when it was the last
+ * order of a marketplace lote, the lote moves to packaging and is assembled now
+ * instead of on the next maintenance tick. Claims are leased, so racing the tick
+ * is safe.
+ */
+export async function advanceMarketplaceLoteAfter(conversionId: string, dependencies: CombineDependencies = defaults()): Promise<void> {
+  const rows = await dependencies.database.select({ batchId: batches.id })
+    .from(conversions)
+    .innerJoin(batches, eq(batches.id, conversions.batchId))
+    .where(and(eq(conversions.id, conversionId), eq(batches.kind, "marketplace")))
+    .limit(1);
+  const batchId = rows[0]?.batchId;
+  if (!batchId) return;
+  await reconcileBatch(batchId, dependencies.database);
+  await processMarketplaceCombine(batchId, dependencies);
 }
 
 export type { CombineDependencies };

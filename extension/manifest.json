@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "UNO · Etiquetas 10×15",
   "short_name": "UNO",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Converte as etiquetas do Mercado Livre, Shopee e TikTok Shop em 10×15 prontas para a térmica, no momento do download.",
   "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
   "action": { "default_title": "UNO", "default_popup": "src/popup/popup.html", "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png" } },

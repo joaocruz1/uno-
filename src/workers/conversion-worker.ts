@@ -9,6 +9,7 @@ import {
   recoverOrphanedQueuedConversions,
   recoverQueuedConversion,
 } from "@/server/conversions";
+import { advanceMarketplaceLoteAfter } from "@/server/marketplace/combine";
 import {
   CONVERSION_JOB_NAME,
   CONVERSION_QUEUE_NAME,
@@ -54,10 +55,19 @@ export function startConversionWorker(): RunningConversionWorker {
     },
   );
   // A settled job wrote `conversion.completed` or `conversion.failed` to the
-  // outbox; deliver the webhooks now instead of on the next 5 s tick.
-  worker.on("completed", () => requestWebhookCycle());
+  // outbox; deliver the webhooks now instead of on the next 5 s tick. Likewise
+  // the last order of a marketplace lote assembles its PDF at once (the batch
+  // tick stays as the safety net; a lote not yet terminal is left untouched).
+  const advanceLote = (conversionId: string | undefined) => {
+    if (conversionId) void advanceMarketplaceLoteAfter(conversionId).catch(() => undefined);
+  };
+  worker.on("completed", (job) => {
+    requestWebhookCycle();
+    advanceLote(job.data.conversionId);
+  });
   worker.on("failed", (job) => {
     requestWebhookCycle();
+    advanceLote(job?.data.conversionId);
     if (job?.data.conversionId) {
       void recoverQueuedConversion(job.data.conversionId, job.id ?? "unknown").catch(() => undefined);
       void reconcileExpiredConversionClaims().catch(() => undefined);

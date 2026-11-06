@@ -7,7 +7,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PRODUCTION_URL = "https://api-nextpy-uno.1nwz76.easypanel.host";
+const PRODUCTION_URL = "https://unoetiquetas.company";
 const root = dirname(fileURLToPath(import.meta.url));
 const flag = process.argv.indexOf("--url");
 const target = new URL(flag > -1 ? process.argv[flag + 1] : PRODUCTION_URL);
