@@ -6,6 +6,8 @@
  *   corepack pnpm bench:engine            # 3 runs of each
  *   corepack pnpm bench:engine -- --runs 5
  */
+import { readFile } from "node:fs/promises";
+
 import { convertPdf } from "../src/engine/index";
 import { closeEngineChildPool, convertPdfIsolated } from "../src/engine/isolated";
 import { syntheticPdf } from "../tests/fixtures/synthetic-pdf";
@@ -25,8 +27,12 @@ function format(timings: Record<string, number>): string {
 
 async function main() {
   const runs = argument("--runs", 3);
-  const input = await syntheticPdf({ fiscalSummary: true, additionalInformation: true });
-  console.log(`fixture: ${input.byteLength} bytes, output ${SIZE.preset}, ${runs} runs each\n`);
+  // `--file <pdf>` measures a local file (kept outside the repository) instead of the fixture.
+  const fileIndex = process.argv.indexOf("--file");
+  const input = fileIndex >= 0
+    ? new Uint8Array(await readFile(process.argv[fileIndex + 1]))
+    : await syntheticPdf({ fiscalSummary: true, additionalInformation: true });
+  console.log(`${fileIndex >= 0 ? "file" : "fixture"}: ${input.byteLength} bytes, output ${SIZE.preset}, ${runs} runs each\n`);
 
   for (let run = 1; run <= runs; run += 1) {
     const started = performance.now();

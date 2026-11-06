@@ -25,7 +25,7 @@ import {
 } from "@/db";
 import { AppError } from "@/lib/errors";
 import { createMarketplaceLote, commitMarketplaceLote, type MarketplaceCreationDependencies } from "@/server/marketplace/create";
-import { processMarketplaceCombine } from "@/server/marketplace/combine";
+import { advanceMarketplaceLoteAfter, processMarketplaceCombine } from "@/server/marketplace/combine";
 import { findUploadIntentForOrganization, readValidatedUpload } from "@/server/uploads";
 import type { StorageGateway, StoredObjectHead } from "@/server/storage";
 import { syntheticMercadoLivreBatch } from "./fixtures/synthetic-marketplace-pdf";
@@ -231,11 +231,16 @@ describe("marketplace lote — create", () => {
 });
 
 describe("marketplace lote — combine", () => {
-  async function seedPackagingLote(orderCount: number, numbering: { start: number; showTotal: boolean } | null) {
+  async function seedPackagingLote(
+    orderCount: number,
+    numbering: { start: number; showTotal: boolean } | null,
+    options: { phase?: "processing" | "packaging"; lastStatus?: "completed" | "queued" } = {},
+  ) {
     const batchId = randomUUID();
+    const conversionIds: string[] = [];
     await database.insert(batches).values({
       id: batchId, organizationId: ORG, createdByUserId: USER,
-      status: "processing", phase: "packaging", kind: "marketplace", marketplace: "mercado-livre",
+      status: "processing", phase: options.phase ?? "packaging", kind: "marketplace", marketplace: "mercado-livre",
       numbering, itemCount: orderCount, completedCount: orderCount, failedCount: 0, progress: 0,
       archiveStatus: "PENDING", artifactsExpireAt: new Date(NOW.getTime() + 86_400_000),
       createdAt: NOW, updatedAt: NOW,
@@ -243,17 +248,20 @@ describe("marketplace lote — combine", () => {
     for (let index = 0; index < orderCount; index += 1) {
       const outputObjectKey = `organizations/${ORG}/conversion-outputs/${randomUUID()}.pdf`;
       storage.objects.set(outputObjectKey, Buffer.from(await onePagePdf()));
+      const conversionId = randomUUID();
+      conversionIds.push(conversionId);
+      const status = index === orderCount - 1 ? options.lastStatus ?? "completed" : "completed";
       await database.insert(conversions).values({
-        id: randomUUID(), organizationId: ORG, createdByUserId: USER, batchId, batchOrderIndex: index,
+        id: conversionId, organizationId: ORG, createdByUserId: USER, batchId, batchOrderIndex: index,
         templateId: TEMPLATE, templateVersion: "1.0.0", engineVersion: "0.1.0",
-        status: "completed", source: "dashboard", progress: 100, currentStage: "completed",
+        status, source: "dashboard", progress: 100, currentStage: "completed",
         outputPreset: "100x150", outputWidthMm: "100", outputHeightMm: "150",
         inputObjectKey: `organizations/${ORG}/conversion-inputs/${randomUUID()}.pdf`,
         inputSha256: "a".repeat(64), sourceByteLength: 1_000, outputObjectKey, outputPages: 1,
         artifactsExpireAt: new Date(NOW.getTime() + 86_400_000), queuedAt: NOW, completedAt: NOW, createdAt: NOW, updatedAt: NOW,
       });
     }
-    return batchId;
+    return Object.assign(batchId, { conversionIds }) as string & { conversionIds: string[] };
   }
 
   it("combines the order outputs into one PDF, one page per order", async () => {
@@ -270,6 +278,24 @@ describe("marketplace lote — combine", () => {
       eq(outboxEvents.type, "batch.completed"), eq(outboxEvents.aggregateId, batchId),
     ));
     expect(completedEvent).toHaveLength(1);
+  });
+
+  it("assembles the lote as soon as its last order settles, without waiting for the tick", async () => {
+    const batchId = await seedPackagingLote(3, null, { phase: "processing" });
+    await advanceMarketplaceLoteAfter(batchId.conversionIds[2]!, { database, storage, randomId: randomUUID, now: () => NOW });
+
+    const batchRows = await database.select().from(batches).where(eq(batches.id, batchId));
+    expect(batchRows[0]).toMatchObject({ status: "completed", phase: "completed", archiveStatus: "READY" });
+    const combined = await PDFDocument.load(storage.objects.get(batchRows[0]!.combinedPdfObjectKey!)!);
+    expect(combined.getPageCount()).toBe(3);
+  });
+
+  it("leaves a lote with an order still queued for later", async () => {
+    const batchId = await seedPackagingLote(2, null, { phase: "processing", lastStatus: "queued" });
+    await advanceMarketplaceLoteAfter(batchId.conversionIds[0]!, { database, storage, randomId: randomUUID, now: () => NOW });
+
+    const batchRows = await database.select().from(batches).where(eq(batches.id, batchId));
+    expect(batchRows[0]).toMatchObject({ status: "processing", phase: "processing", archiveStatus: "PENDING", combinedPdfObjectKey: null });
   });
 
   it("does not let the ZIP archiver touch a marketplace lote", async () => {

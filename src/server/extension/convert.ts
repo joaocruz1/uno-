@@ -5,11 +5,11 @@ import { z } from "zod";
 import { AppError } from "@/lib/errors";
 import { getPlanCatalog } from "@/lib/plans";
 import type { Actor } from "@/server/auth/actor";
-import { createMarketplaceLote, type AcceptedLote } from "@/server/marketplace/create";
+import { createMarketplaceLote, defaultMarketplaceCreationDependencies, type AcceptedLote } from "@/server/marketplace/create";
 import { convertShopeeSync, convertTikTokSync, convertZplSync, type SyncResult, ZPL_MAX_BYTES } from "@/server/marketplace/sync";
 import { enforceRateLimit } from "@/server/rate-limit";
 import { getStorage } from "@/server/storage";
-import { insertUploadIntentWithPendingLimit, pendingUploadLimit, uploadIntentRateLimit } from "@/server/uploads";
+import { hasPdfMagic, insertUploadIntentWithPendingLimit, pendingUploadLimit, type ReadValidatedUpload, uploadIntentRateLimit } from "@/server/uploads";
 
 export const extensionMarketplaceSchema = z.enum(["mercado-livre", "mercado-livre-full", "shopee", "tiktok"]);
 export type ExtensionMarketplace = z.infer<typeof extensionMarketplaceSchema>;
@@ -21,14 +21,18 @@ export type ExtensionConversion =
 const INTENT_TTL_MS = 5 * 60_000;
 
 /**
- * Stages bytes the server already holds as an upload intent, so the Mercado
+ * Records bytes the server already holds as an upload intent, so the Mercado
  * Livre lote goes through exactly the same `createMarketplaceLote` path (split,
- * snapshot, quota, outbox) as the dashboard's presigned upload.
+ * snapshot, quota, outbox) as the dashboard's presigned upload. The source copy
+ * is stored in the background: the lote reads the bytes from memory instead of
+ * paying a storage round trip.
  */
-async function stageUpload(actor: Pick<Actor, "organizationId" | "userId" | "planId">, bytes: Uint8Array, fileName: string | undefined): Promise<string> {
+async function stageUpload(actor: Pick<Actor, "organizationId" | "userId" | "planId">, bytes: Buffer, fileName: string | undefined) {
   const id = randomUUID();
   const objectKey = `organizations/${actor.organizationId}/uploads/${randomUUID()}.pdf`;
-  await getStorage().putBytes(objectKey, Buffer.from(bytes), "application/pdf", bytes.length);
+  const checksumSha256 = createHash("sha256").update(bytes).digest("hex");
+  // The lote never reads this copy back, so a failed upload does not fail it.
+  const stored = getStorage().putBytes(objectKey, bytes, "application/pdf", bytes.length).catch(() => undefined);
   await insertUploadIntentWithPendingLimit({
     id,
     organizationId: actor.organizationId,
@@ -36,11 +40,18 @@ async function stageUpload(actor: Pick<Actor, "organizationId" | "userId" | "pla
     objectKey,
     contentType: "application/pdf",
     contentLength: bytes.length,
-    checksumSha256: createHash("sha256").update(bytes).digest("hex"),
+    checksumSha256,
     originalFileName: fileName?.slice(0, 255),
     expiresAt: new Date(Date.now() + INTENT_TTL_MS),
   }, pendingUploadLimit(actor));
-  return id;
+  const upload: ReadValidatedUpload = {
+    bytes,
+    contentLength: bytes.length,
+    contentType: "application/pdf",
+    checksumSha256,
+    originalFileName: fileName?.slice(0, 255),
+  };
+  return { id, upload, stored };
 }
 
 /**
@@ -61,15 +72,21 @@ export async function convertForExtension(
 
   if (marketplace === "mercado-livre-full") return { kind: "pdf", result: await convertZplSync(await file.text()) };
 
-  const bytes = new Uint8Array(await file.arrayBuffer());
+  const bytes = Buffer.from(await file.arrayBuffer());
   if (marketplace === "shopee") return { kind: "pdf", result: await convertShopeeSync([bytes]) };
   if (marketplace === "tiktok") return { kind: "pdf", result: await convertTikTokSync([bytes], []) };
 
-  const uploadIntentId = await stageUpload(actor, bytes, file.name || undefined);
+  if (!hasPdfMagic(bytes)) throw new AppError("invalid_pdf", "O arquivo enviado não possui assinatura PDF válida.", 400);
+  const staged = await stageUpload(actor, bytes, file.name || undefined);
+  const dependencies = defaultMarketplaceCreationDependencies();
   const lote = await createMarketplaceLote(actor, {
-    uploadIntentIds: [uploadIntentId],
+    uploadIntentIds: [staged.id],
     marketplace: "mercado-livre",
     size: { preset: "100x150" },
+  }, {
+    ...dependencies,
+    readUpload: async (intent, storage) => intent.id === staged.id ? staged.upload : dependencies.readUpload(intent, storage),
   });
+  await staged.stored;
   return { kind: "lote", lote };
 }

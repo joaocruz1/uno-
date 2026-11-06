@@ -302,6 +302,20 @@ describe("resident engine child pool", () => {
     }
   }, 60_000);
 
+  it("replaces an idle-retired child at once, without waiting for a job", async () => {
+    await closeEngineChildPool();
+    vi.stubEnv("UNO_ENGINE_CHILD_IDLE_MS", "1500");
+    try {
+      await warmEngineChildPool();
+      const before = await idleChild();
+      const after = await idleChild(before.pid);
+      expect(after.generation).toBeGreaterThan(before.generation);
+      expect(isRunning(before.pid)).toBe(false);
+    } finally {
+      await closeEngineChildPool();
+    }
+  }, 60_000);
+
   it("retires a child that breaks the message protocol", async () => {
     await closeEngineChildPool();
     vi.stubEnv("UNO_ENGINE_CHILD_ENTRY", STUB_ENTRY);

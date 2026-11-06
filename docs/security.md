@@ -193,6 +193,7 @@ protocol violation (unexpected message or job id) or a throwing progress
 handler; after `UNO_ENGINE_CHILD_MAX_JOBS` jobs (50); when idle for
 `UNO_ENGINE_CHILD_IDLE_MS` (10 min, never more than `UNO_ENGINE_TMP_MAX_AGE_MS`);
 and when an idle RSS sample exceeds `UNO_ENGINE_CHILD_IDLE_RSS_MB` (640). A
+child retired while idle is replaced at once, so the pool stays warm. A
 typed engine error (invalid PDF and similar) does not retire the child. Only the
 allowlisted error codes cross the boundary. The RSS watchdog reads `/proc` on
 Linux (after a self-test at first use) and falls back to `ps` elsewhere.

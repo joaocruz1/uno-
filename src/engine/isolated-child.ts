@@ -675,9 +675,10 @@ export class EngineChildPool {
       const index = this.idle.indexOf(child);
       if (index < 0) return;
       this.idle.splice(index, 1);
-      // Idle retirement does not respawn: the next acquire does.
-      this.desired = Math.max(0, this.desired - 1);
+      // Idle retirement recycles the child: a fresh one replaces it at once, so
+      // the first job after a quiet period does not pay the ~2 s cold start.
       void child.terminate();
+      this.pump();
     }, idleRetirementMs());
     child.idleTimer.unref();
   }

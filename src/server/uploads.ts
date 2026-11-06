@@ -194,7 +194,7 @@ function assertUsable(intent: UploadIntentRecord, now: Date): void {
   }
 }
 
-function hasPdfMagic(bytes: Buffer): boolean {
+export function hasPdfMagic(bytes: Buffer): boolean {
   return bytes.subarray(0, PDF_MAGIC_SCAN_BYTES).includes(Buffer.from("%PDF-", "ascii"));
 }
 

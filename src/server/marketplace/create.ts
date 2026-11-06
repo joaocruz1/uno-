@@ -6,6 +6,7 @@ import { z } from "zod";
 import { batches, conversions, getDb, outboxEvents, subscriptions, uploadIntents, type UnoDatabase } from "@/db";
 import { QuotaExceededError, reserveUsage } from "@/db/usage";
 import { splitIntoOrderPdfs } from "@/engine/marketplace/pdf";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { AppError } from "@/lib/errors";
 import { outputSizeSchema, sizeDimensions } from "@/lib/label-size";
 import type { Actor } from "@/server/auth/actor";
@@ -22,6 +23,8 @@ import { findUploadIntentForOrganization, readValidatedUpload, type ReadValidate
 
 /** Marketplaces the lote pipeline can ingest, and how many pages make up one order. */
 const MARKETPLACE_PAGES_PER_ORDER: Record<string, number> = { "mercado-livre": 2 };
+/** Order snapshots uploaded, and conversions published, at once. */
+const STORAGE_CONCURRENCY = 8;
 
 export const labelNumberingSchema = z.object({
   letter: z.string().regex(/^[A-Z]{1,3}$/).optional(),
@@ -193,7 +196,7 @@ export async function commitMarketplaceLote(
   });
 }
 
-function defaultDependencies(): MarketplaceCreationDependencies {
+export function defaultMarketplaceCreationDependencies(): MarketplaceCreationDependencies {
   const storage = getStorage();
   return {
     storage,
@@ -217,7 +220,7 @@ function defaultDependencies(): MarketplaceCreationDependencies {
 export async function createMarketplaceLote(
   actor: Pick<Actor, "organizationId" | "userId">,
   rawInput: unknown,
-  dependencies: MarketplaceCreationDependencies = defaultDependencies(),
+  dependencies: MarketplaceCreationDependencies = defaultMarketplaceCreationDependencies(),
 ): Promise<AcceptedLote> {
   const request = createMarketplaceLoteInputSchema.parse(rawInput);
   if (new Set(request.uploadIntentIds).size !== request.uploadIntentIds.length) {
@@ -227,7 +230,7 @@ export async function createMarketplaceLote(
 
   const intents: UploadIntentRecord[] = [];
   const sourceByteLengths: number[] = [];
-  const orders: OrderSnapshot[] = [];
+  const orders: Array<OrderSnapshot & { bytes: Uint8Array }> = [];
   // Files are read in the order the caller sent them, and each is split into its
   // orders in page sequence, so the combined output follows the chosen order.
   for (const intentId of request.uploadIntentIds) {
@@ -237,11 +240,21 @@ export async function createMarketplaceLote(
     sourceByteLengths.push(source.contentLength);
 
     const orderPdfs = await splitIntoOrderPdfs(source.bytes, pagesPerOrder);
-    for (const bytes of orderPdfs) {
-      const objectKey = `organizations/${actor.organizationId}/conversion-inputs/${dependencies.randomId()}.pdf`;
-      await dependencies.storage.putBytes(objectKey, Buffer.from(bytes), "application/pdf", bytes.length);
-      orders.push({ objectKey, sha256: createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.length, originalFileName: source.originalFileName });
-    }
+    orders.push(...orderPdfs.map((bytes) => ({
+      bytes,
+      objectKey: `organizations/${actor.organizationId}/conversion-inputs/${dependencies.randomId()}.pdf`,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.length,
+      originalFileName: source.originalFileName,
+    })));
+  }
+  // Each snapshot is its own object; the uploads run a few at once.
+  try {
+    await mapWithConcurrency(orders, STORAGE_CONCURRENCY, (order) =>
+      dependencies.storage.putBytes(order.objectKey, Buffer.from(order.bytes), "application/pdf", order.byteLength));
+  } catch (error) {
+    await Promise.all(orders.map((order) => dependencies.storage.delete(order.objectKey).catch(() => undefined)));
+    throw error;
   }
 
   const batchId = dependencies.randomId();
@@ -267,7 +280,7 @@ export async function createMarketplaceLote(
     throw error;
   }
 
-  for (const outboxId of committed.outboxIds) await dependencies.publish(outboxId).catch(() => undefined);
+  await mapWithConcurrency(committed.outboxIds, STORAGE_CONCURRENCY, (outboxId) => dependencies.publish(outboxId).catch(() => undefined));
   return { id: batchId, status: "queued", progress: 0, itemCount: orders.length, createdAt: committed.createdAt.toISOString() };
 }
 

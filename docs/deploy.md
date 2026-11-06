@@ -186,7 +186,9 @@ Everything can also run on one server next to PostgreSQL and Redis. Still
    when conversions feel slow.
    `UNO_CONVERSION_CONCURRENCY` (default 1, max 4) sets both the number of
    BullMQ slots and of resident children; raise it only with 2+ vCPUs and
-   memory for every child. Every completed attempt logs one JSON line
+   memory for every child. The orders of a Mercado Livre lote are converted
+   one per slot, so this is what makes large lotes faster (one order takes
+   about 0.3 s of engine time when warm). Every completed attempt logs one JSON line
    `{"event":"conversion.completed", ...}` with `queueWaitMs`, `claimMs`,
    `downloadMs`, `spawnMs`, `engineMs`, `uploadMs`, `commitMs` and `wallMs`;
    read it in the service logs to see where time goes in production. The same

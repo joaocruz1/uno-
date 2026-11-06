@@ -4,7 +4,6 @@ import { MARKETPLACE_IDS, MARKETPLACES, marketplaceFor } from "./marketplaces.js
 
 const API = `${UNO_URL}/api/extension/v1`;
 const CONNECT_STATE_TTL_MS = 10 * 60_000;
-const LOTE_POLL_MS = 2_000;
 const LOTE_TIMEOUT_MS = 5 * 60_000;
 const HISTORY_LIMIT = 8;
 
@@ -102,10 +101,19 @@ function pdfDataUrl(bytes) {
   return `data:application/pdf;base64,${bytesToBase64(bytes)}`;
 }
 
+// Most lotes finish in a few seconds, so the first ones poll fast and long
+// lotes back off (same profile as the dashboard).
+function lotePollDelay(elapsedMs) {
+  if (elapsedMs < 15_000) return 300;
+  if (elapsedMs < 60_000) return 1_000;
+  return 2_000;
+}
+
 async function waitForLote(token, loteId) {
-  const deadline = Date.now() + LOTE_TIMEOUT_MS;
+  const startedAt = Date.now();
+  const deadline = startedAt + LOTE_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, LOTE_POLL_MS));
+    await new Promise((resolve) => setTimeout(resolve, lotePollDelay(Date.now() - startedAt)));
     const lote = await (await api(`/lotes/${loteId}`, { token })).json();
     if (lote.downloadAvailable) {
       const signed = await (await api(`/lotes/${loteId}/download`, { token })).json();
